@@ -24,22 +24,30 @@ public class InstallationService : IInstallationService
             .ToListAsync();
     }
 
-    public async Task<List<Installation>> GetByCustomerIdAsync(string customerId)
+    public async Task<List<Installation>> GetByCustomerIdAsync(string userId)
     {
+        // Find Customer entity linked to the user
+        var customer = await _context.Customers.FirstOrDefaultAsync(c => c.UserId == userId);
+        if (customer == null) return new List<Installation>();
+
         return await _context.Installations
             .Include(i => i.Customer)
             .Include(i => i.Partner)
-            .Where(i => i.CustomerId == customerId)
+            .Where(i => i.CustomerId == customer.Id)
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync();
     }
 
-    public async Task<List<Installation>> GetByPartnerIdAsync(string partnerId)
+    public async Task<List<Installation>> GetByPartnerIdAsync(string userId)
     {
+        // Find Partner via user's PartnerId
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user?.PartnerId == null) return new List<Installation>();
+
         return await _context.Installations
             .Include(i => i.Customer)
             .Include(i => i.Partner)
-            .Where(i => i.PartnerId == partnerId)
+            .Where(i => i.PartnerId == user.PartnerId)
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync();
     }
@@ -50,6 +58,10 @@ public class InstallationService : IInstallationService
             .Include(i => i.Customer)
             .Include(i => i.Partner)
             .Include(i => i.Equipment)
+            .Include(i => i.WarrantyRecords)
+            .Include(i => i.CleaningRecords.OrderByDescending(c => c.ScheduledDate))
+            .Include(i => i.Documents)
+            .Include(i => i.Tariffs.OrderByDescending(t => t.EffectiveFrom))
             .Include(i => i.MaintenanceRecords.OrderByDescending(m => m.ScheduledDate))
             .Include(i => i.Alerts.Where(a => a.ResolvedAt == null).OrderByDescending(a => a.OccurredAt))
             .FirstOrDefaultAsync(i => i.Id == id);
@@ -57,7 +69,14 @@ public class InstallationService : IInstallationService
 
     public async Task<Installation> CreateAsync(Installation installation)
     {
+        // Auto-generate site code
+        var count = await _context.Installations.CountAsync();
+        installation.SiteCode = $"SI-{DateTime.UtcNow:yyyy}-{(count + 1):D4}";
+
         installation.WarrantyExpiryDate = installation.InstallationDate.AddYears(installation.WarrantyYears);
+        if (installation.InverterWarrantyYears > 0)
+            installation.InverterWarrantyExpiryDate = installation.InstallationDate.AddYears(installation.InverterWarrantyYears);
+
         installation.CreatedAt = DateTime.UtcNow;
         installation.UpdatedAt = DateTime.UtcNow;
 
@@ -92,14 +111,18 @@ public class InstallationService : IInstallationService
         installation.LastCleaningDate = cleaningDate;
 
         if (installation.CompletedCleaningCount < installation.TotalCleaningCount)
-        {
-            // Schedule next cleaning in 6 months by default
-            installation.NextCleaningDueDate = cleaningDate.AddMonths(6);
-        }
+            installation.NextCleaningDueDate = cleaningDate.AddMonths(installation.CleaningFrequencyMonths);
         else
-        {
             installation.NextCleaningDueDate = null;
-        }
+
+        // Create cleaning record
+        _context.CleaningRecords.Add(new CleaningRecord
+        {
+            InstallationId = installationId,
+            ScheduledDate = cleaningDate,
+            ActualDate = cleaningDate,
+            Status = Enums.CleaningStatus.Completed
+        });
 
         installation.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();

@@ -7,87 +7,68 @@ using SolarApp.Services.LineApi;
 namespace SolarApp.BackgroundJobs;
 
 /// <summary>
-/// Background job that monitors system health, detects offline systems,
-/// and sends LINE notifications for alerts.
+/// Hangfire recurring job: monitors system health, detects offline systems,
+/// checks cleaning/warranty due, sends LINE notifications.
+/// Scheduled: every 2 minutes.
 /// </summary>
-public class SystemHealthMonitorJob : BackgroundService
+public class SystemHealthMonitorJob
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ApplicationDbContext _context;
+    private readonly ILineMessagingService _lineService;
     private readonly ILogger<SystemHealthMonitorJob> _logger;
     private readonly IConfiguration _configuration;
 
     public SystemHealthMonitorJob(
-        IServiceScopeFactory scopeFactory,
+        ApplicationDbContext context,
+        ILineMessagingService lineService,
         ILogger<SystemHealthMonitorJob> logger,
         IConfiguration configuration)
     {
-        _scopeFactory = scopeFactory;
+        _context = context;
+        _lineService = lineService;
         _logger = logger;
         _configuration = configuration;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public async Task ExecuteAsync()
     {
-        var intervalMinutes = _configuration.GetValue("InverterApis:HealthCheckIntervalMinutes", 5);
-
-        // Wait initial delay to let data sync run first
-        await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await CheckSystemHealthAsync(stoppingToken);
-                await CheckMaintenanceDueAsync(stoppingToken);
-                await CheckWarrantyExpiryAsync(stoppingToken);
-                await SendPendingNotificationsAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in system health monitor job");
-            }
-
-            await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
-        }
+        await CheckSystemHealthAsync();
+        await CheckMaintenanceDueAsync();
+        await CheckWarrantyExpiryAsync();
+        await SendPendingNotificationsAsync();
     }
 
-    private async Task CheckSystemHealthAsync(CancellationToken ct)
+    private async Task CheckSystemHealthAsync()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-        var offlineThreshold = _configuration.GetValue("InverterApis:OfflineThresholdMinutes", 30);
+        var offlineThreshold = _configuration.GetValue("InverterApis:OfflineThresholdMinutes", 15);
         var threshold = DateTime.UtcNow.AddMinutes(-offlineThreshold);
 
-        // Find installations that haven't reported data within the threshold
-        var offlineInstallations = await context.Installations
+        var offlineInstallations = await _context.Installations
             .Where(i => i.Status == InstallationStatus.Active
                 && i.LastOnlineAt != null
                 && i.LastOnlineAt < threshold)
-            .ToListAsync(ct);
+            .ToListAsync();
 
         foreach (var installation in offlineInstallations)
         {
             installation.Status = InstallationStatus.Offline;
 
-            // Check recent API logs for root cause analysis
-            var recentLogs = await context.InverterApiLogs
+            var recentLogs = await _context.InverterApiLogs
                 .Where(l => l.InstallationId == installation.Id && !l.IsSuccess)
                 .OrderByDescending(l => l.RequestTime)
                 .Take(5)
-                .ToListAsync(ct);
+                .ToListAsync();
 
             var rootCause = AnalyzeRootCause(recentLogs);
 
-            // Create alert if not already exists
-            var existingAlert = await context.SystemAlerts
+            var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == installation.Id
                     && a.AlertType == AlertType.Offline
-                    && a.ResolvedAt == null, ct);
+                    && a.ResolvedAt == null);
 
             if (!existingAlert)
             {
-                context.SystemAlerts.Add(new SystemAlert
+                _context.SystemAlerts.Add(new SystemAlert
                 {
                     InstallationId = installation.Id,
                     AlertType = AlertType.Offline,
@@ -95,7 +76,6 @@ public class SystemHealthMonitorJob : BackgroundService
                     Title = $"System Offline: {installation.SiteName}",
                     Message = $"Installation '{installation.SiteName}' has been offline since {installation.LastOnlineAt:dd/MM/yyyy HH:mm}",
                     RootCauseAnalysis = rootCause,
-                    OccurredAt = DateTime.UtcNow,
                     IsNotified = false
                 });
 
@@ -104,122 +84,133 @@ public class SystemHealthMonitorJob : BackgroundService
             }
         }
 
-        await context.SaveChangesAsync(ct);
+        // Auto-resolve offline alerts for installations that came back online
+        var resolvedAlerts = await _context.SystemAlerts
+            .Include(a => a.Installation)
+            .Where(a => a.AlertType == AlertType.Offline
+                && a.ResolvedAt == null
+                && a.Installation.Status == InstallationStatus.Active)
+            .ToListAsync();
+
+        foreach (var alert in resolvedAlerts)
+        {
+            alert.ResolvedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
     }
 
-    private async Task CheckMaintenanceDueAsync(CancellationToken ct)
+    private async Task CheckMaintenanceDueAsync()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
-        var installations = await context.Installations
+        var installations = await _context.Installations
             .Where(i => i.NextCleaningDueDate != null && i.NextCleaningDueDate <= DateTime.UtcNow)
-            .ToListAsync(ct);
+            .ToListAsync();
 
         foreach (var installation in installations)
         {
-            var existingAlert = await context.SystemAlerts
+            var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == installation.Id
                     && a.AlertType == AlertType.MaintenanceDue
-                    && a.ResolvedAt == null, ct);
+                    && a.ResolvedAt == null);
 
             if (!existingAlert)
             {
-                context.SystemAlerts.Add(new SystemAlert
+                _context.SystemAlerts.Add(new SystemAlert
                 {
                     InstallationId = installation.Id,
                     AlertType = AlertType.MaintenanceDue,
                     Severity = AlertSeverity.Medium,
                     Title = $"Panel Cleaning Due: {installation.SiteName}",
                     Message = $"Panel cleaning is due for '{installation.SiteName}'. " +
-                              $"Remaining cleanings: {installation.RemainingCleanings}/{installation.TotalCleaningCount}",
+                              $"Remaining: {installation.RemainingCleanings}/{installation.TotalCleaningCount}",
                     IsNotified = false
                 });
             }
         }
 
-        await context.SaveChangesAsync(ct);
+        await _context.SaveChangesAsync();
     }
 
-    private async Task CheckWarrantyExpiryAsync(CancellationToken ct)
+    private async Task CheckWarrantyExpiryAsync()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-
         var threshold = DateTime.UtcNow.AddDays(90);
-        var installations = await context.Installations
+        var installations = await _context.Installations
             .Where(i => i.WarrantyExpiryDate <= threshold
                 && i.WarrantyExpiryDate > DateTime.UtcNow)
-            .ToListAsync(ct);
+            .ToListAsync();
 
         foreach (var installation in installations)
         {
-            var existingAlert = await context.SystemAlerts
+            var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == installation.Id
                     && a.AlertType == AlertType.WarrantyExpiring
-                    && a.ResolvedAt == null, ct);
+                    && a.ResolvedAt == null);
 
             if (!existingAlert)
             {
                 var daysLeft = (installation.WarrantyExpiryDate - DateTime.UtcNow).Days;
-                context.SystemAlerts.Add(new SystemAlert
+                _context.SystemAlerts.Add(new SystemAlert
                 {
                     InstallationId = installation.Id,
                     AlertType = AlertType.WarrantyExpiring,
                     Severity = AlertSeverity.Low,
                     Title = $"Warranty Expiring: {installation.SiteName}",
-                    Message = $"Warranty for '{installation.SiteName}' expires in {daysLeft} days ({installation.WarrantyExpiryDate:dd/MM/yyyy})",
+                    Message = $"Warranty expires in {daysLeft} days ({installation.WarrantyExpiryDate:dd/MM/yyyy})",
                     IsNotified = false
                 });
             }
         }
 
-        await context.SaveChangesAsync(ct);
+        await _context.SaveChangesAsync();
     }
 
-    private async Task SendPendingNotificationsAsync(CancellationToken ct)
+    private async Task SendPendingNotificationsAsync()
     {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var lineService = scope.ServiceProvider.GetRequiredService<ILineMessagingService>();
-
-        var pendingAlerts = await context.SystemAlerts
+        var pendingAlerts = await _context.SystemAlerts
             .Include(a => a.Installation)
                 .ThenInclude(i => i.Customer)
             .Include(a => a.Installation)
                 .ThenInclude(i => i.Partner)
             .Where(a => !a.IsNotified)
-            .ToListAsync(ct);
+            .ToListAsync();
 
         foreach (var alert in pendingAlerts)
         {
-            // Notify customer
+            var severity = alert.Severity.ToString();
+
+            // Notify customer via LINE
             if (!string.IsNullOrEmpty(alert.Installation.Customer.LineUserId))
             {
-                await lineService.SendAlertAsync(
+                await _lineService.SendFlexAlertAsync(
                     alert.Installation.Customer.LineUserId,
                     alert.Installation.SiteName,
-                    alert.Title,
-                    alert.Message,
-                    alert.RootCauseAnalysis);
+                    alert.Title, alert.Message,
+                    severity, alert.RootCauseAnalysis);
             }
 
-            // Notify partner
-            if (alert.Installation.Partner != null
-                && !string.IsNullOrEmpty(alert.Installation.Partner.LineUserId))
+            // Notify partner via LINE
+            // Find partner users with LINE IDs
+            if (alert.Installation.Partner != null)
             {
-                await lineService.SendAlertAsync(
-                    alert.Installation.Partner.LineUserId,
-                    alert.Installation.SiteName,
-                    alert.Title,
-                    alert.Message,
-                    alert.RootCauseAnalysis);
+                var partnerUsers = await _context.Users
+                    .Where(u => u.PartnerId == alert.Installation.PartnerId
+                        && u.LineUserId != null)
+                    .ToListAsync();
+
+                foreach (var pu in partnerUsers)
+                {
+                    await _lineService.SendFlexAlertAsync(
+                        pu.LineUserId!,
+                        alert.Installation.SiteName,
+                        alert.Title, alert.Message,
+                        severity, alert.RootCauseAnalysis);
+                }
             }
 
             alert.IsNotified = true;
         }
 
-        await context.SaveChangesAsync(ct);
+        await _context.SaveChangesAsync();
     }
 
     private static string AnalyzeRootCause(List<InverterApiLog> recentLogs)
@@ -245,8 +236,7 @@ public class SystemHealthMonitorJob : BackgroundService
         if (errorMessages.Any(e => e.Contains("connection", StringComparison.OrdinalIgnoreCase)))
             return "Connection errors detected. The inverter or its data logger may have lost internet connectivity. Check the site's network.";
 
-        var consecutiveFailures = recentLogs.Count;
-        return $"System has failed {consecutiveFailures} consecutive API calls. " +
+        return $"System has failed {recentLogs.Count} consecutive API calls. " +
                $"Latest error: {errorMessages.FirstOrDefault() ?? "Unknown"}. " +
                "Possible causes: hardware issue, network problem, or cloud API changes.";
     }

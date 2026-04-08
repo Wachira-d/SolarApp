@@ -42,5 +42,18 @@ public static class DbInitializer
                 await userManager.AddToRoleAsync(admin, UserRoles.Admin);
             }
         }
+
+        // Seed default system settings
+        if (!context.SystemSettings.Any())
+        {
+            context.SystemSettings.AddRange(
+                new SystemSetting { Key = "DefaultCleaningFrequencyMonths", Value = "6", Description = "Default panel cleaning frequency in months" },
+                new SystemSetting { Key = "DefaultWarrantyYears", Value = "10", Description = "Default system warranty years" },
+                new SystemSetting { Key = "DefaultElectricityRate", Value = "4.0", Description = "Default electricity rate (THB/kWh)" },
+                new SystemSetting { Key = "OfflineThresholdMinutes", Value = "30", Description = "Minutes before system is considered offline" },
+                new SystemSetting { Key = "SiteCodePrefix", Value = "SI", Description = "Prefix for auto-generated site codes" }
+            );
+            await context.SaveChangesAsync();
+        }
     }
 }

@@ -20,11 +20,23 @@ public class DashboardService : IDashboardService
     {
         var query = _context.Installations.AsQueryable();
 
-        // Role-based filtering
+        // Role-based filtering using new Customer/Partner entities
         if (role == UserRoles.Customer)
-            query = query.Where(i => i.CustomerId == userId);
+        {
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.UserId == userId);
+            if (customer != null)
+                query = query.Where(i => i.CustomerId == customer.Id);
+            else
+                query = query.Where(i => false);
+        }
         else if (role == UserRoles.Partner)
-            query = query.Where(i => i.PartnerId == userId);
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (user?.PartnerId != null)
+                query = query.Where(i => i.PartnerId == user.PartnerId);
+            else
+                query = query.Where(i => false);
+        }
 
         var installations = await query
             .Include(i => i.Customer)
@@ -34,21 +46,18 @@ public class DashboardService : IDashboardService
         var today = DateTime.UtcNow.Date;
         var monthStart = new DateTime(today.Year, today.Month, 1);
 
-        // Today's energy data
         var todayData = await _context.EnergyData
             .Where(e => installationIds.Contains(e.InstallationId)
                 && e.Granularity == DataGranularity.Daily
                 && e.Timestamp.Date == today)
             .ToListAsync();
 
-        // Monthly energy data
         var monthlyData = await _context.EnergyData
             .Where(e => installationIds.Contains(e.InstallationId)
                 && e.Granularity == DataGranularity.Daily
                 && e.Timestamp >= monthStart)
             .ToListAsync();
 
-        // Active alerts
         var activeAlerts = await _context.SystemAlerts
             .Where(a => installationIds.Contains(a.InstallationId) && a.ResolvedAt == null)
             .OrderByDescending(a => a.OccurredAt)
@@ -56,10 +65,8 @@ public class DashboardService : IDashboardService
             .Include(a => a.Installation)
             .ToListAsync();
 
-        // Average electricity rate
         var avgRate = installations.Any() ? installations.Average(i => i.ElectricityRatePerKwh) : 4.0m;
 
-        // Daily production for last 30 days chart
         var last30Days = today.AddDays(-30);
         var dailyChart = await _context.EnergyData
             .Where(e => installationIds.Contains(e.InstallationId)
@@ -75,7 +82,6 @@ public class DashboardService : IDashboardService
             .OrderBy(c => c.Label)
             .ToListAsync();
 
-        // Monthly chart for last 12 months
         var last12Months = today.AddMonths(-12);
         var monthlyChart = await _context.EnergyData
             .Where(e => installationIds.Contains(e.InstallationId)
@@ -91,13 +97,11 @@ public class DashboardService : IDashboardService
             .OrderBy(c => c.Label)
             .ToListAsync();
 
-        // Installation summaries
         var summaries = new List<InstallationSummary>();
         foreach (var inst in installations)
         {
             var instToday = todayData.Where(e => e.InstallationId == inst.Id);
             var instMonth = monthlyData.Where(e => e.InstallationId == inst.Id);
-            var instAlerts = activeAlerts.Count(a => a.InstallationId == inst.Id);
 
             summaries.Add(new InstallationSummary
             {
@@ -110,7 +114,7 @@ public class DashboardService : IDashboardService
                 TodayKwh = instToday.Sum(e => e.EnergyGenerationKwh),
                 MonthKwh = instMonth.Sum(e => e.EnergyGenerationKwh),
                 LastOnline = inst.LastOnlineAt,
-                ActiveAlerts = instAlerts
+                ActiveAlerts = activeAlerts.Count(a => a.InstallationId == inst.Id)
             });
         }
 
@@ -148,10 +152,8 @@ public class DashboardService : IDashboardService
     {
         var installation = await _context.Installations
             .Include(i => i.Customer)
-            .FirstOrDefaultAsync(i => i.Id == installationId);
-
-        if (installation == null)
-            throw new ArgumentException("Installation not found");
+            .FirstOrDefaultAsync(i => i.Id == installationId)
+            ?? throw new ArgumentException("Installation not found");
 
         var data = await _context.EnergyData
             .Where(e => e.InstallationId == installationId
@@ -160,9 +162,7 @@ public class DashboardService : IDashboardService
             .OrderBy(e => e.Timestamp)
             .ToListAsync();
 
-        var totalDays = (to - from).Days;
-        if (totalDays <= 0) totalDays = 1;
-
+        var totalDays = Math.Max(1, (to - from).Days);
         var totalGen = data.Sum(e => e.EnergyGenerationKwh);
 
         return new ProductionReportViewModel

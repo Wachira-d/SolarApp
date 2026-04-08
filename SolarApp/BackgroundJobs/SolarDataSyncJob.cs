@@ -8,53 +8,30 @@ using SolarApp.Services.InverterApi.Models;
 namespace SolarApp.BackgroundJobs;
 
 /// <summary>
-/// Background job that periodically syncs energy data from inverter cloud APIs.
-/// Runs every N minutes (configured in appsettings.json).
+/// Hangfire recurring job: syncs energy data from all inverter cloud APIs.
+/// Scheduled: every 5 minutes.
 /// </summary>
-public class SolarDataSyncJob : BackgroundService
+public class SolarDataSyncJob
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ApplicationDbContext _context;
+    private readonly IInverterApiAdapterFactory _adapterFactory;
     private readonly ILogger<SolarDataSyncJob> _logger;
-    private readonly IConfiguration _configuration;
 
     public SolarDataSyncJob(
-        IServiceScopeFactory scopeFactory,
-        ILogger<SolarDataSyncJob> logger,
-        IConfiguration configuration)
+        ApplicationDbContext context,
+        IInverterApiAdapterFactory adapterFactory,
+        ILogger<SolarDataSyncJob> logger)
     {
-        _scopeFactory = scopeFactory;
+        _context = context;
+        _adapterFactory = adapterFactory;
         _logger = logger;
-        _configuration = configuration;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public async Task ExecuteAsync()
     {
-        var intervalMinutes = _configuration.GetValue("InverterApis:SyncIntervalMinutes", 15);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await SyncAllInstallationsAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in solar data sync job");
-            }
-
-            await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
-        }
-    }
-
-    private async Task SyncAllInstallationsAsync(CancellationToken ct)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var adapterFactory = scope.ServiceProvider.GetRequiredService<IInverterApiAdapterFactory>();
-
-        var installations = await context.Installations
+        var installations = await _context.Installations
             .Where(i => i.Status != InstallationStatus.Inactive && i.PlantId != null)
-            .ToListAsync(ct);
+            .ToListAsync();
 
         _logger.LogInformation("Starting data sync for {Count} installations", installations.Count);
 
@@ -62,7 +39,7 @@ public class SolarDataSyncJob : BackgroundService
         {
             try
             {
-                var adapter = adapterFactory.GetAdapter(installation.InverterBrand);
+                var adapter = _adapterFactory.GetAdapter(installation.InverterBrand);
                 var credentials = new ApiCredentials
                 {
                     ApiKey = installation.CloudApiKey,
@@ -78,12 +55,9 @@ public class SolarDataSyncJob : BackgroundService
                     installation.LastOnlineAt = realtimeData.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
 
                     if (realtimeData.IsOnline && installation.Status == InstallationStatus.Offline)
-                    {
                         installation.Status = InstallationStatus.Active;
-                    }
 
-                    // Store energy data point
-                    var energyData = new EnergyData
+                    _context.EnergyData.Add(new EnergyData
                     {
                         InstallationId = installation.Id,
                         Timestamp = DateTime.UtcNow,
@@ -93,12 +67,9 @@ public class SolarDataSyncJob : BackgroundService
                         GridExportKwh = realtimeData.GridExportKw ?? 0,
                         GridImportKwh = realtimeData.GridImportKw ?? 0,
                         BatterySocPercent = realtimeData.BatterySocPercent
-                    };
+                    });
 
-                    context.EnergyData.Add(energyData);
-
-                    // Log successful API call
-                    context.InverterApiLogs.Add(new InverterApiLog
+                    _context.InverterApiLogs.Add(new InverterApiLog
                     {
                         InstallationId = installation.Id,
                         ApiProvider = installation.InverterBrand.ToString(),
@@ -109,14 +80,14 @@ public class SolarDataSyncJob : BackgroundService
                     });
                 }
 
-                await context.SaveChangesAsync(ct);
+                await _context.SaveChangesAsync();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to sync data for installation {Id} ({Brand})",
+                _logger.LogError(ex, "Failed to sync installation {Id} ({Brand})",
                     installation.Id, installation.InverterBrand);
 
-                context.InverterApiLogs.Add(new InverterApiLog
+                _context.InverterApiLogs.Add(new InverterApiLog
                 {
                     InstallationId = installation.Id,
                     ApiProvider = installation.InverterBrand.ToString(),
@@ -127,7 +98,7 @@ public class SolarDataSyncJob : BackgroundService
                     RequestTime = DateTime.UtcNow
                 });
 
-                await context.SaveChangesAsync(ct);
+                await _context.SaveChangesAsync();
             }
         }
 

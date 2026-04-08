@@ -8,11 +8,13 @@ public class ApplicationUser : IdentityUser
     public string? CompanyName { get; set; }
     public string? LineUserId { get; set; }
     public string? ProfileImageUrl { get; set; }
+    public string PreferredLanguage { get; set; } = "th";
+
+    // Link to Partner entity (if user is a Partner)
+    public int? PartnerId { get; set; }
+    public Partner? Partner { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLoginAt { get; set; }
     public bool IsActive { get; set; } = true;
-
-    // Navigation properties
-    public ICollection<Installation> OwnedInstallations { get; set; } = new List<Installation>();
-    public ICollection<Installation> ManagedInstallations { get; set; } = new List<Installation>();
 }

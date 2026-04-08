@@ -1,0 +1,69 @@
+@page
+@model SolarApp.Pages.Admin.AuditLogsModel
+@{
+    ViewData["Title"] = "Audit Logs";
+}
+
+<h4 class="mb-3">Audit Logs</h4>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Action</th>
+                        <th>Entity</th>
+                        <th>Entity ID</th>
+                        <th>IP</th>
+                        <th>Changes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in Model.Logs)
+                    {
+                        var actionClass = log.Action switch
+                        {
+                            "Create" => "text-success",
+                            "Update" => "text-warning",
+                            "Delete" => "text-danger",
+                            _ => ""
+                        };
+                        <tr>
+                            <td><small>@log.Timestamp.ToString("dd/MM HH:mm:ss")</small></td>
+                            <td><small>@(log.UserName ?? "-")</small></td>
+                            <td><span class="@actionClass fw-bold">@log.Action</span></td>
+                            <td>@log.EntityType</td>
+                            <td>@(log.EntityId ?? "-")</td>
+                            <td><small>@(log.IpAddress ?? "-")</small></td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(log.NewValues))
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary"
+                                            data-bs-toggle="popover"
+                                            data-bs-content="@log.NewValues"
+                                            data-bs-trigger="hover">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    @if (!Model.Logs.Any())
+                    {
+                        <tr><td colspan="7" class="text-center text-muted py-4">No audit logs</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        var popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+        popoverTriggerList.map(function (el) { return new bootstrap.Popover(el); });
+    </script>
+}
