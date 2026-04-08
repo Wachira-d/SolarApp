@@ -1,0 +1,179 @@
+@page
+@model SolarApp.Pages.Reports.IndexModel
+@using System.Text.Json
+@{
+    ViewData["Title"] = "Production Reports";
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">Installation</label>
+                <select asp-for="InstallationId" asp-items="Model.InstallationOptions" class="form-select">
+                    <option value="">-- Select Installation --</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">From</label>
+                <input asp-for="FromDate" class="form-control" type="date" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">To</label>
+                <input asp-for="ToDate" class="form-control" type="date" />
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-warning w-100">
+                    <i class="bi bi-search"></i> Generate
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@if (Model.Report != null)
+{
+    var rpt = Model.Report;
+
+    <!-- Summary Cards -->
+    <div class="row mb-4">
+        <div class="col-md-2">
+            <div class="card border-0 shadow-sm text-center">
+                <div class="card-body">
+                    <small class="text-muted">Total Generation</small>
+                    <h5 class="text-warning">@rpt.TotalGenerationKwh.ToString("N0")</h5>
+                    <small>kWh</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card border-0 shadow-sm text-center">
+                <div class="card-body">
+                    <small class="text-muted">Self Consumption</small>
+                    <h5 class="text-info">@rpt.TotalSelfConsumptionKwh.ToString("N0")</h5>
+                    <small>kWh</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card border-0 shadow-sm text-center">
+                <div class="card-body">
+                    <small class="text-muted">Grid Export</small>
+                    <h5 class="text-success">@rpt.TotalExportKwh.ToString("N0")</h5>
+                    <small>kWh</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card border-0 shadow-sm text-center">
+                <div class="card-body">
+                    <small class="text-muted">Grid Import</small>
+                    <h5 class="text-danger">@rpt.TotalImportKwh.ToString("N0")</h5>
+                    <small>kWh</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card border-0 shadow-sm text-center">
+                <div class="card-body">
+                    <small class="text-muted">Avg Daily</small>
+                    <h5>@rpt.AverageDailyKwh.ToString("N1")</h5>
+                    <small>kWh/day</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div class="card border-0 shadow-sm text-center">
+                <div class="card-body">
+                    <small class="text-muted">Total Savings</small>
+                    <h5 class="text-success">@rpt.TotalSavingsThb.ToString("N0")</h5>
+                    <small>THB</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Daily Chart -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white">
+            <h6 class="mb-0">Daily Production: @rpt.Installation.SiteName</h6>
+        </div>
+        <div class="card-body">
+            <canvas id="reportChart" height="300"></canvas>
+        </div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white">
+            <h6 class="mb-0">Daily Breakdown</h6>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Date</th>
+                            <th class="text-end">Generation (kWh)</th>
+                            <th class="text-end">Self Use (kWh)</th>
+                            <th class="text-end">Export (kWh)</th>
+                            <th class="text-end">Import (kWh)</th>
+                            <th class="text-end">Savings (THB)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in rpt.DailyData)
+                        {
+                            <tr>
+                                <td>@d.Label</td>
+                                <td class="text-end">@d.Value.ToString("N1")</td>
+                                <td class="text-end">@((d.Value2 ?? 0).ToString("N1"))</td>
+                                <td class="text-end">-</td>
+                                <td class="text-end">-</td>
+                                <td class="text-end">@((d.Value * rpt.Installation.ElectricityRatePerKwh).ToString("N0"))</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    @section Scripts {
+        <script>
+            const ctx = document.getElementById('reportChart').getContext('2d');
+            const data = @Html.Raw(JsonSerializer.Serialize(rpt.DailyData));
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map(d => d.label),
+                    datasets: [{
+                        label: 'Generation (kWh)',
+                        data: data.map(d => d.value),
+                        backgroundColor: 'rgba(255, 193, 7, 0.7)',
+                        borderColor: 'rgba(255, 193, 7, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: 'Self Consumption (kWh)',
+                        data: data.map(d => d.value2 || 0),
+                        backgroundColor: 'rgba(13, 202, 240, 0.5)',
+                        borderColor: 'rgba(13, 202, 240, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'kWh' } } }
+                }
+            });
+        </script>
+    }
+}
+else if (Model.InstallationId == null)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-bar-chart text-muted" style="font-size: 4rem;"></i>
+        <h5 class="mt-3 text-muted">Select an installation to view reports</h5>
+    </div>
+}

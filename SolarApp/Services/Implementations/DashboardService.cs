@@ -1,0 +1,194 @@
+using Microsoft.EntityFrameworkCore;
+using SolarApp.Data;
+using SolarApp.Models;
+using SolarApp.Models.Enums;
+using SolarApp.Services.Interfaces;
+using SolarApp.ViewModels;
+
+namespace SolarApp.Services.Implementations;
+
+public class DashboardService : IDashboardService
+{
+    private readonly ApplicationDbContext _context;
+
+    public DashboardService(ApplicationDbContext context)
+    {
+        _context = context;
+    }
+
+    public async Task<DashboardViewModel> GetDashboardAsync(string? userId, string role)
+    {
+        var query = _context.Installations.AsQueryable();
+
+        // Role-based filtering
+        if (role == UserRoles.Customer)
+            query = query.Where(i => i.CustomerId == userId);
+        else if (role == UserRoles.Partner)
+            query = query.Where(i => i.PartnerId == userId);
+
+        var installations = await query
+            .Include(i => i.Customer)
+            .ToListAsync();
+
+        var installationIds = installations.Select(i => i.Id).ToList();
+        var today = DateTime.UtcNow.Date;
+        var monthStart = new DateTime(today.Year, today.Month, 1);
+
+        // Today's energy data
+        var todayData = await _context.EnergyData
+            .Where(e => installationIds.Contains(e.InstallationId)
+                && e.Granularity == DataGranularity.Daily
+                && e.Timestamp.Date == today)
+            .ToListAsync();
+
+        // Monthly energy data
+        var monthlyData = await _context.EnergyData
+            .Where(e => installationIds.Contains(e.InstallationId)
+                && e.Granularity == DataGranularity.Daily
+                && e.Timestamp >= monthStart)
+            .ToListAsync();
+
+        // Active alerts
+        var activeAlerts = await _context.SystemAlerts
+            .Where(a => installationIds.Contains(a.InstallationId) && a.ResolvedAt == null)
+            .OrderByDescending(a => a.OccurredAt)
+            .Take(10)
+            .Include(a => a.Installation)
+            .ToListAsync();
+
+        // Average electricity rate
+        var avgRate = installations.Any() ? installations.Average(i => i.ElectricityRatePerKwh) : 4.0m;
+
+        // Daily production for last 30 days chart
+        var last30Days = today.AddDays(-30);
+        var dailyChart = await _context.EnergyData
+            .Where(e => installationIds.Contains(e.InstallationId)
+                && e.Granularity == DataGranularity.Daily
+                && e.Timestamp >= last30Days)
+            .GroupBy(e => e.Timestamp.Date)
+            .Select(g => new ChartDataPoint
+            {
+                Label = g.Key.ToString("dd/MM"),
+                Value = g.Sum(e => e.EnergyGenerationKwh),
+                Value2 = g.Sum(e => e.SelfConsumptionKwh)
+            })
+            .OrderBy(c => c.Label)
+            .ToListAsync();
+
+        // Monthly chart for last 12 months
+        var last12Months = today.AddMonths(-12);
+        var monthlyChart = await _context.EnergyData
+            .Where(e => installationIds.Contains(e.InstallationId)
+                && e.Granularity == DataGranularity.Daily
+                && e.Timestamp >= last12Months)
+            .GroupBy(e => new { e.Timestamp.Year, e.Timestamp.Month })
+            .Select(g => new ChartDataPoint
+            {
+                Label = $"{g.Key.Month:00}/{g.Key.Year}",
+                Value = g.Sum(e => e.EnergyGenerationKwh),
+                Value2 = g.Sum(e => e.GridExportKwh)
+            })
+            .OrderBy(c => c.Label)
+            .ToListAsync();
+
+        // Installation summaries
+        var summaries = new List<InstallationSummary>();
+        foreach (var inst in installations)
+        {
+            var instToday = todayData.Where(e => e.InstallationId == inst.Id);
+            var instMonth = monthlyData.Where(e => e.InstallationId == inst.Id);
+            var instAlerts = activeAlerts.Count(a => a.InstallationId == inst.Id);
+
+            summaries.Add(new InstallationSummary
+            {
+                Id = inst.Id,
+                SiteName = inst.SiteName,
+                CustomerName = inst.Customer.FullName,
+                InverterBrand = inst.InverterBrand.ToString(),
+                CapacityKw = inst.SystemCapacityKw,
+                Status = inst.Status.ToString(),
+                TodayKwh = instToday.Sum(e => e.EnergyGenerationKwh),
+                MonthKwh = instMonth.Sum(e => e.EnergyGenerationKwh),
+                LastOnline = inst.LastOnlineAt,
+                ActiveAlerts = instAlerts
+            });
+        }
+
+        var todayGenKwh = todayData.Sum(e => e.EnergyGenerationKwh);
+        var monthGenKwh = monthlyData.Sum(e => e.EnergyGenerationKwh);
+
+        return new DashboardViewModel
+        {
+            TotalInstallations = installations.Count,
+            ActiveInstallations = installations.Count(i => i.Status == InstallationStatus.Active),
+            OfflineInstallations = installations.Count(i => i.Status == InstallationStatus.Offline),
+            TotalCapacityKw = installations.Sum(i => i.SystemCapacityKw),
+            TodayGenerationKwh = todayGenKwh,
+            TodayExportKwh = todayData.Sum(e => e.GridExportKwh),
+            TodaySelfConsumptionKwh = todayData.Sum(e => e.SelfConsumptionKwh),
+            TodaySavingsThb = todayGenKwh * avgRate,
+            MonthlyGenerationKwh = monthGenKwh,
+            MonthlySavingsThb = monthGenKwh * avgRate,
+            ActiveAlertCount = activeAlerts.Count,
+            RecentAlerts = activeAlerts,
+            PendingMaintenanceCount = await _context.MaintenanceRecords
+                .CountAsync(m => installationIds.Contains(m.InstallationId)
+                    && m.Status == MaintenanceStatus.Scheduled),
+            CleaningDueCount = installations.Count(i => i.IsCleaningDue),
+            WarrantyExpiringCount = installations.Count(i =>
+                i.WarrantyExpiryDate <= DateTime.UtcNow.AddDays(90) && !i.IsWarrantyExpired),
+            DailyProductionChart = dailyChart,
+            MonthlyProductionChart = monthlyChart,
+            Installations = summaries
+        };
+    }
+
+    public async Task<ProductionReportViewModel> GetProductionReportAsync(
+        int installationId, DateTime from, DateTime to)
+    {
+        var installation = await _context.Installations
+            .Include(i => i.Customer)
+            .FirstOrDefaultAsync(i => i.Id == installationId);
+
+        if (installation == null)
+            throw new ArgumentException("Installation not found");
+
+        var data = await _context.EnergyData
+            .Where(e => e.InstallationId == installationId
+                && e.Granularity == DataGranularity.Daily
+                && e.Timestamp >= from && e.Timestamp <= to)
+            .OrderBy(e => e.Timestamp)
+            .ToListAsync();
+
+        var totalDays = (to - from).Days;
+        if (totalDays <= 0) totalDays = 1;
+
+        var totalGen = data.Sum(e => e.EnergyGenerationKwh);
+
+        return new ProductionReportViewModel
+        {
+            Installation = installation,
+            FromDate = from,
+            ToDate = to,
+            TotalGenerationKwh = totalGen,
+            TotalExportKwh = data.Sum(e => e.GridExportKwh),
+            TotalImportKwh = data.Sum(e => e.GridImportKwh),
+            TotalSelfConsumptionKwh = data.Sum(e => e.SelfConsumptionKwh),
+            TotalSavingsThb = totalGen * installation.ElectricityRatePerKwh,
+            AverageDailyKwh = totalGen / totalDays,
+            DailyData = data.Select(e => new ChartDataPoint
+            {
+                Label = e.Timestamp.ToString("dd/MM/yyyy"),
+                Value = e.EnergyGenerationKwh,
+                Value2 = e.SelfConsumptionKwh
+            }).ToList(),
+            MonthlyData = data.GroupBy(e => new { e.Timestamp.Year, e.Timestamp.Month })
+                .Select(g => new ChartDataPoint
+                {
+                    Label = $"{g.Key.Month:00}/{g.Key.Year}",
+                    Value = g.Sum(e => e.EnergyGenerationKwh),
+                    Value2 = g.Sum(e => e.GridExportKwh)
+                }).ToList()
+        };
+    }
+}

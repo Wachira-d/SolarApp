@@ -1,20 +1,15 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 
-namespace SolarApp.Pages
+namespace SolarApp.Pages;
+
+public class IndexModel : PageModel
 {
-    public class IndexModel : PageModel
+    public IActionResult OnGet()
     {
-        private readonly ILogger<IndexModel> _logger;
+        if (User.Identity?.IsAuthenticated == true)
+            return RedirectToPage("/Dashboard/Index");
 
-        public IndexModel(ILogger<IndexModel> logger)
-        {
-            _logger = logger;
-        }
-
-        public void OnGet()
-        {
-
-        }
+        return RedirectToPage("/Account/Login");
     }
 }

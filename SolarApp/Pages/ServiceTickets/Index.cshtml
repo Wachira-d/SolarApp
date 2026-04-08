@@ -1,0 +1,61 @@
+@page
+@model SolarApp.Pages.ServiceTickets.IndexModel
+@{
+    ViewData["Title"] = "Service Tickets";
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between">
+        <h6 class="mb-0">Service Tickets</h6>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Ticket #</th>
+                    <th>Site</th>
+                    <th>Subject</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Reported By</th>
+                    <th>Assigned To</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in Model.Tickets)
+                {
+                    var priorityClass = t.Priority switch
+                    {
+                        SolarApp.Models.Enums.TicketPriority.Urgent => "bg-danger",
+                        SolarApp.Models.Enums.TicketPriority.High => "bg-warning",
+                        SolarApp.Models.Enums.TicketPriority.Normal => "bg-info",
+                        _ => "bg-secondary"
+                    };
+                    var statusClass = t.Status switch
+                    {
+                        SolarApp.Models.Enums.TicketStatus.Open => "bg-primary",
+                        SolarApp.Models.Enums.TicketStatus.InProgress => "bg-warning",
+                        SolarApp.Models.Enums.TicketStatus.Resolved => "bg-success",
+                        SolarApp.Models.Enums.TicketStatus.Closed => "bg-secondary",
+                        _ => "bg-info"
+                    };
+                    <tr>
+                        <td><strong>@t.TicketNumber</strong></td>
+                        <td>@t.Installation.SiteName</td>
+                        <td>@t.Subject</td>
+                        <td><span class="badge @priorityClass">@t.Priority</span></td>
+                        <td><span class="badge @statusClass">@t.Status</span></td>
+                        <td>@t.ReportedByUser.FullName</td>
+                        <td>@(t.AssignedToUser?.FullName ?? "-")</td>
+                        <td>@t.CreatedAt.ToString("dd/MM/yyyy")</td>
+                    </tr>
+                }
+                @if (!Model.Tickets.Any())
+                {
+                    <tr><td colspan="8" class="text-center text-muted py-4">No service tickets</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

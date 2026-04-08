@@ -1,0 +1,305 @@
+@page
+@model SolarApp.Pages.Dashboard.IndexModel
+@using System.Text.Json
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<!-- Summary Cards -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="text-muted">Total Installations</h6>
+                        <h3>@Model.Dashboard.TotalInstallations</h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-house-gear text-primary" style="font-size: 2rem;"></i>
+                    </div>
+                </div>
+                <small class="text-success">@Model.Dashboard.ActiveInstallations active</small>
+                @if (Model.Dashboard.OfflineInstallations > 0)
+                {
+                    <small class="text-danger ms-2">@Model.Dashboard.OfflineInstallations offline</small>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="text-muted">Today's Generation</h6>
+                        <h3>@Model.Dashboard.TodayGenerationKwh.ToString("N1") <small class="text-muted">kWh</small></h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-lightning-charge text-warning" style="font-size: 2rem;"></i>
+                    </div>
+                </div>
+                <small class="text-success">Savings: @Model.Dashboard.TodaySavingsThb.ToString("N0") THB</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="text-muted">Monthly Generation</h6>
+                        <h3>@Model.Dashboard.MonthlyGenerationKwh.ToString("N0") <small class="text-muted">kWh</small></h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-calendar-check text-info" style="font-size: 2rem;"></i>
+                    </div>
+                </div>
+                <small class="text-success">Savings: @Model.Dashboard.MonthlySavingsThb.ToString("N0") THB</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="text-muted">Total Capacity</h6>
+                        <h3>@Model.Dashboard.TotalCapacityKw.ToString("N1") <small class="text-muted">kWp</small></h3>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-sun text-warning" style="font-size: 2rem;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Alert Summary -->
+@if (Model.Dashboard.ActiveAlertCount > 0 || Model.Dashboard.CleaningDueCount > 0)
+{
+    <div class="row mb-4">
+        @if (Model.Dashboard.ActiveAlertCount > 0)
+        {
+            <div class="col-md-4">
+                <div class="card border-danger border-0 shadow-sm">
+                    <div class="card-body text-center">
+                        <i class="bi bi-exclamation-triangle text-danger" style="font-size: 1.5rem;"></i>
+                        <h5 class="mt-2">@Model.Dashboard.ActiveAlertCount Active Alerts</h5>
+                    </div>
+                </div>
+            </div>
+        }
+        @if (Model.Dashboard.CleaningDueCount > 0)
+        {
+            <div class="col-md-4">
+                <div class="card border-warning border-0 shadow-sm">
+                    <div class="card-body text-center">
+                        <i class="bi bi-droplet text-warning" style="font-size: 1.5rem;"></i>
+                        <h5 class="mt-2">@Model.Dashboard.CleaningDueCount Cleaning Due</h5>
+                    </div>
+                </div>
+            </div>
+        }
+        @if (Model.Dashboard.WarrantyExpiringCount > 0)
+        {
+            <div class="col-md-4">
+                <div class="card border-info border-0 shadow-sm">
+                    <div class="card-body text-center">
+                        <i class="bi bi-shield-exclamation text-info" style="font-size: 1.5rem;"></i>
+                        <h5 class="mt-2">@Model.Dashboard.WarrantyExpiringCount Warranty Expiring</h5>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<!-- Charts -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white">
+                <h6 class="mb-0">Daily Energy Production (Last 30 Days)</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="dailyChart" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white">
+                <h6 class="mb-0">Recent Alerts</h6>
+            </div>
+            <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                @if (Model.Dashboard.RecentAlerts.Any())
+                {
+                    @foreach (var alert in Model.Dashboard.RecentAlerts.Take(5))
+                    {
+                        var badgeClass = alert.Severity switch
+                        {
+                            SolarApp.Models.Enums.AlertSeverity.Critical => "bg-danger",
+                            SolarApp.Models.Enums.AlertSeverity.High => "bg-warning",
+                            SolarApp.Models.Enums.AlertSeverity.Medium => "bg-info",
+                            _ => "bg-secondary"
+                        };
+                        <div class="d-flex align-items-start mb-3">
+                            <span class="badge @badgeClass me-2 mt-1">@alert.Severity</span>
+                            <div>
+                                <strong>@alert.Title</strong>
+                                <br /><small class="text-muted">@alert.OccurredAt.ToString("dd/MM HH:mm")</small>
+                            </div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <p class="text-muted text-center mb-0">No active alerts</p>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Monthly Chart -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white">
+                <h6 class="mb-0">Monthly Energy Production (Last 12 Months)</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="monthlyChart" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Installations Table -->
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">Installations Overview</h6>
+        @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+        {
+            <a asp-page="/Installations/Create" class="btn btn-warning btn-sm">
+                <i class="bi bi-plus"></i> New Installation
+            </a>
+        }
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Site Name</th>
+                        <th>Customer</th>
+                        <th>Brand</th>
+                        <th>Capacity</th>
+                        <th>Today</th>
+                        <th>This Month</th>
+                        <th>Status</th>
+                        <th>Alerts</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var inst in Model.Dashboard.Installations)
+                    {
+                        var statusClass = inst.Status switch
+                        {
+                            "Active" => "bg-success",
+                            "Offline" => "bg-danger",
+                            "Maintenance" => "bg-warning",
+                            _ => "bg-secondary"
+                        };
+                        <tr>
+                            <td><strong>@inst.SiteName</strong></td>
+                            <td>@inst.CustomerName</td>
+                            <td>@inst.InverterBrand</td>
+                            <td>@inst.CapacityKw kWp</td>
+                            <td>@inst.TodayKwh.ToString("N1") kWh</td>
+                            <td>@inst.MonthKwh.ToString("N0") kWh</td>
+                            <td><span class="badge @statusClass">@inst.Status</span></td>
+                            <td>
+                                @if (inst.ActiveAlerts > 0)
+                                {
+                                    <span class="badge bg-danger">@inst.ActiveAlerts</span>
+                                }
+                            </td>
+                            <td>
+                                <a asp-page="/Installations/Detail" asp-route-id="@inst.Id"
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Daily Production Chart
+        const dailyCtx = document.getElementById('dailyChart').getContext('2d');
+        const dailyData = @Html.Raw(JsonSerializer.Serialize(Model.Dashboard.DailyProductionChart));
+        new Chart(dailyCtx, {
+            type: 'bar',
+            data: {
+                labels: dailyData.map(d => d.label),
+                datasets: [{
+                    label: 'Generation (kWh)',
+                    data: dailyData.map(d => d.value),
+                    backgroundColor: 'rgba(255, 193, 7, 0.7)',
+                    borderColor: 'rgba(255, 193, 7, 1)',
+                    borderWidth: 1
+                }, {
+                    label: 'Self Consumption (kWh)',
+                    data: dailyData.map(d => d.value2 || 0),
+                    backgroundColor: 'rgba(13, 202, 240, 0.5)',
+                    borderColor: 'rgba(13, 202, 240, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        // Monthly Production Chart
+        const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
+        const monthlyData = @Html.Raw(JsonSerializer.Serialize(Model.Dashboard.MonthlyProductionChart));
+        new Chart(monthlyCtx, {
+            type: 'line',
+            data: {
+                labels: monthlyData.map(d => d.label),
+                datasets: [{
+                    label: 'Generation (kWh)',
+                    data: monthlyData.map(d => d.value),
+                    borderColor: 'rgba(255, 193, 7, 1)',
+                    backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }, {
+                    label: 'Grid Export (kWh)',
+                    data: monthlyData.map(d => d.value2 || 0),
+                    borderColor: 'rgba(40, 167, 69, 1)',
+                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+    </script>
+}

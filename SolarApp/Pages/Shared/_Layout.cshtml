@@ -1,51 +1,115 @@
-﻿<!DOCTYPE html>
+@using Microsoft.AspNetCore.Identity
+@using SolarApp.Models
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - SolarApp</title>
-    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-    <link rel="stylesheet" href="~/SolarApp.styles.css" asp-append-version="true" />
 </head>
 <body>
-    <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container">
-                <a class="navbar-brand" asp-area="" asp-page="/Index">SolarApp</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
+    @if (SignInManager.IsSignedIn(User))
+    {
+        <div class="d-flex" id="wrapper">
+            <!-- Sidebar -->
+            <div class="bg-dark text-white" id="sidebar" style="min-width: 250px; min-height: 100vh;">
+                <div class="p-3 border-bottom border-secondary">
+                    <h5 class="mb-0"><i class="bi bi-sun-fill text-warning"></i> SolarApp</h5>
+                    <small class="text-muted">Solar Management System</small>
+                </div>
+                <nav class="p-2">
+                    <ul class="nav flex-column">
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-page="/Index">Home</a>
+                            <a class="nav-link text-white" asp-page="/Dashboard/Index">
+                                <i class="bi bi-speedometer2 me-2"></i>Dashboard
+                            </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-page="/Privacy">Privacy</a>
+                            <a class="nav-link text-white" asp-page="/Installations/Index">
+                                <i class="bi bi-house-gear me-2"></i>Installations
+                            </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link text-white" asp-page="/Maintenance/Index">
+                                <i class="bi bi-tools me-2"></i>Maintenance
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link text-white" asp-page="/ServiceTickets/Index">
+                                <i class="bi bi-ticket-detailed me-2"></i>Service Tickets
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link text-white" asp-page="/Reports/Index">
+                                <i class="bi bi-bar-chart me-2"></i>Reports
+                            </a>
+                        </li>
+                        @if (User.IsInRole("Admin"))
+                        {
+                            <li class="nav-item mt-3">
+                                <small class="text-muted px-3">ADMIN</small>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" asp-page="/Admin/Users">
+                                    <i class="bi bi-people me-2"></i>User Management
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link text-white" asp-page="/Admin/Alerts">
+                                    <i class="bi bi-bell me-2"></i>All Alerts
+                                </a>
+                            </li>
+                        }
                     </ul>
+                </nav>
+            </div>
+
+            <!-- Page Content -->
+            <div class="flex-grow-1">
+                <!-- Top Navbar -->
+                <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm">
+                    <div class="container-fluid">
+                        <span class="navbar-text fw-bold">@ViewData["Title"]</span>
+                        <div class="d-flex align-items-center">
+                            <span class="me-3 text-muted">
+                                <i class="bi bi-person-circle me-1"></i>
+                                @UserManager.GetUserName(User)
+                            </span>
+                            <form asp-page="/Account/Logout" method="post">
+                                <button type="submit" class="btn btn-outline-secondary btn-sm">
+                                    <i class="bi bi-box-arrow-right"></i> Logout
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </nav>
+
+                <div class="container-fluid p-4">
+                    <main role="main">
+                        @RenderBody()
+                    </main>
                 </div>
             </div>
-        </nav>
-    </header>
-    <div class="container">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
-    </div>
-
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            &copy; 2026 - SolarApp - <a asp-area="" asp-page="/Privacy">Privacy</a>
         </div>
-    </footer>
+    }
+    else
+    {
+        <div class="container">
+            <main role="main">
+                @RenderBody()
+            </main>
+        </div>
+    }
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
-    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
-
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>
