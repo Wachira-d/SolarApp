@@ -1,0 +1,78 @@
+@page "{installationId:int}"
+@model SolarApp.Pages.Installations.AddEquipmentModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = "Add Equipment";
+}
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Add Equipment to @Model.Installation.SiteName</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.EquipmentType" class="form-label">Equipment Type *</label>
+                            <select asp-for="Input.EquipmentType" asp-items="Html.GetEnumSelectList<EquipmentType>()" class="form-select"></select>
+                            <span asp-validation-for="Input.EquipmentType" class="text-danger"></span>
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.Brand" class="form-label">Brand *</label>
+                            <input asp-for="Input.Brand" class="form-control" />
+                            <span asp-validation-for="Input.Brand" class="text-danger"></span>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.Model" class="form-label">Model *</label>
+                            <input asp-for="Input.Model" class="form-control" />
+                            <span asp-validation-for="Input.Model" class="text-danger"></span>
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.SerialNumber" class="form-label">Serial Number</label>
+                            <input asp-for="Input.SerialNumber" class="form-control" />
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label asp-for="Input.Quantity" class="form-label">Quantity *</label>
+                            <input asp-for="Input.Quantity" class="form-control" />
+                            <span asp-validation-for="Input.Quantity" class="text-danger"></span>
+                        </div>
+                        <div class="col-md-4">
+                            <label asp-for="Input.WarrantyYears" class="form-label">Warranty (Years) *</label>
+                            <input asp-for="Input.WarrantyYears" class="form-control" />
+                            <span asp-validation-for="Input.WarrantyYears" class="text-danger"></span>
+                        </div>
+                        <div class="col-md-4">
+                            <label asp-for="Input.InstalledDate" class="form-label">Installed Date *</label>
+                            <input asp-for="Input.InstalledDate" class="form-control" type="date" />
+                            <span asp-validation-for="Input.InstalledDate" class="text-danger"></span>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Input.Notes" class="form-label">Notes</label>
+                        <textarea asp-for="Input.Notes" class="form-control" rows="3"></textarea>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a asp-page="Detail" asp-route-id="@Model.Installation.Id" class="btn btn-outline-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-warning">Add Equipment</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

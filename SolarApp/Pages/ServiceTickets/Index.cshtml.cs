@@ -35,12 +35,19 @@ public class IndexModel : PageModel
 
         if (roles.Contains(UserRoles.Customer))
         {
-            query = query.Where(t => t.ReportedByUserId == user!.Id
-                || t.Installation.CustomerId == user!.Id);
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.UserId == user!.Id);
+            if (customer != null)
+                query = query.Where(t => t.ReportedByUserId == user!.Id
+                    || t.Installation.CustomerId == customer.Id);
+            else
+                query = query.Where(t => t.ReportedByUserId == user!.Id);
         }
         else if (roles.Contains(UserRoles.Partner))
         {
-            query = query.Where(t => t.Installation.PartnerId == user!.Id);
+            if (user!.PartnerId != null)
+                query = query.Where(t => t.Installation.PartnerId == user.PartnerId);
+            else
+                query = query.Where(t => false);
         }
 
         Tickets = await query

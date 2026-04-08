@@ -72,19 +72,35 @@ public class AlertService : IAlertService
 
         if (role == UserRoles.Customer && userId != null)
         {
-            var installationIds = await _context.Installations
-                .Where(i => i.CustomerId == userId)
-                .Select(i => i.Id)
-                .ToListAsync();
-            query = query.Where(a => installationIds.Contains(a.InstallationId));
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.UserId == userId);
+            if (customer != null)
+            {
+                var installationIds = await _context.Installations
+                    .Where(i => i.CustomerId == customer.Id)
+                    .Select(i => i.Id)
+                    .ToListAsync();
+                query = query.Where(a => installationIds.Contains(a.InstallationId));
+            }
+            else
+            {
+                return 0;
+            }
         }
         else if (role == UserRoles.Partner && userId != null)
         {
-            var installationIds = await _context.Installations
-                .Where(i => i.PartnerId == userId)
-                .Select(i => i.Id)
-                .ToListAsync();
-            query = query.Where(a => installationIds.Contains(a.InstallationId));
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (user?.PartnerId != null)
+            {
+                var installationIds = await _context.Installations
+                    .Where(i => i.PartnerId == user.PartnerId)
+                    .Select(i => i.Id)
+                    .ToListAsync();
+                query = query.Where(a => installationIds.Contains(a.InstallationId));
+            }
+            else
+            {
+                return 0;
+            }
         }
 
         return await query.CountAsync();

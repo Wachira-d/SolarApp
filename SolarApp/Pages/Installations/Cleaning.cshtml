@@ -1,0 +1,103 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.CleaningModel
+@{
+    ViewData["Title"] = $"Cleaning - {Model.Installation.SiteName}";
+    var inst = Model.Installation;
+}
+
+<div class="d-flex justify-content-between mb-3">
+    <div>
+        <h4>Panel Cleaning: @inst.SiteName</h4>
+        <p class="text-muted mb-0">
+            Completed: @inst.CompletedCleaningCount / @inst.TotalCleaningCount |
+            Remaining: @inst.RemainingCleanings |
+            Next Due: @(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "N/A")
+        </p>
+    </div>
+    <a asp-page="Detail" asp-route-id="@inst.Id" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+<!-- Add New Cleaning -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white"><h6 class="mb-0">Record Cleaning</h6></div>
+    <div class="card-body">
+        <form method="post">
+            <input type="hidden" asp-for="Input.InstallationId" />
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Scheduled Date</label>
+                    <input asp-for="Input.ScheduledDate" class="form-control" type="date" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Actual Date</label>
+                    <input asp-for="Input.ActualDate" class="form-control" type="date" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Performed By</label>
+                    <input asp-for="Input.PerformedByExternal" class="form-control" placeholder="Contractor name" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Notes</label>
+                    <input asp-for="Input.Notes" class="form-control" />
+                </div>
+            </div>
+            <div class="mt-3 d-flex gap-2">
+                <div class="form-check">
+                    <input asp-for="Input.MarkCompleted" class="form-check-input" />
+                    <label asp-for="Input.MarkCompleted" class="form-check-label">Mark as Completed</label>
+                </div>
+                <button type="submit" class="btn btn-warning btn-sm ms-auto">
+                    <i class="bi bi-plus"></i> Add Record
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Cleaning History -->
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white"><h6 class="mb-0">Cleaning History</h6></div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr><th>#</th><th>Scheduled</th><th>Actual</th><th>Status</th><th>Performed By</th><th>Notes</th><th></th></tr>
+            </thead>
+            <tbody>
+                @{ var idx = Model.Records.Count; }
+                @foreach (var r in Model.Records)
+                {
+                    var statusClass = r.Status switch
+                    {
+                        SolarApp.Models.Enums.CleaningStatus.Completed => "bg-success",
+                        SolarApp.Models.Enums.CleaningStatus.Scheduled => "bg-primary",
+                        SolarApp.Models.Enums.CleaningStatus.Missed => "bg-danger",
+                        _ => "bg-secondary"
+                    };
+                    <tr>
+                        <td>@(idx--)</td>
+                        <td>@r.ScheduledDate.ToString("dd/MM/yyyy")</td>
+                        <td>@(r.ActualDate?.ToString("dd/MM/yyyy") ?? "-")</td>
+                        <td><span class="badge @statusClass">@r.Status</span></td>
+                        <td>@(r.PerformedByExternal ?? r.PerformedByUser?.FullName ?? "-")</td>
+                        <td><small>@(r.Notes ?? "-")</small></td>
+                        <td>
+                            @if (r.Status == SolarApp.Models.Enums.CleaningStatus.Scheduled)
+                            {
+                                <form method="post" asp-page-handler="Complete" class="d-inline">
+                                    <input type="hidden" name="recordId" value="@r.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Complete</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Records.Any())
+                {
+                    <tr><td colspan="7" class="text-center text-muted py-3">No cleaning records</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

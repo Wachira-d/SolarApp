@@ -1,0 +1,93 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.WarrantyModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = $"Warranty - {Model.Installation.SiteName}";
+}
+
+<div class="d-flex justify-content-between mb-3">
+    <h4>Warranty Records: @Model.Installation.SiteName</h4>
+    <a asp-page="Detail" asp-route-id="@Model.Installation.Id" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+<!-- Add Warranty -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white"><h6 class="mb-0">Add Warranty Record</h6></div>
+    <div class="card-body">
+        <form method="post">
+            <input type="hidden" asp-for="Input.InstallationId" />
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Warranty Type</label>
+                    <select asp-for="Input.WarrantyType" asp-items="Html.GetEnumSelectList<WarrantyType>()" class="form-select"></select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Provider</label>
+                    <input asp-for="Input.ProviderName" class="form-control" required />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Start Date</label>
+                    <input asp-for="Input.WarrantyStartDate" class="form-control" type="date" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Years</label>
+                    <input asp-for="Input.WarrantyYears" class="form-control" type="number" min="1" max="30" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Equipment</label>
+                    <select asp-for="Input.EquipmentId" asp-items="Model.EquipmentOptions" class="form-select">
+                        <option value="">-- System --</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-10">
+                    <label class="form-label">Terms</label>
+                    <input asp-for="Input.TermsDescription" class="form-control" placeholder="Warranty terms..." />
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-warning w-100">Add</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Warranty List -->
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white"><h6 class="mb-0">Warranty Records</h6></div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr><th>Type</th><th>Provider</th><th>Equipment</th><th>Start</th><th>End</th><th>Days Left</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var w in Model.Records)
+                {
+                    <tr>
+                        <td>@w.WarrantyType</td>
+                        <td>@w.ProviderName</td>
+                        <td>@(w.Equipment != null ? $"{w.Equipment.Brand} {w.Equipment.Model}" : "System")</td>
+                        <td>@w.WarrantyStartDate.ToString("dd/MM/yyyy")</td>
+                        <td>@w.WarrantyEndDate.ToString("dd/MM/yyyy")</td>
+                        <td class="@(w.IsExpired ? "text-danger fw-bold" : w.DaysRemaining < 90 ? "text-warning" : "text-success")">
+                            @(w.IsExpired ? "EXPIRED" : $"{w.DaysRemaining} days")
+                        </td>
+                        <td>
+                            @if (w.ClaimFiled)
+                            {
+                                <span class="badge bg-warning">@w.ClaimStatus</span>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Records.Any())
+                {
+                    <tr><td colspan="7" class="text-center text-muted py-3">No warranty records</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

@@ -1,0 +1,85 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.DocumentsModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = $"Documents - {Model.Installation.SiteName}";
+}
+
+<div class="d-flex justify-content-between mb-3">
+    <h4>Documents: @Model.Installation.SiteName</h4>
+    <a asp-page="Detail" asp-route-id="@Model.Installation.Id" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+<!-- Upload -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white"><h6 class="mb-0">Upload Document</h6></div>
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+            <input type="hidden" asp-for="Input.InstallationId" />
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Type</label>
+                    <select asp-for="Input.DocumentType" asp-items="Html.GetEnumSelectList<DocumentType>()" class="form-select"></select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Title</label>
+                    <input asp-for="Input.Title" class="form-control" required />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">File</label>
+                    <input asp-for="Input.File" class="form-control" type="file" required />
+                    <span asp-validation-for="Input.File" class="text-danger"></span>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Notes</label>
+                    <input asp-for="Input.Notes" class="form-control" />
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-warning">
+                    <i class="bi bi-upload"></i> Upload
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Document List -->
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white"><h6 class="mb-0">Uploaded Documents</h6></div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr><th>Type</th><th>Title</th><th>Size</th><th>Uploaded By</th><th>Date</th><th>Notes</th><th></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var doc in Model.DocumentList)
+                {
+                    <tr>
+                        <td><span class="badge bg-info">@doc.DocumentType</span></td>
+                        <td><strong>@doc.Title</strong></td>
+                        <td>@((doc.FileSizeBytes / 1024.0).ToString("N0")) KB</td>
+                        <td>@doc.UploadedByUser.FullName</td>
+                        <td>@doc.CreatedAt.ToString("dd/MM/yyyy")</td>
+                        <td><small>@(doc.Notes ?? "-")</small></td>
+                        <td>
+                            <form method="post" asp-page-handler="Delete" class="d-inline">
+                                <input type="hidden" name="documentId" value="@doc.Id" />
+                                <button type="submit" class="btn btn-sm btn-outline-danger"
+                                        onclick="return confirm('Delete this document?')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                @if (!Model.DocumentList.Any())
+                {
+                    <tr><td colspan="7" class="text-center text-muted py-3">No documents</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

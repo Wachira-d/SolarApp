@@ -1,0 +1,56 @@
+@page
+@model SolarApp.Pages.ServiceTickets.CreateModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = "Create Service Ticket";
+}
+
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Create Service Ticket</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                    <div class="mb-3">
+                        <label asp-for="InstallationId" class="form-label">Installation *</label>
+                        <select asp-for="InstallationId" asp-items="Model.Installations" class="form-select">
+                            <option value="">-- Select Installation --</option>
+                        </select>
+                        <span asp-validation-for="InstallationId" class="text-danger"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Subject" class="form-label">Subject *</label>
+                        <input asp-for="Subject" class="form-control" />
+                        <span asp-validation-for="Subject" class="text-danger"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Description" class="form-label">Description *</label>
+                        <textarea asp-for="Description" class="form-control" rows="5"></textarea>
+                        <span asp-validation-for="Description" class="text-danger"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Priority" class="form-label">Priority</label>
+                        <select asp-for="Priority" asp-items="Html.GetEnumSelectList<TicketPriority>()" class="form-select"></select>
+                        <span asp-validation-for="Priority" class="text-danger"></span>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a asp-page="Index" class="btn btn-outline-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-warning">Create Ticket</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

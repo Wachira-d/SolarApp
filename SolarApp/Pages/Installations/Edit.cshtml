@@ -1,0 +1,154 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.EditModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = "Edit Installation";
+}
+
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Edit Installation</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+                    <input type="hidden" asp-for="Input.Id" />
+                    <input type="hidden" asp-for="Input.CustomerId" />
+
+                    <!-- Site Information -->
+                    <h6 class="text-muted mb-3">Site Information</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.SiteName" class="form-label">Site Name *</label>
+                            <input asp-for="Input.SiteName" class="form-control" />
+                            <span asp-validation-for="Input.SiteName" class="text-danger"></span>
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.Address" class="form-label">Address *</label>
+                            <input asp-for="Input.Address" class="form-control" />
+                            <span asp-validation-for="Input.Address" class="text-danger"></span>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.Latitude" class="form-label">Latitude</label>
+                            <input asp-for="Input.Latitude" class="form-control" />
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.Longitude" class="form-label">Longitude</label>
+                            <input asp-for="Input.Longitude" class="form-control" />
+                        </div>
+                    </div>
+
+                    <!-- Customer & Partner -->
+                    <h6 class="text-muted mb-3 mt-4">Customer & Partner</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Customer</label>
+                            <input type="text" class="form-control" value="@Model.CustomerDisplayName" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.PartnerId" class="form-label">Partner</label>
+                            <select asp-for="Input.PartnerId" asp-items="Model.Partners" class="form-select">
+                                <option value="">-- No Partner (Direct Sale) --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- System Specs -->
+                    <h6 class="text-muted mb-3 mt-4">System Specifications</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label asp-for="Input.InverterBrand" class="form-label">Inverter Brand *</label>
+                            <select asp-for="Input.InverterBrand" asp-items="Html.GetEnumSelectList<InverterBrand>()" class="form-select"></select>
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.SystemCapacityKw" class="form-label">Capacity (kWp) *</label>
+                            <input asp-for="Input.SystemCapacityKw" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.NumberOfPanels" class="form-label">Panels *</label>
+                            <input asp-for="Input.NumberOfPanels" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.PanelWattage" class="form-label">Panel Wattage (W) *</label>
+                            <input asp-for="Input.PanelWattage" class="form-control" />
+                        </div>
+                    </div>
+
+                    <!-- Cloud API -->
+                    <h6 class="text-muted mb-3 mt-4">Cloud API Connection</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.PlantId" class="form-label">Plant/Station ID</label>
+                            <input asp-for="Input.PlantId" class="form-control" />
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.CloudApiKey" class="form-label">API Key</label>
+                            <input asp-for="Input.CloudApiKey" class="form-control" />
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.CloudUsername" class="form-label">Cloud Username</label>
+                            <input asp-for="Input.CloudUsername" class="form-control" />
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.CloudPassword" class="form-label">Cloud Password</label>
+                            <input asp-for="Input.CloudPassword" class="form-control" type="password" />
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.CloudApiSecret" class="form-label">API Secret</label>
+                            <input asp-for="Input.CloudApiSecret" class="form-control" type="password" />
+                        </div>
+                    </div>
+
+                    <!-- Warranty & Maintenance -->
+                    <h6 class="text-muted mb-3 mt-4">Warranty & Maintenance</h6>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label asp-for="Input.InstallationDate" class="form-label">Installation Date *</label>
+                            <input asp-for="Input.InstallationDate" class="form-control" type="date" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.CommissionDate" class="form-label">Commission Date</label>
+                            <input asp-for="Input.CommissionDate" class="form-control" type="date" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.WarrantyYears" class="form-label">Warranty (Years) *</label>
+                            <input asp-for="Input.WarrantyYears" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.TotalCleaningCount" class="form-label">Total Cleanings</label>
+                            <input asp-for="Input.TotalCleaningCount" class="form-control" />
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label asp-for="Input.ElectricityRatePerKwh" class="form-label">Electricity Rate (THB/kWh)</label>
+                            <input asp-for="Input.ElectricityRatePerKwh" class="form-control" />
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Input.Notes" class="form-label">Notes</label>
+                        <textarea asp-for="Input.Notes" class="form-control" rows="3"></textarea>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a asp-page="Index" class="btn btn-outline-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-warning">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

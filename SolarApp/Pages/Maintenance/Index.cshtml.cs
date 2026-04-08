@@ -29,10 +29,22 @@ public class IndexModel : PageModel
         var roles = await _userManager.GetRolesAsync(user!);
 
         var installationQuery = _context.Installations.AsQueryable();
+
         if (roles.Contains(UserRoles.Customer))
-            installationQuery = installationQuery.Where(i => i.CustomerId == user!.Id);
+        {
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.UserId == user!.Id);
+            if (customer != null)
+                installationQuery = installationQuery.Where(i => i.CustomerId == customer.Id);
+            else
+                installationQuery = installationQuery.Where(i => false);
+        }
         else if (roles.Contains(UserRoles.Partner))
-            installationQuery = installationQuery.Where(i => i.PartnerId == user!.Id);
+        {
+            if (user!.PartnerId != null)
+                installationQuery = installationQuery.Where(i => i.PartnerId == user.PartnerId);
+            else
+                installationQuery = installationQuery.Where(i => false);
+        }
 
         var installationIds = await installationQuery.Select(i => i.Id).ToListAsync();
 
