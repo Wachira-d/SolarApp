@@ -44,7 +44,7 @@ try
     });
 
     // ── Identity ──
-    builder.Services.AddDefaultIdentity<ApplicationUser>(options =>
+    builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
     {
         options.SignIn.RequireConfirmedAccount = false;
         options.Password.RequireDigit = true;
@@ -53,8 +53,8 @@ try
         options.Password.RequiredLength = 8;
         options.Lockout.MaxFailedAccessAttempts = 5;
     })
-    .AddRoles<IdentityRole>()
-    .AddEntityFrameworkStores<ApplicationDbContext>();
+    .AddEntityFrameworkStores<ApplicationDbContext>()
+    .AddDefaultTokenProviders();
 
     builder.Services.ConfigureApplicationCookie(options =>
     {

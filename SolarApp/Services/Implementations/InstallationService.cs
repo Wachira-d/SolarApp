@@ -121,7 +121,7 @@ public class InstallationService : IInstallationService
             InstallationId = installationId,
             ScheduledDate = cleaningDate,
             ActualDate = cleaningDate,
-            Status = Enums.CleaningStatus.Completed
+            Status = CleaningStatus.Completed
         });
 
         installation.UpdatedAt = DateTime.UtcNow;
