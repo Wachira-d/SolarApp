@@ -371,7 +371,7 @@ public class Startup
     //  DIAGNOSTIC PAGE
     // ══════════════════════════════════════════════════════════════
 
-    public static void MapDiagnosticEndpoint(WebApplication app, string logFile)
+    public static void MapDiagnosticEndpoint(WebApplication app, string? logFile)
     {
         app.MapGet("/startup-log", async (ApplicationDbContext db) =>
         {

@@ -1,14 +1,38 @@
-var logFile = Path.Combine(AppContext.BaseDirectory, "startup-debug.log");
-File.WriteAllText(logFile, ""); // clear old log
+// ══════════════════════════════════════════════════════════════
+// SolarApp - Program.cs
+// Designed to NEVER crash silently. Logs everything to stdout
+// (captured by IIS via web.config stdoutLogEnabled="true")
+// ══════════════════════════════════════════════════════════════
+
+string? logFile = null;
 
 void Log(string msg)
 {
     var line = $"[{DateTime.Now:HH:mm:ss}] {msg}";
     Console.WriteLine(line);
-    try { File.AppendAllText(logFile, line + Environment.NewLine); } catch { }
+    if (logFile != null)
+        try { File.AppendAllText(logFile, line + Environment.NewLine); } catch { }
+}
+
+// Try to set up file logging (may fail under IIS due to permissions)
+try
+{
+    var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+    Directory.CreateDirectory(logDir);
+    logFile = Path.Combine(logDir, "startup-debug.log");
+    File.WriteAllText(logFile, "");
+}
+catch
+{
+    // File logging unavailable - stdout only (IIS captures via web.config)
+    logFile = null;
 }
 
 Log("=== SolarApp Starting ===");
+Log($"BaseDir: {AppContext.BaseDirectory}");
+Log($"Env: {Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "(not set = Production)"}");
+Log($"User: {Environment.UserName}");
+Log($"OS: {Environment.OSVersion}");
 
 try
 {
@@ -17,15 +41,15 @@ try
 
     if (string.IsNullOrEmpty(connectionString))
     {
-        Log("FATAL: No connection string! Add 'DefaultConnection' to appsettings.json");
+        Log("FATAL: No 'DefaultConnection' in appsettings.json!");
         return;
     }
 
-    Log($"SQL Server: {connectionString.Split(';')[0]}");
+    Log($"SQL: {connectionString.Split(';')[0]}...");
 
-    // ── Register all services ──
+    // ── Services ──
     SolarApp.Startup.ConfigureServices(builder);
-    Log("Services registered");
+    Log("Services OK");
 
     // ── Hangfire (optional) ──
     var hangfireOk = false;
@@ -33,7 +57,7 @@ try
     {
         SolarApp.Startup.ConfigureHangfire(builder, connectionString);
         hangfireOk = true;
-        Log("Hangfire registered");
+        Log("Hangfire OK");
     }
     catch (Exception ex)
     {
@@ -41,9 +65,9 @@ try
     }
 
     var app = builder.Build();
-    Log("App built OK");
+    Log("Build OK");
 
-    // ── Self-healing database init ──
+    // ── Database ──
     await SolarApp.Startup.InitializeDatabaseAsync(app.Services, Log);
 
     // ── Middleware ──
@@ -55,7 +79,7 @@ try
 
     if (hangfireOk)
     {
-        try { SolarApp.Startup.ConfigureHangfireDashboard(app); Log("Hangfire jobs OK"); }
+        try { SolarApp.Startup.ConfigureHangfireDashboard(app); Log("Hangfire dashboard OK"); }
         catch (Exception ex) { Log($"Hangfire dashboard skipped: {ex.Message}"); }
     }
 
@@ -69,8 +93,4 @@ try
 catch (Exception ex)
 {
     Log($"FATAL: {ex}");
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine($"\nFATAL: {ex.Message}");
-    Console.WriteLine($"Log: {logFile}");
-    Console.ResetColor();
 }
