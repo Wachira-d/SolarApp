@@ -12,7 +12,7 @@ public static class DbInitializer
         var userManager = serviceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var roleManager = serviceProvider.GetRequiredService<RoleManager<IdentityRole>>();
 
-        await context.Database.EnsureCreatedAsync();
+        // DB creation is handled by Program.cs (MigrateAsync or EnsureCreatedAsync)
 
         // Seed roles
         string[] roles = { UserRoles.Admin, UserRoles.Partner, UserRoles.Customer };

@@ -29,18 +29,15 @@ try
     builder.Host.UseSerilog((context, services, config) => config
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
-        .Enrich.FromLogContext()
-        .Enrich.WithMachineName()
-        .Enrich.WithEnvironmentName());
+        .Enrich.FromLogContext());
 
     // ── Database (MS SQL Server) ──
     builder.Services.AddHttpContextAccessor();
-    builder.Services.AddScoped<AuditableEntityInterceptor>();
+    builder.Services.AddSingleton<AuditableEntityInterceptor>();
     builder.Services.AddDbContext<ApplicationDbContext>((sp, options) =>
     {
-        var interceptor = sp.GetRequiredService<AuditableEntityInterceptor>();
-        options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
-               .AddInterceptors(interceptor);
+        options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+        options.AddInterceptors(sp.GetRequiredService<AuditableEntityInterceptor>());
     });
 
     // ── Identity ──
@@ -96,11 +93,12 @@ try
         .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection"),
             new SqlServerStorageOptions
             {
+                PrepareSchemaIfNecessary = true,
                 CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
                 SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
                 QueuePollInterval = TimeSpan.FromSeconds(15),
                 UseRecommendedIsolationLevel = true,
-                SchemaName = "Hangfire"
+                SchemaName = "HangFire"
             }));
     builder.Services.AddHangfireServer(options =>
     {
@@ -117,9 +115,27 @@ try
     var app = builder.Build();
 
     // ── Seed database ──
-    using (var scope = app.Services.CreateScope())
+    try
     {
+        using var scope = app.Services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await context.Database.MigrateAsync();
         await DbInitializer.SeedAsync(scope.ServiceProvider);
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Database initialization failed. Attempting EnsureCreated fallback...");
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            await context.Database.EnsureCreatedAsync();
+            await DbInitializer.SeedAsync(scope.ServiceProvider);
+        }
+        catch (Exception ex2)
+        {
+            Log.Error(ex2, "Database setup failed. App will start but DB features won't work until DB is available.");
+        }
     }
 
     // ── Serilog request logging ──
@@ -146,15 +162,22 @@ try
         });
 
     // ── Register recurring Hangfire jobs ──
-    RecurringJob.AddOrUpdate<SolarDataSyncJob>(
-        "sync-production-data",
-        job => job.ExecuteAsync(),
-        "*/5 * * * *");  // Every 5 minutes
+    try
+    {
+        RecurringJob.AddOrUpdate<SolarDataSyncJob>(
+            "sync-production-data",
+            job => job.ExecuteAsync(),
+            "*/5 * * * *");
 
-    RecurringJob.AddOrUpdate<SystemHealthMonitorJob>(
-        "check-system-health",
-        job => job.ExecuteAsync(),
-        "*/2 * * * *");  // Every 2 minutes
+        RecurringJob.AddOrUpdate<SystemHealthMonitorJob>(
+            "check-system-health",
+            job => job.ExecuteAsync(),
+            "*/2 * * * *");
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Failed to register Hangfire recurring jobs. They can be registered later via the dashboard.");
+    }
 
     app.MapRazorPages();
 

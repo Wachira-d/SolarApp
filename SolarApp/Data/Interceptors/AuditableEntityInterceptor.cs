@@ -22,16 +22,18 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
         var context = eventData.Context;
         if (context == null) return base.SavingChangesAsync(eventData, result, cancellationToken);
 
-        var userId = _httpContextAccessor.HttpContext?.User?.FindFirst(
+        var httpContext = _httpContextAccessor.HttpContext;
+        var userId = httpContext?.User?.FindFirst(
             System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        var userName = _httpContextAccessor.HttpContext?.User?.Identity?.Name;
-        var ipAddress = _httpContextAccessor.HttpContext?.Connection?.RemoteIpAddress?.ToString();
+        var userName = httpContext?.User?.Identity?.Name;
+        var ipAddress = httpContext?.Connection?.RemoteIpAddress?.ToString();
 
         var auditEntries = new List<AuditLog>();
 
         foreach (var entry in context.ChangeTracker.Entries())
         {
-            if (entry.Entity is AuditLog) continue;
+            if (entry.Entity is AuditLog || entry.State == EntityState.Detached || entry.State == EntityState.Unchanged)
+                continue;
 
             var entityType = entry.Entity.GetType().Name;
             string? entityId = null;
@@ -113,10 +115,17 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
     private static string? SerializeProperties(Dictionary<string, object?> properties)
     {
         if (properties.Count == 0) return null;
-        return JsonSerializer.Serialize(properties, new JsonSerializerOptions
+        try
         {
-            WriteIndented = false,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-        });
+            return JsonSerializer.Serialize(properties, new JsonSerializerOptions
+            {
+                WriteIndented = false,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
+        }
+        catch
+        {
+            return "{\"error\": \"Could not serialize\"}";
+        }
     }
 }
