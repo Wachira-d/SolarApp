@@ -2,6 +2,7 @@ using FluentValidation;
 using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
@@ -10,18 +11,18 @@ namespace SolarApp;
 
 public class Startup
 {
+    // ══════════════════════════════════════════════════════════════
+    //  SERVICE REGISTRATION
+    // ══════════════════════════════════════════════════════════════
+
     public static void ConfigureServices(WebApplicationBuilder builder)
     {
-        var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")!;
-
-        // ── Database ──
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
-            options.UseSqlServer(connectionString);
+            options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
         });
 
-        // ── Identity ──
         builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
         {
             options.SignIn.RequireConfirmedAccount = false;
@@ -42,14 +43,12 @@ public class Startup
             options.SlidingExpiration = true;
         });
 
-        // ── Core Services ──
         builder.Services.AddScoped<Services.Interfaces.IInstallationService, Services.Implementations.InstallationService>();
         builder.Services.AddScoped<Services.Interfaces.IDashboardService, Services.Implementations.DashboardService>();
         builder.Services.AddScoped<Services.Interfaces.IMaintenanceService, Services.Implementations.MaintenanceService>();
         builder.Services.AddScoped<Services.Interfaces.IAlertService, Services.Implementations.AlertService>();
         builder.Services.AddScoped<Services.ReportExport.IReportExportService, Services.ReportExport.ReportExportService>();
 
-        // ── Inverter API ──
         builder.Services.AddHttpClient();
         builder.Services.AddScoped<Services.InverterApi.Adapters.HuaweiAdapter>();
         builder.Services.AddScoped<Services.InverterApi.Adapters.FoxEssAdapter>();
@@ -57,17 +56,10 @@ public class Startup
         builder.Services.AddScoped<Services.InverterApi.Adapters.GoodWeAdapter>();
         builder.Services.AddScoped<Services.InverterApi.Adapters.DeyeAdapter>();
         builder.Services.AddScoped<Services.InverterApi.IInverterApiAdapterFactory, Services.InverterApi.InverterApiAdapterFactory>();
-
-        // ── LINE ──
         builder.Services.AddScoped<Services.LineApi.ILineMessagingService, Services.LineApi.LineMessagingService>();
-
-        // ── Validators ──
         builder.Services.AddValidatorsFromAssemblyContaining<Startup>();
-
-        // ── Background jobs ──
         builder.Services.AddScoped<BackgroundJobs.SolarDataSyncJob>();
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
-
         builder.Services.AddRazorPages();
     }
 
@@ -77,15 +69,14 @@ public class Startup
             .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
             .UseSimpleAssemblyNameTypeSerializer()
             .UseRecommendedSerializerSettings()
-            .UseSqlServerStorage(connectionString,
-                new SqlServerStorageOptions
-                {
-                    PrepareSchemaIfNecessary = true,
-                    CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
-                    QueuePollInterval = TimeSpan.FromSeconds(15),
-                    UseRecommendedIsolationLevel = true,
-                    SchemaName = "HangFire"
-                }));
+            .UseSqlServerStorage(connectionString, new SqlServerStorageOptions
+            {
+                PrepareSchemaIfNecessary = true,
+                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+                QueuePollInterval = TimeSpan.FromSeconds(15),
+                UseRecommendedIsolationLevel = true,
+                SchemaName = "HangFire"
+            }));
         builder.Services.AddHangfireServer(options =>
         {
             options.WorkerCount = 5;
@@ -99,76 +90,337 @@ public class Startup
         {
             Authorization = new[] { new BackgroundJobs.HangfireAdminAuthorizationFilter() }
         });
-
         RecurringJob.AddOrUpdate<BackgroundJobs.SolarDataSyncJob>(
             "sync-production-data", job => job.ExecuteAsync(), "*/5 * * * *");
         RecurringJob.AddOrUpdate<BackgroundJobs.SystemHealthMonitorJob>(
             "check-system-health", job => job.ExecuteAsync(), "*/2 * * * *");
     }
 
+    // ══════════════════════════════════════════════════════════════
+    //  SELF-HEALING DATABASE INITIALIZATION
+    // ══════════════════════════════════════════════════════════════
+
     public static async Task InitializeDatabaseAsync(IServiceProvider services, Action<string> log)
     {
         using var scope = services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var connectionString = context.Database.GetConnectionString()!;
 
-        // Check if tables exist by testing a known table
-        var canConnect = await context.Database.CanConnectAsync();
-        log($"Database CanConnect: {canConnect}");
-
-        if (canConnect)
+        // ── Step A: Ensure SQL Server is reachable ──
+        log("DB: Testing SQL Server connection...");
+        if (!await TestSqlServerAsync(connectionString, log))
         {
+            log("DB: SQL Server not reachable. Will try to create database anyway...");
+        }
+
+        // ── Step B: Ensure database exists ──
+        log("DB: Ensuring database exists...");
+        await EnsureDatabaseExistsAsync(connectionString, log);
+
+        // ── Step C: Ensure all tables exist ──
+        log("DB: Checking tables...");
+        var tablesOk = await CheckTablesExistAsync(context, log);
+
+        if (!tablesOk)
+        {
+            log("DB: Tables missing or incomplete. Rebuilding schema...");
+
+            // Drop everything and recreate
             try
             {
-                // Test if AspNetUsers table exists
-                await context.Database.ExecuteSqlRawAsync("SELECT TOP 1 Id FROM AspNetUsers");
-                log("Tables already exist");
-            }
-            catch
-            {
-                // Tables don't exist - delete and recreate
-                log("Tables missing! Dropping and recreating database...");
                 await context.Database.EnsureDeletedAsync();
-                log("Old database deleted");
-                await context.Database.EnsureCreatedAsync();
-                log("Database recreated with all tables");
+                log("DB: Dropped old database");
+            }
+            catch (Exception ex)
+            {
+                log($"DB: Drop failed (OK if DB was empty): {ex.Message}");
+            }
+
+            // Recreate
+            var created = await context.Database.EnsureCreatedAsync();
+            log($"DB: EnsureCreated result: {created}");
+
+            // Verify tables again
+            tablesOk = await CheckTablesExistAsync(context, log);
+            if (!tablesOk)
+            {
+                // Last resort: raw SQL to verify what happened
+                log("DB: WARNING - Tables still not created. Checking raw schema...");
+                await DumpTableListAsync(context, log);
             }
         }
-        else
-        {
-            await context.Database.EnsureCreatedAsync();
-            log("Database created from scratch");
-        }
 
-        await DbInitializer.SeedAsync(scope.ServiceProvider);
-        log("Database seeded (admin@solarapp.com / Admin@123456)");
-    }
-
-    public static bool TryCreateDatabase(string connectionString, Action<string> log)
-    {
+        // ── Step D: Seed data ──
+        log("DB: Seeding data...");
         try
         {
-            var csBuilder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
-            var dbName = csBuilder.InitialCatalog;
-            csBuilder.InitialCatalog = "master";
-            csBuilder.ConnectTimeout = 10;
-
-            using var conn = new Microsoft.Data.SqlClient.SqlConnection(csBuilder.ConnectionString);
-            conn.Open();
-            log($"Connected to SQL Server: {csBuilder.DataSource}");
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = $@"IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = @db)
-                BEGIN CREATE DATABASE [{dbName}] SELECT 'CREATED' END ELSE SELECT 'EXISTS'";
-            cmd.Parameters.AddWithValue("@db", dbName);
-            var result = cmd.ExecuteScalar()?.ToString();
-            log($"Database '{dbName}': {result}");
-            return true;
+            await DbInitializer.SeedAsync(scope.ServiceProvider);
+            log("DB: Seed complete (admin@solarapp.com / Admin@123456)");
         }
         catch (Exception ex)
         {
-            log($"SQL Server ERROR: {ex.Message}");
-            log("Check: 1) SQL Server running? 2) Connection string correct? 3) Auth method?");
+            log($"DB: Seed failed: {ex.Message}");
+            if (ex.InnerException != null)
+                log($"DB: Seed inner: {ex.InnerException.Message}");
+        }
+
+        // ── Step E: Final verification ──
+        log("DB: Running final verification...");
+        await VerifyDatabaseAsync(context, log);
+    }
+
+    private static async Task<bool> TestSqlServerAsync(string connectionString, Action<string> log)
+    {
+        try
+        {
+            var csb = new SqlConnectionStringBuilder(connectionString);
+            csb.ConnectTimeout = 5;
+            using var conn = new SqlConnection(csb.ConnectionString);
+            await conn.OpenAsync();
+            log($"DB: Connected to {csb.DataSource}, database: {csb.InitialCatalog}");
+            return true;
+        }
+        catch (SqlException ex)
+        {
+            log($"DB: Connection failed - Error {ex.Number}: {ex.Message}");
+
+            // Self-diagnose common issues
+            switch (ex.Number)
+            {
+                case -1:
+                case 2:
+                    log("DB: FIX -> SQL Server is not running. Start it: Services > 'SQL Server (MSSQLSERVER)' > Start");
+                    log("DB: FIX -> Or check server name in connection string. Common names: localhost, .\\SQLEXPRESS, (localdb)\\mssqllocaldb");
+                    break;
+                case 4060:
+                    log("DB: FIX -> Database doesn't exist yet. Will be auto-created.");
+                    break;
+                case 18456:
+                    log("DB: FIX -> Login failed. If using Trusted_Connection=True, ensure your Windows user has SQL access.");
+                    log("DB: FIX -> Or use SQL auth: User Id=sa;Password=YourPassword");
+                    break;
+                case 233:
+                    log("DB: FIX -> Named pipes/TCP not enabled. Enable TCP/IP in SQL Server Configuration Manager.");
+                    break;
+                default:
+                    log($"DB: FIX -> Check SQL Server error number {ex.Number} for details");
+                    break;
+            }
             return false;
         }
+    }
+
+    private static async Task EnsureDatabaseExistsAsync(string connectionString, Action<string> log)
+    {
+        try
+        {
+            var csb = new SqlConnectionStringBuilder(connectionString);
+            var dbName = csb.InitialCatalog;
+
+            if (string.IsNullOrEmpty(dbName))
+            {
+                log("DB: ERROR - No database name in connection string!");
+                return;
+            }
+
+            // Connect to master to create database
+            csb.InitialCatalog = "master";
+            csb.ConnectTimeout = 10;
+
+            using var conn = new SqlConnection(csb.ConnectionString);
+            await conn.OpenAsync();
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $@"
+                IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = @db)
+                BEGIN
+                    CREATE DATABASE [{dbName}];
+                    SELECT 'CREATED';
+                END
+                ELSE SELECT 'EXISTS';";
+            cmd.Parameters.AddWithValue("@db", dbName);
+
+            var result = (await cmd.ExecuteScalarAsync())?.ToString();
+            log($"DB: Database '{dbName}' -> {result}");
+        }
+        catch (Exception ex)
+        {
+            log($"DB: Could not ensure database exists: {ex.Message}");
+        }
+    }
+
+    private static async Task<bool> CheckTablesExistAsync(ApplicationDbContext context, Action<string> log)
+    {
+        var requiredTables = new[]
+        {
+            "AspNetUsers", "AspNetRoles", "AspNetUserRoles",
+            "Installations", "Customers", "Partners", "Equipment",
+            "EnergyData", "SystemAlerts", "MaintenanceRecords",
+            "ServiceTickets", "SystemSettings"
+        };
+
+        var missingTables = new List<string>();
+
+        foreach (var table in requiredTables)
+        {
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync($"SELECT TOP 0 * FROM [{table}]");
+            }
+            catch
+            {
+                missingTables.Add(table);
+            }
+        }
+
+        if (missingTables.Count == 0)
+        {
+            log($"DB: All {requiredTables.Length} tables verified OK");
+            return true;
+        }
+
+        log($"DB: Missing {missingTables.Count} tables: {string.Join(", ", missingTables)}");
+        return false;
+    }
+
+    private static async Task DumpTableListAsync(ApplicationDbContext context, Action<string> log)
+    {
+        try
+        {
+            var tables = new List<string>();
+            using var cmd = context.Database.GetDbConnection().CreateCommand();
+            cmd.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME";
+            await context.Database.OpenConnectionAsync();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                tables.Add(reader.GetString(0));
+
+            log($"DB: Existing tables ({tables.Count}): {(tables.Count > 0 ? string.Join(", ", tables) : "NONE")}");
+        }
+        catch (Exception ex)
+        {
+            log($"DB: Could not list tables: {ex.Message}");
+        }
+    }
+
+    private static async Task VerifyDatabaseAsync(ApplicationDbContext context, Action<string> log)
+    {
+        try
+        {
+            var userCount = await context.Users.CountAsync();
+            var roleCount = await context.Roles.CountAsync();
+            var settingCount = await context.SystemSettings.CountAsync();
+            log($"DB: Verification OK - Users: {userCount}, Roles: {roleCount}, Settings: {settingCount}");
+        }
+        catch (Exception ex)
+        {
+            log($"DB: Verification FAILED: {ex.Message}");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  API ENDPOINTS
+    // ══════════════════════════════════════════════════════════════
+
+    public static void MapApiEndpoints(WebApplication app)
+    {
+        app.MapGet("/api/reports/excel/{installationId:int}", async (
+            int installationId, DateTime? from, DateTime? to,
+            Services.ReportExport.IReportExportService svc) =>
+        {
+            var f = from ?? DateTime.UtcNow.AddMonths(-1);
+            var t = to ?? DateTime.UtcNow;
+            return Results.File(await svc.ExportProductionToExcelAsync(installationId, f, t),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"Report_{installationId}.xlsx");
+        }).RequireAuthorization();
+
+        app.MapGet("/api/reports/pdf/{installationId:int}", async (
+            int installationId, DateTime? from, DateTime? to,
+            Services.ReportExport.IReportExportService svc) =>
+        {
+            var f = from ?? DateTime.UtcNow.AddMonths(-1);
+            var t = to ?? DateTime.UtcNow;
+            return Results.File(await svc.ExportProductionToPdfAsync(installationId, f, t),
+                "application/pdf", $"Report_{installationId}.pdf");
+        }).RequireAuthorization();
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  DIAGNOSTIC PAGE
+    // ══════════════════════════════════════════════════════════════
+
+    public static void MapDiagnosticEndpoint(WebApplication app, string logFile)
+    {
+        app.MapGet("/startup-log", async (ApplicationDbContext db) =>
+        {
+            var log = File.Exists(logFile) ? await File.ReadAllTextAsync(logFile) : "No log found";
+            var dbStatus = "Unknown";
+            var tableList = "";
+
+            try
+            {
+                var tables = new List<string>();
+                using var cmd = db.Database.GetDbConnection().CreateCommand();
+                cmd.CommandText = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME";
+                await db.Database.OpenConnectionAsync();
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync()) tables.Add(reader.GetString(0));
+
+                var userCount = await db.Users.CountAsync();
+                var roleCount = await db.Roles.CountAsync();
+
+                dbStatus = $"OK - {tables.Count} tables, {userCount} users, {roleCount} roles";
+                tableList = string.Join(", ", tables);
+            }
+            catch (Exception ex)
+            {
+                dbStatus = $"ERROR: {ex.Message}";
+            }
+
+            return Results.Content($@"<!DOCTYPE html>
+<html><head><title>SolarApp Diagnostic</title>
+<style>
+body {{ font-family: 'Segoe UI', monospace; background: #0d1117; color: #c9d1d9; padding: 30px; max-width: 1000px; margin: auto; }}
+h1 {{ color: #ffc107; border-bottom: 2px solid #30363d; padding-bottom: 10px; }}
+h2 {{ color: #58a6ff; margin-top: 25px; }}
+.card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin: 15px 0; }}
+.ok {{ border-left: 4px solid #3fb950; }}
+.err {{ border-left: 4px solid #f85149; }}
+pre {{ background: #0d1117; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }}
+.label {{ color: #8b949e; min-width: 120px; display: inline-block; }}
+</style></head>
+<body>
+<h1>SolarApp Diagnostic</h1>
+
+<h2>Database Status</h2>
+<div class='card {(dbStatus.StartsWith("OK") ? "ok" : "err")}'>
+<p><span class='label'>Status:</span> <strong>{dbStatus}</strong></p>
+<p><span class='label'>Tables:</span> {(string.IsNullOrEmpty(tableList) ? "None" : tableList)}</p>
+<p><span class='label'>ConnString:</span> {MaskConnectionString(db.Database.GetConnectionString())}</p>
+</div>
+
+<h2>Startup Log</h2>
+<div class='card'>
+<pre>{System.Net.WebUtility.HtmlEncode(log)}</pre>
+</div>
+
+<h2>System Info</h2>
+<div class='card'>
+<p><span class='label'>Runtime:</span> {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}</p>
+<p><span class='label'>OS:</span> {System.Runtime.InteropServices.RuntimeInformation.OSDescription}</p>
+<p><span class='label'>Time:</span> {DateTime.Now:yyyy-MM-dd HH:mm:ss}</p>
+<p><span class='label'>Log file:</span> {logFile}</p>
+</div>
+</body></html>", "text/html");
+        });
+    }
+
+    private static string MaskConnectionString(string? cs)
+    {
+        if (string.IsNullOrEmpty(cs)) return "(empty)";
+        return System.Text.RegularExpressions.Regex.Replace(
+            cs, @"(Password|Pwd)\s*=\s*[^;]+", "$1=***",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 }
