@@ -3,6 +3,7 @@ using FluentValidation.AspNetCore;
 using Hangfire;
 using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using SolarApp.BackgroundJobs;
@@ -31,12 +32,40 @@ try
         .ReadFrom.Services(services)
         .Enrich.FromLogContext());
 
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")!;
+
+    // ── Pre-create database if it doesn't exist ──
+    var hangfireEnabled = false;
+    try
+    {
+        var csBuilder = new SqlConnectionStringBuilder(connectionString);
+        var databaseName = csBuilder.InitialCatalog;
+        csBuilder.InitialCatalog = "master";
+
+        using var masterConn = new SqlConnection(csBuilder.ConnectionString);
+        masterConn.Open();
+        using var cmd = masterConn.CreateCommand();
+        cmd.CommandText = $@"
+            IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = @db)
+            BEGIN
+                CREATE DATABASE [{databaseName}]
+            END";
+        cmd.Parameters.AddWithValue("@db", databaseName);
+        cmd.ExecuteNonQuery();
+        Log.Information("Database '{Database}' is ready", databaseName);
+        hangfireEnabled = true;
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "Could not pre-create database. Check your connection string and SQL Server availability. App will start without Hangfire.");
+    }
+
     // ── Database (MS SQL Server) ──
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddSingleton<AuditableEntityInterceptor>();
     builder.Services.AddDbContext<ApplicationDbContext>((sp, options) =>
     {
-        options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+        options.UseSqlServer(connectionString);
         options.AddInterceptors(sp.GetRequiredService<AuditableEntityInterceptor>());
     });
 
@@ -85,26 +114,29 @@ try
     // ── LINE Messaging ──
     builder.Services.AddScoped<ILineMessagingService, LineMessagingService>();
 
-    // ── Hangfire ──
-    builder.Services.AddHangfire(config => config
-        .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
-        .UseSimpleAssemblyNameTypeSerializer()
-        .UseRecommendedSerializerSettings()
-        .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection"),
-            new SqlServerStorageOptions
-            {
-                PrepareSchemaIfNecessary = true,
-                CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
-                SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
-                QueuePollInterval = TimeSpan.FromSeconds(15),
-                UseRecommendedIsolationLevel = true,
-                SchemaName = "HangFire"
-            }));
-    builder.Services.AddHangfireServer(options =>
+    // ── Hangfire (only if DB is available) ──
+    if (hangfireEnabled)
     {
-        options.WorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 5);
-        options.Queues = new[] { "critical", "default", "low" };
-    });
+        builder.Services.AddHangfire(config => config
+            .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+            .UseSimpleAssemblyNameTypeSerializer()
+            .UseRecommendedSerializerSettings()
+            .UseSqlServerStorage(connectionString,
+                new SqlServerStorageOptions
+                {
+                    PrepareSchemaIfNecessary = true,
+                    CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
+                    SlidingInvisibilityTimeout = TimeSpan.FromMinutes(5),
+                    QueuePollInterval = TimeSpan.FromSeconds(15),
+                    UseRecommendedIsolationLevel = true,
+                    SchemaName = "HangFire"
+                }));
+        builder.Services.AddHangfireServer(options =>
+        {
+            options.WorkerCount = builder.Configuration.GetValue("Hangfire:WorkerCount", 5);
+            options.Queues = new[] { "critical", "default", "low" };
+        });
+    }
 
     // ── Hangfire job classes ──
     builder.Services.AddScoped<SolarDataSyncJob>();
@@ -114,69 +146,69 @@ try
 
     var app = builder.Build();
 
-    // ── Seed database ──
+    // ── Create tables + Seed database ──
     try
     {
         using var scope = app.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await context.Database.MigrateAsync();
+        await context.Database.EnsureCreatedAsync();
+        Log.Information("Database schema created/verified");
         await DbInitializer.SeedAsync(scope.ServiceProvider);
+        Log.Information("Database seeded successfully");
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "Database initialization failed. Attempting EnsureCreated fallback...");
-        try
-        {
-            using var scope = app.Services.CreateScope();
-            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            await context.Database.EnsureCreatedAsync();
-            await DbInitializer.SeedAsync(scope.ServiceProvider);
-        }
-        catch (Exception ex2)
-        {
-            Log.Error(ex2, "Database setup failed. App will start but DB features won't work until DB is available.");
-        }
+        Log.Error(ex, "Database initialization failed: {Message}", ex.Message);
     }
 
-    // ── Serilog request logging ──
-    app.UseSerilogRequestLogging();
-
-    if (!app.Environment.IsDevelopment())
+    // ── Middleware ──
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseDeveloperExceptionPage();
+    }
+    else
     {
         app.UseExceptionHandler("/Error");
         app.UseHsts();
     }
 
+    app.UseSerilogRequestLogging();
     app.UseHttpsRedirection();
     app.UseStaticFiles();
     app.UseRouting();
     app.UseAuthentication();
     app.UseAuthorization();
 
-    // ── Hangfire Dashboard (Admin only) ──
-    app.UseHangfireDashboard(
-        app.Configuration.GetValue("Hangfire:DashboardPath", "/hangfire")!,
-        new DashboardOptions
+    // ── Hangfire Dashboard + Jobs (only if enabled) ──
+    if (hangfireEnabled)
+    {
+        app.UseHangfireDashboard(
+            app.Configuration.GetValue("Hangfire:DashboardPath", "/hangfire")!,
+            new DashboardOptions
+            {
+                Authorization = new[] { new HangfireAdminAuthorizationFilter() }
+            });
+
+        try
         {
-            Authorization = new[] { new HangfireAdminAuthorizationFilter() }
-        });
+            RecurringJob.AddOrUpdate<SolarDataSyncJob>(
+                "sync-production-data",
+                job => job.ExecuteAsync(),
+                "*/5 * * * *");
 
-    // ── Register recurring Hangfire jobs ──
-    try
-    {
-        RecurringJob.AddOrUpdate<SolarDataSyncJob>(
-            "sync-production-data",
-            job => job.ExecuteAsync(),
-            "*/5 * * * *");
-
-        RecurringJob.AddOrUpdate<SystemHealthMonitorJob>(
-            "check-system-health",
-            job => job.ExecuteAsync(),
-            "*/2 * * * *");
+            RecurringJob.AddOrUpdate<SystemHealthMonitorJob>(
+                "check-system-health",
+                job => job.ExecuteAsync(),
+                "*/2 * * * *");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to register Hangfire recurring jobs");
+        }
     }
-    catch (Exception ex)
+    else
     {
-        Log.Warning(ex, "Failed to register Hangfire recurring jobs. They can be registered later via the dashboard.");
+        Log.Warning("Hangfire is disabled. Background jobs will not run.");
     }
 
     app.MapRazorPages();
@@ -205,11 +237,12 @@ try
             $"SolarReport_{installationId}_{fromDate:yyyyMMdd}_{toDate:yyyyMMdd}.pdf");
     }).RequireAuthorization();
 
+    Log.Information("SolarApp started successfully");
     app.Run();
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "Application terminated unexpectedly");
+    Log.Fatal(ex, "Application terminated unexpectedly: {Message}", ex.Message);
 }
 finally
 {
