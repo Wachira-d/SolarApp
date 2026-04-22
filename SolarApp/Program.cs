@@ -54,18 +54,22 @@ try
     var app = builder.Build();
     Log("Build OK");
 
-    // Database schema + seed
+    // Database schema + seed (MUST succeed or app is useless)
     Log("Step 7: Initializing database...");
     try
     {
         await SolarApp.Startup.InitializeDatabaseAsync(app.Services, Log);
+        Log("Database ready!");
     }
     catch (Exception ex)
     {
-        var msg = $"DB init FAILED: {ex.Message}";
-        Log(msg);
-        errors.Add(msg);
+        Log($"DB init FAILED: {ex.Message}");
         if (ex.InnerException != null) Log($"  Inner: {ex.InnerException.Message}");
+        Log($"  Stack: {ex.StackTrace}");
+        errors.Add($"DATABASE FAILED: {ex.Message}");
+        // Don't swallow - this is critical
+        throw new InvalidOperationException(
+            $"Database initialization failed. Check startup-debug.log for details. Error: {ex.Message}", ex);
     }
 
     // Middleware

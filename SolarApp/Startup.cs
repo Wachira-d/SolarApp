@@ -110,8 +110,35 @@ public class Startup
     {
         using var scope = services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        await context.Database.EnsureCreatedAsync();
-        log("Database schema created/verified");
+
+        // Check if tables exist by testing a known table
+        var canConnect = await context.Database.CanConnectAsync();
+        log($"Database CanConnect: {canConnect}");
+
+        if (canConnect)
+        {
+            try
+            {
+                // Test if AspNetUsers table exists
+                await context.Database.ExecuteSqlRawAsync("SELECT TOP 1 Id FROM AspNetUsers");
+                log("Tables already exist");
+            }
+            catch
+            {
+                // Tables don't exist - delete and recreate
+                log("Tables missing! Dropping and recreating database...");
+                await context.Database.EnsureDeletedAsync();
+                log("Old database deleted");
+                await context.Database.EnsureCreatedAsync();
+                log("Database recreated with all tables");
+            }
+        }
+        else
+        {
+            await context.Database.EnsureCreatedAsync();
+            log("Database created from scratch");
+        }
+
         await DbInitializer.SeedAsync(scope.ServiceProvider);
         log("Database seeded (admin@solarapp.com / Admin@123456)");
     }
