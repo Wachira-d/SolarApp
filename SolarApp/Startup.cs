@@ -1,4 +1,6 @@
 using FluentValidation;
+using Hangfire;
+using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
@@ -6,7 +8,7 @@ using SolarApp.Models;
 
 namespace SolarApp;
 
-public static class Startup
+public class Startup
 {
     public static void ConfigureServices(WebApplicationBuilder builder)
     {
@@ -62,7 +64,7 @@ public static class Startup
         // ── Validators ──
         builder.Services.AddValidatorsFromAssemblyContaining<Startup>();
 
-        // ── Background jobs (simple classes, no Hangfire yet) ──
+        // ── Background jobs ──
         builder.Services.AddScoped<BackgroundJobs.SolarDataSyncJob>();
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
 
@@ -72,11 +74,11 @@ public static class Startup
     public static void ConfigureHangfire(WebApplicationBuilder builder, string connectionString)
     {
         builder.Services.AddHangfire(config => config
-            .SetDataCompatibilityLevel(Hangfire.CompatibilityLevel.Version_180)
+            .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
             .UseSimpleAssemblyNameTypeSerializer()
             .UseRecommendedSerializerSettings()
             .UseSqlServerStorage(connectionString,
-                new Hangfire.SqlServer.SqlServerStorageOptions
+                new SqlServerStorageOptions
                 {
                     PrepareSchemaIfNecessary = true,
                     CommandBatchMaxTimeout = TimeSpan.FromMinutes(5),
@@ -93,14 +95,14 @@ public static class Startup
 
     public static void ConfigureHangfireDashboard(WebApplication app)
     {
-        app.UseHangfireDashboard("/hangfire", new Hangfire.DashboardOptions
+        app.UseHangfireDashboard("/hangfire", new DashboardOptions
         {
             Authorization = new[] { new BackgroundJobs.HangfireAdminAuthorizationFilter() }
         });
 
-        Hangfire.RecurringJob.AddOrUpdate<BackgroundJobs.SolarDataSyncJob>(
+        RecurringJob.AddOrUpdate<BackgroundJobs.SolarDataSyncJob>(
             "sync-production-data", job => job.ExecuteAsync(), "*/5 * * * *");
-        Hangfire.RecurringJob.AddOrUpdate<BackgroundJobs.SystemHealthMonitorJob>(
+        RecurringJob.AddOrUpdate<BackgroundJobs.SystemHealthMonitorJob>(
             "check-system-health", job => job.ExecuteAsync(), "*/2 * * * *");
     }
 
