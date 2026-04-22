@@ -8,7 +8,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 {
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
 
-    // Core entities
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Partner> Partners => Set<Partner>();
     public DbSet<Installation> Installations => Set<Installation>();
@@ -18,8 +17,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<MaintenanceRecord> MaintenanceRecords => Set<MaintenanceRecord>();
     public DbSet<ServiceTicket> ServiceTickets => Set<ServiceTicket>();
     public DbSet<InverterApiLog> InverterApiLogs => Set<InverterApiLog>();
-
-    // New entities
     public DbSet<WarrantyRecord> WarrantyRecords => Set<WarrantyRecord>();
     public DbSet<CleaningRecord> CleaningRecords => Set<CleaningRecord>();
     public DbSet<InstallationDocument> InstallationDocuments => Set<InstallationDocument>();
@@ -31,6 +28,13 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        // ══════════════════════════════════════════════════════════
+        // SQL Server does NOT allow multiple cascade paths.
+        // All FK relationships use Restrict (no cascade) to avoid
+        // "may cause cycles or multiple cascade paths" errors.
+        // Application code handles deletions explicitly.
+        // ══════════════════════════════════════════════════════════
 
         // ── Customer ──
         builder.Entity<Customer>(entity =>
@@ -67,33 +71,45 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(i => i.Partner)
                 .WithMany(p => p.Installations)
                 .HasForeignKey(i => i.PartnerId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(i => i.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(i => i.CreatedByUserId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(i => i.SiteCode).IsUnique();
             entity.HasIndex(i => i.CustomerId);
             entity.HasIndex(i => i.PartnerId);
             entity.HasIndex(i => i.Status);
-            entity.HasIndex(i => i.InverterBrand);
 
             entity.Property(i => i.SystemCapacityKw).HasPrecision(10, 3);
             entity.Property(i => i.ElectricityRatePerKwh).HasPrecision(10, 4);
             entity.Property(i => i.FeedInTariffRate).HasPrecision(10, 4);
             entity.Property(i => i.ContractValue).HasPrecision(18, 2);
             entity.Property(i => i.BatteryCapacityKwh).HasPrecision(10, 3);
-
             entity.Property(i => i.SiteCode).HasMaxLength(50);
             entity.Property(i => i.SiteName).HasMaxLength(200);
             entity.Property(i => i.Address).HasMaxLength(500);
         });
 
+        // ── Equipment ──
+        builder.Entity<Equipment>(entity =>
+        {
+            entity.HasOne(e => e.Installation)
+                .WithMany(i => i.Equipment)
+                .HasForeignKey(e => e.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // ── EnergyData ──
         builder.Entity<EnergyData>(entity =>
         {
+            entity.HasOne(e => e.Installation)
+                .WithMany(i => i.EnergyData)
+                .HasForeignKey(e => e.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(e => new { e.InstallationId, e.Timestamp, e.Granularity });
             entity.HasIndex(e => e.Timestamp);
 
@@ -110,17 +126,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         // ── SystemAlert ──
         builder.Entity<SystemAlert>(entity =>
         {
+            entity.HasOne(a => a.Installation)
+                .WithMany(i => i.Alerts)
+                .HasForeignKey(a => a.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(a => a.AcknowledgedByUser)
+                .WithMany()
+                .HasForeignKey(a => a.AcknowledgedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(a => new { a.InstallationId, a.OccurredAt });
             entity.HasIndex(a => a.AlertType);
             entity.HasIndex(a => a.IsNotified);
-            entity.HasIndex(a => new { a.ResolvedAt }).HasFilter("[ResolvedAt] IS NULL");
         });
 
         // ── ServiceTicket ──
         builder.Entity<ServiceTicket>(entity =>
         {
-            entity.HasIndex(t => t.TicketNumber).IsUnique();
-            entity.HasIndex(t => t.Status);
+            entity.HasOne(t => t.Installation)
+                .WithMany(i => i.ServiceTickets)
+                .HasForeignKey(t => t.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(t => t.ReportedByUser)
                 .WithMany()
@@ -130,18 +157,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(t => t.AssignedToUser)
                 .WithMany()
                 .HasForeignKey(t => t.AssignedToUserId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasIndex(t => t.TicketNumber).IsUnique();
+            entity.HasIndex(t => t.Status);
             entity.Property(t => t.TicketNumber).HasMaxLength(50);
         });
 
         // ── MaintenanceRecord ──
         builder.Entity<MaintenanceRecord>(entity =>
         {
+            entity.HasOne(m => m.Installation)
+                .WithMany(i => i.MaintenanceRecords)
+                .HasForeignKey(m => m.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(m => m.PerformedByUser)
                 .WithMany()
                 .HasForeignKey(m => m.PerformedByUserId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.Property(m => m.Cost).HasPrecision(12, 2);
         });
@@ -149,6 +183,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         // ── InverterApiLog ──
         builder.Entity<InverterApiLog>(entity =>
         {
+            entity.HasOne(l => l.Installation)
+                .WithMany()
+                .HasForeignKey(l => l.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(l => new { l.InstallationId, l.RequestTime });
             entity.HasIndex(l => l.IsSuccess);
         });
@@ -156,10 +195,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         // ── WarrantyRecord ──
         builder.Entity<WarrantyRecord>(entity =>
         {
+            entity.HasOne(w => w.Installation)
+                .WithMany(i => i.WarrantyRecords)
+                .HasForeignKey(w => w.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(w => w.Equipment)
                 .WithMany()
                 .HasForeignKey(w => w.EquipmentId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(w => new { w.InstallationId, w.WarrantyEndDate });
         });
@@ -167,10 +211,15 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         // ── CleaningRecord ──
         builder.Entity<CleaningRecord>(entity =>
         {
+            entity.HasOne(c => c.Installation)
+                .WithMany(i => i.CleaningRecords)
+                .HasForeignKey(c => c.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(c => c.PerformedByUser)
                 .WithMany()
                 .HasForeignKey(c => c.PerformedByUserId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(c => new { c.InstallationId, c.ScheduledDate });
         });
@@ -178,6 +227,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         // ── InstallationDocument ──
         builder.Entity<InstallationDocument>(entity =>
         {
+            entity.HasOne(d => d.Installation)
+                .WithMany(i => i.Documents)
+                .HasForeignKey(d => d.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(d => d.UploadedByUser)
                 .WithMany()
                 .HasForeignKey(d => d.UploadedByUserId)
@@ -186,34 +240,38 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(d => d.FilePath).HasMaxLength(500);
         });
 
+        // ── ElectricityTariff ──
+        builder.Entity<ElectricityTariff>(entity =>
+        {
+            entity.HasOne(t => t.Installation)
+                .WithMany(i => i.Tariffs)
+                .HasForeignKey(t => t.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.Property(t => t.ImportRatePerKwh).HasPrecision(10, 4);
+            entity.Property(t => t.ExportRatePerKwh).HasPrecision(10, 4);
+            entity.Property(t => t.DemandChargePerKw).HasPrecision(10, 4);
+            entity.HasIndex(t => new { t.InstallationId, t.EffectiveFrom });
+        });
+
         // ── NotificationLog ──
         builder.Entity<NotificationLog>(entity =>
         {
             entity.HasOne(n => n.RecipientUser)
                 .WithMany()
                 .HasForeignKey(n => n.RecipientUserId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(n => new { n.RecipientUserId, n.CreatedAt });
             entity.HasIndex(n => n.Status);
         });
 
-        // ── AuditLog ──
+        // ── AuditLog (no FK) ──
         builder.Entity<AuditLog>(entity =>
         {
             entity.HasIndex(a => a.Timestamp);
             entity.HasIndex(a => new { a.EntityType, a.EntityId });
             entity.HasIndex(a => a.UserId);
-        });
-
-        // ── ElectricityTariff ──
-        builder.Entity<ElectricityTariff>(entity =>
-        {
-            entity.Property(t => t.ImportRatePerKwh).HasPrecision(10, 4);
-            entity.Property(t => t.ExportRatePerKwh).HasPrecision(10, 4);
-            entity.Property(t => t.DemandChargePerKw).HasPrecision(10, 4);
-
-            entity.HasIndex(t => new { t.InstallationId, t.EffectiveFrom });
         });
 
         // ── SystemSetting ──

@@ -125,18 +125,39 @@ public class Startup
         {
             log("DB: Tables missing or incomplete. Rebuilding schema...");
 
-            // Drop everything and recreate
+            // Drop via raw SQL (more reliable than EnsureDeleted)
             try
             {
-                await context.Database.EnsureDeletedAsync();
-                log("DB: Dropped old database");
+                var cs = context.Database.GetConnectionString()!;
+                var csb = new SqlConnectionStringBuilder(cs);
+                var dbName = csb.InitialCatalog;
+                csb.InitialCatalog = "master";
+                using var conn = new SqlConnection(csb.ConnectionString);
+                await conn.OpenAsync();
+                using var dropCmd = conn.CreateCommand();
+                dropCmd.CommandText = $@"
+                    IF EXISTS (SELECT 1 FROM sys.databases WHERE name = @db)
+                    BEGIN
+                        ALTER DATABASE [{dbName}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+                        DROP DATABASE [{dbName}];
+                    END";
+                dropCmd.Parameters.AddWithValue("@db", dbName);
+                await dropCmd.ExecuteNonQueryAsync();
+                log("DB: Dropped old database via SQL");
+
+                // Recreate empty database
+                using var createCmd = conn.CreateCommand();
+                createCmd.CommandText = $"CREATE DATABASE [{dbName}]";
+                await createCmd.ExecuteNonQueryAsync();
+                log("DB: Created fresh database");
             }
             catch (Exception ex)
             {
-                log($"DB: Drop failed (OK if DB was empty): {ex.Message}");
+                log($"DB: Raw drop/create failed: {ex.Message}. Trying EnsureDeleted...");
+                await context.Database.EnsureDeletedAsync();
             }
 
-            // Recreate
+            // Create all tables
             var created = await context.Database.EnsureCreatedAsync();
             log($"DB: EnsureCreated result: {created}");
 
