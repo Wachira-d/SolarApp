@@ -68,34 +68,49 @@ public class DashboardService : IDashboardService
         var avgRate = installations.Any() ? installations.Average(i => i.ElectricityRatePerKwh) : 4.0m;
 
         var last30Days = today.AddDays(-30);
-        var dailyChart = await _context.EnergyData
+        var dailyChartRaw = await _context.EnergyData
             .Where(e => installationIds.Contains(e.InstallationId)
                 && e.Granularity == DataGranularity.Daily
                 && e.Timestamp >= last30Days)
             .GroupBy(e => e.Timestamp.Date)
-            .Select(g => new ChartDataPoint
+            .Select(g => new
             {
-                Label = g.Key.ToString("dd/MM"),
-                Value = g.Sum(e => e.EnergyGenerationKwh),
-                Value2 = g.Sum(e => e.SelfConsumptionKwh)
+                Date = g.Key,
+                Gen = g.Sum(e => e.EnergyGenerationKwh),
+                Self = g.Sum(e => e.SelfConsumptionKwh)
             })
-            .OrderBy(c => c.Label)
+            .OrderBy(g => g.Date)
             .ToListAsync();
 
+        var dailyChart = dailyChartRaw.Select(g => new ChartDataPoint
+        {
+            Label = g.Date.ToString("dd/MM"),
+            Value = g.Gen,
+            Value2 = g.Self
+        }).ToList();
+
         var last12Months = today.AddMonths(-12);
-        var monthlyChart = await _context.EnergyData
+        var monthlyChartRaw = await _context.EnergyData
             .Where(e => installationIds.Contains(e.InstallationId)
                 && e.Granularity == DataGranularity.Daily
                 && e.Timestamp >= last12Months)
             .GroupBy(e => new { e.Timestamp.Year, e.Timestamp.Month })
-            .Select(g => new ChartDataPoint
+            .Select(g => new
             {
-                Label = $"{g.Key.Month:00}/{g.Key.Year}",
-                Value = g.Sum(e => e.EnergyGenerationKwh),
-                Value2 = g.Sum(e => e.GridExportKwh)
+                g.Key.Year,
+                g.Key.Month,
+                Gen = g.Sum(e => e.EnergyGenerationKwh),
+                Export = g.Sum(e => e.GridExportKwh)
             })
-            .OrderBy(c => c.Label)
+            .OrderBy(g => g.Year).ThenBy(g => g.Month)
             .ToListAsync();
+
+        var monthlyChart = monthlyChartRaw.Select(g => new ChartDataPoint
+        {
+            Label = $"{g.Month:00}/{g.Year}",
+            Value = g.Gen,
+            Value2 = g.Export
+        }).ToList();
 
         var summaries = new List<InstallationSummary>();
         foreach (var inst in installations)
