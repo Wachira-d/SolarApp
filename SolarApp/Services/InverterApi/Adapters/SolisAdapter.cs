@@ -10,19 +10,22 @@ namespace SolarApp.Services.InverterApi.Adapters;
 /// <summary>
 /// Solis Cloud API Adapter.
 ///
-/// Auth: HMAC-SHA1 signature using API Key ID + API Secret
-/// Get credentials from: SolisCloud > User Profile > API Management
+/// Mode 1 - Official API (HMAC-SHA1 signature):
+///   ApiKey = API Key ID, ApiSecret = API Key Secret
+///   Get from: SolisCloud > User Profile > API Management
 ///
-/// Credentials mapping:
-///   ApiKey = API Key ID
-///   ApiSecret = API Key Secret
-///   PlantId = Station ID (numeric, e.g. 1298491919450550810)
+/// Mode 2 - Reverse Web Login (unofficial, when ApiKey = "SOLISWEB"):
+///   Username = SolisCloud email, Password = SolisCloud password
+///   Uses the same login flow as the web dashboard.
+///
+/// PlantId = Station ID (numeric, e.g. 1298491919450550810)
 /// </summary>
 public class SolisAdapter : IInverterApiAdapter
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SolisAdapter> _logger;
     private const string BaseUrl = "https://www.soliscloud.com:13333/v1/api";
+    private const string WebBaseUrl = "https://www.soliscloud.com";
 
     public InverterBrand Brand => InverterBrand.Solis;
 
@@ -32,15 +35,40 @@ public class SolisAdapter : IInverterApiAdapter
         _logger = logger;
     }
 
+    private bool IsWebMode(ApiCredentials c) =>
+        string.Equals(c.ApiKey, "SOLISWEB", StringComparison.OrdinalIgnoreCase);
+
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
-        if (string.IsNullOrEmpty(credentials.ApiKey))
-            return (false, "API Key ID is required (get from SolisCloud > User Profile > API Management)");
-        if (string.IsNullOrEmpty(credentials.ApiSecret))
-            return (false, "API Secret is required");
+        if (IsWebMode(credentials))
+        {
+            if (string.IsNullOrEmpty(credentials.Username))
+                return (false, "Username (SolisCloud email) is required for SOLISWEB mode");
+            if (string.IsNullOrEmpty(credentials.Password))
+                return (false, "Password (SolisCloud password) is required for SOLISWEB mode");
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(credentials.ApiKey))
+                return (false, "API Key ID is required (get from SolisCloud > User Profile > API Management)");
+            if (string.IsNullOrEmpty(credentials.ApiSecret))
+                return (false, "API Secret is required");
+        }
 
         try
         {
+            if (IsWebMode(credentials))
+            {
+                var token = await WebLoginAsync(credentials);
+                if (string.IsNullOrEmpty(token))
+                    return (false, "Solis web login failed. Check username/password.");
+
+                var plant = await GetPlantInfoAsync(credentials);
+                return plant != null
+                    ? (true, $"Connected to Solis Cloud (web mode)! Plant: {plant.PlantName}")
+                    : (true, "Solis web login OK but no plant data found. Check Station ID.");
+            }
+
             var body = JsonSerializer.Serialize(new { pageNo = 1, pageSize = 1 });
             var (response, error) = await SendRequestWithDetailAsync(credentials, "/stationList", body);
 
@@ -63,7 +91,7 @@ public class SolisAdapter : IInverterApiAdapter
             if (!json.TryGetProperty("data", out var data))
                 return (false, $"Solis: no 'data' in response. Body: {Truncate(content, 300)}");
 
-            return (true, "Connected to Solis Cloud!");
+            return (true, "Connected to Solis Cloud (API mode)!");
         }
         catch (Exception ex)
         {
@@ -276,6 +304,10 @@ public class SolisAdapter : IInverterApiAdapter
 
     private async Task<JsonElement?> SendAndParseAsync(ApiCredentials credentials, string path, string body)
     {
+        // Route to web mode if SOLISWEB
+        if (IsWebMode(credentials))
+            return await SendWebRequestAsync(credentials, path, body);
+
         var (response, error) = await SendRequestWithDetailAsync(credentials, path, body);
         if (response == null)
         {
@@ -348,6 +380,97 @@ public class SolisAdapter : IInverterApiAdapter
         catch (Exception ex)
         {
             return (null, $"Exception: {ex.Message}");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  SOLISWEB mode: Reverse Web Login (unofficial)
+    // ══════════════════════════════════════════════════════════════
+
+    private string? _webToken;
+
+    private async Task<string?> WebLoginAsync(ApiCredentials credentials)
+    {
+        if (!string.IsNullOrEmpty(_webToken)) return _webToken;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 SolarApp/1.0");
+
+            var response = await client.PostAsJsonAsync($"{WebBaseUrl}/u/login", new
+            {
+                userInfo = credentials.Username,
+                passWord = credentials.Password
+            });
+
+            var body = await response.Content.ReadAsStringAsync();
+            _logger.LogInformation("Solis web login: HTTP {Code}, len={Len}", (int)response.StatusCode, body.Length);
+
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = JsonDocument.Parse(body).RootElement;
+
+            // Try multiple known response structures
+            if (json.TryGetProperty("data", out var data))
+            {
+                _webToken = SafeGetString(data, "token") ?? SafeGetString(data, "csrfToken");
+                if (!string.IsNullOrEmpty(_webToken))
+                {
+                    _logger.LogInformation("Solis web login OK, token obtained");
+                    return _webToken;
+                }
+            }
+
+            // Some versions return token at root
+            _webToken = SafeGetString(json, "token") ?? SafeGetString(json, "csrfToken");
+            if (!string.IsNullOrEmpty(_webToken)) return _webToken;
+
+            _logger.LogWarning("Solis web login: no token found. Response: {Body}", Truncate(body, 300));
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Solis web login failed");
+            return null;
+        }
+    }
+
+    private async Task<JsonElement?> SendWebRequestAsync(ApiCredentials credentials, string path, string body)
+    {
+        try
+        {
+            var token = await WebLoginAsync(credentials);
+            if (string.IsNullOrEmpty(token))
+            {
+                _logger.LogWarning("Solis web: no token, cannot make request");
+                return null;
+            }
+
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("token", token);
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 SolarApp/1.0");
+
+            var response = await client.PostAsync($"{WebBaseUrl}/v2/api{path}",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+
+            var content = await response.Content.ReadAsStringAsync();
+            _logger.LogDebug("Solis web {Path}: HTTP {Code}", path, (int)response.StatusCode);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Solis web {Path}: HTTP {Code}: {Body}", path, (int)response.StatusCode, Truncate(content, 200));
+                return null;
+            }
+
+            return JsonDocument.Parse(content).RootElement;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Solis web {Path} failed", path);
+            return null;
         }
     }
 
