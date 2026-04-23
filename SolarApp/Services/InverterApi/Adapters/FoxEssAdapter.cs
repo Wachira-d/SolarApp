@@ -288,7 +288,9 @@ public class FoxEssAdapter : IInverterApiAdapter
                     DeviceType = GetString(item, "deviceType") ?? "",
                     SerialNumber = GetString(item, "deviceSN"),
                     Model = GetString(item, "productType"),
-                    IsOnline = item.TryGetProperty("status", out var s) && s.GetInt32() == 1
+                    IsOnline = item.TryGetProperty("status", out var s)
+                        && s.ValueKind == JsonValueKind.Number
+                        && s.TryGetInt32(out var sv) && sv == 1
                 });
             }
         }

@@ -266,7 +266,10 @@ public class HuaweiAdapter : IInverterApiAdapter
                         DeviceName = SafeGetString(item, "devName")
                     });
                 }
-                catch { /* skip bad alarm items */ }
+                catch (Exception itemEx)
+                {
+                    _logger.LogWarning(itemEx, "Huawei: skipping malformed alarm item");
+                }
             }
         }
         catch (Exception ex)
@@ -313,7 +316,10 @@ public class HuaweiAdapter : IInverterApiAdapter
                         IsOnline = SafeGetInt(item, "devStatus") == 1
                     });
                 }
-                catch { }
+                catch (Exception itemEx)
+                {
+                    _logger.LogWarning(itemEx, "Huawei: skipping malformed device item");
+                }
             }
         }
         catch (Exception ex)
@@ -362,7 +368,10 @@ public class HuaweiAdapter : IInverterApiAdapter
                     return (null, $"Login failed code={failCode}: {msg}");
                 }
             }
-            catch { }
+            catch (Exception parseEx)
+            {
+                _logger.LogWarning(parseEx, "Huawei: login body not JSON");
+            }
 
             return (null, $"No token in response. Body: {Truncate(body, 300)}");
         }

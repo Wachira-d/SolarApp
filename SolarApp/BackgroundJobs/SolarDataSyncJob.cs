@@ -1,3 +1,4 @@
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
@@ -8,11 +9,9 @@ using SolarApp.Services.InverterApi.Models;
 namespace SolarApp.BackgroundJobs;
 
 /// <summary>
-/// Hangfire recurring job - syncs full data set from all inverter cloud APIs:
-/// 1. Realtime snapshot (every sync)
-/// 2. Daily aggregate (upsert today's record)
-/// 3. Historical daily records (first sync of the day only, backfills last 7 days)
-/// 4. Alarms (last 24 hours)
+/// Hangfire recurring job - syncs full data set from all inverter cloud APIs.
+/// [DisableConcurrentExecution] prevents overlapping runs if previous sync
+/// takes longer than the sync interval. Timeout = 30 min.
 /// </summary>
 public class SolarDataSyncJob
 {
@@ -30,6 +29,7 @@ public class SolarDataSyncJob
         _logger = logger;
     }
 
+    [DisableConcurrentExecution(timeoutInSeconds: 1800)]
     public async Task ExecuteAsync()
     {
         var installations = await _context.Installations

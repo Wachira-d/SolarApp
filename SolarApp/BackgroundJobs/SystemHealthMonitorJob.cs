@@ -1,3 +1,4 @@
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
@@ -30,6 +31,7 @@ public class SystemHealthMonitorJob
         _configuration = configuration;
     }
 
+    [DisableConcurrentExecution(timeoutInSeconds: 600)]
     public async Task ExecuteAsync()
     {
         await CheckSystemHealthAsync();
@@ -174,50 +176,105 @@ public class SystemHealthMonitorJob
             .Where(a => !a.IsNotified)
             .ToListAsync();
 
+        if (pendingAlerts.Count == 0) return;
+
+        // Load alert group ID once (not per alert)
+        var alertGroupId = await _context.SystemSettings
+            .Where(s => s.Key == "Line.AlertGroupId")
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync();
+
+        // Preload partner users (fixes N+1 query)
+        var partnerIds = pendingAlerts
+            .Select(a => a.Installation.PartnerId)
+            .Where(pid => pid.HasValue)
+            .Distinct()
+            .ToList();
+
+        var partnerUsersLookup = new Dictionary<int, List<string>>();
+        if (partnerIds.Count > 0)
+        {
+            var partnerUsers = await _context.Users
+                .Where(u => u.PartnerId != null && partnerIds.Contains(u.PartnerId.Value)
+                    && u.LineUserId != null)
+                .Select(u => new { u.PartnerId, u.LineUserId })
+                .ToListAsync();
+
+            foreach (var pu in partnerUsers)
+            {
+                if (!pu.PartnerId.HasValue || pu.LineUserId == null) continue;
+                if (!partnerUsersLookup.TryGetValue(pu.PartnerId.Value, out var list))
+                    partnerUsersLookup[pu.PartnerId.Value] = list = new();
+                list.Add(pu.LineUserId);
+            }
+        }
+
         foreach (var alert in pendingAlerts)
         {
             var severity = alert.Severity.ToString();
 
-            // 1. Send to Alert Group (if configured)
-            var alertGroupId = await _context.SystemSettings
-                .Where(s => s.Key == "Line.AlertGroupId")
-                .Select(s => s.Value)
-                .FirstOrDefaultAsync();
+            // Defensive: Installation should always be present (Included),
+            // but guard against bad data to prevent killing the loop
+            if (alert.Installation == null)
+            {
+                _logger.LogWarning("Alert {Id} has no Installation, skipping", alert.Id);
+                alert.IsNotified = true;
+                continue;
+            }
 
+            // 1. Send to Alert Group (if configured)
             if (!string.IsNullOrWhiteSpace(alertGroupId))
             {
-                await _lineService.SendFlexAlertAsync(
-                    alertGroupId,
-                    alert.Installation.SiteName,
-                    alert.Title, alert.Message,
-                    severity, alert.RootCauseAnalysis);
-            }
-
-            // 2. Notify customer via LINE
-            if (!string.IsNullOrEmpty(alert.Installation.Customer.LineUserId))
-            {
-                await _lineService.SendFlexAlertAsync(
-                    alert.Installation.Customer.LineUserId,
-                    alert.Installation.SiteName,
-                    alert.Title, alert.Message,
-                    severity, alert.RootCauseAnalysis);
-            }
-
-            // 3. Notify partner users via LINE
-            if (alert.Installation.Partner != null)
-            {
-                var partnerUsers = await _context.Users
-                    .Where(u => u.PartnerId == alert.Installation.PartnerId
-                        && u.LineUserId != null)
-                    .ToListAsync();
-
-                foreach (var pu in partnerUsers)
+                try
                 {
                     await _lineService.SendFlexAlertAsync(
-                        pu.LineUserId!,
+                        alertGroupId,
                         alert.Installation.SiteName,
                         alert.Title, alert.Message,
                         severity, alert.RootCauseAnalysis);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed LINE group notify for alert {Id}", alert.Id);
+                }
+            }
+
+            // 2. Notify customer via LINE (Customer + LineUserId must exist)
+            var customerLineId = alert.Installation.Customer?.LineUserId;
+            if (!string.IsNullOrEmpty(customerLineId))
+            {
+                try
+                {
+                    await _lineService.SendFlexAlertAsync(
+                        customerLineId,
+                        alert.Installation.SiteName,
+                        alert.Title, alert.Message,
+                        severity, alert.RootCauseAnalysis);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed LINE customer notify for alert {Id}", alert.Id);
+                }
+            }
+
+            // 3. Notify partner users via LINE (from preloaded dict, no N+1)
+            if (alert.Installation.PartnerId.HasValue
+                && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var partnerLineIds))
+            {
+                foreach (var lineId in partnerLineIds)
+                {
+                    try
+                    {
+                        await _lineService.SendFlexAlertAsync(
+                            lineId,
+                            alert.Installation.SiteName,
+                            alert.Title, alert.Message,
+                            severity, alert.RootCauseAnalysis);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed LINE partner notify for alert {Id}", alert.Id);
+                    }
                 }
             }
 

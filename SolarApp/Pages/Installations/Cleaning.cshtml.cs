@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 using SolarApp.Services.FileUpload;
 
 namespace SolarApp.Pages.Installations;
@@ -14,11 +15,13 @@ public class CleaningModel : PageModel
 {
     private readonly ApplicationDbContext _context;
     private readonly IFileUploadService _uploader;
+    private readonly IInstallationAccessHelper _access;
 
-    public CleaningModel(ApplicationDbContext context, IFileUploadService uploader)
+    public CleaningModel(ApplicationDbContext context, IFileUploadService uploader, IInstallationAccessHelper access)
     {
         _context = context;
         _uploader = uploader;
+        _access = access;
     }
 
     public Installation Installation { get; set; } = null!;
@@ -42,6 +45,8 @@ public class CleaningModel : PageModel
 
     public async Task<IActionResult> OnGetAsync(int id)
     {
+        if (!await _access.CanAccessAsync(id, User)) return Forbid();
+
         var inst = await _context.Installations
             .Include(i => i.CleaningRecords.OrderByDescending(c => c.ScheduledDate))
             .Include(i => i.Customer)
@@ -57,6 +62,8 @@ public class CleaningModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
+        if (!await _access.CanAccessAsync(Input.InstallationId, User)) return Forbid();
+
         var installation = await _context.Installations.FindAsync(Input.InstallationId);
         if (installation == null) return NotFound();
 
@@ -106,6 +113,7 @@ public class CleaningModel : PageModel
     {
         var record = await _context.CleaningRecords.FindAsync(recordId);
         if (record == null) return NotFound();
+        if (!await _access.CanAccessAsync(record.InstallationId, User)) return Forbid();
 
         var files = kind == "before" ? BeforePhotoFiles : AfterPhotoFiles;
         foreach (var file in files.Where(f => f != null && f.Length > 0))
@@ -127,6 +135,7 @@ public class CleaningModel : PageModel
     {
         var record = await _context.CleaningRecords.FindAsync(recordId);
         if (record == null) return NotFound();
+        if (!await _access.CanAccessAsync(record.InstallationId, User)) return Forbid();
 
         if (kind == "before")
             record.BeforePhotos = _uploader.RemoveFromCsv(record.BeforePhotos, url);

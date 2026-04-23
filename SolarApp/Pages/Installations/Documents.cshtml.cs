@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 
 namespace SolarApp.Pages.Installations;
 
@@ -15,12 +16,14 @@ public class DocumentsModel : PageModel
     private readonly ApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IConfiguration _configuration;
+    private readonly IInstallationAccessHelper _access;
 
-    public DocumentsModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IConfiguration configuration)
+    public DocumentsModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IConfiguration configuration, IInstallationAccessHelper access)
     {
         _context = context;
         _userManager = userManager;
         _configuration = configuration;
+        _access = access;
     }
 
     public Installation Installation { get; set; } = null!;
@@ -40,6 +43,8 @@ public class DocumentsModel : PageModel
 
     public async Task<IActionResult> OnGetAsync(int id)
     {
+        if (!await _access.CanAccessAsync(id, User)) return Forbid();
+
         var inst = await _context.Installations
             .Include(i => i.Documents.OrderByDescending(d => d.CreatedAt))
                 .ThenInclude(d => d.UploadedByUser)
@@ -56,6 +61,8 @@ public class DocumentsModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
+        if (!await _access.CanAccessAsync(Input.InstallationId, User)) return Forbid();
+
         if (Input.File == null || Input.File.Length == 0)
         {
             ModelState.AddModelError("Input.File", "Please select a file");
@@ -103,6 +110,8 @@ public class DocumentsModel : PageModel
     {
         var doc = await _context.InstallationDocuments.FindAsync(documentId);
         if (doc == null) return NotFound();
+
+        if (!await _access.CanAccessAsync(doc.InstallationId, User)) return Forbid();
 
         var installationId = doc.InstallationId;
 

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 
 namespace SolarApp.Pages.Installations;
 
@@ -13,10 +14,12 @@ namespace SolarApp.Pages.Installations;
 public class WarrantyModel : PageModel
 {
     private readonly ApplicationDbContext _context;
+    private readonly IInstallationAccessHelper _access;
 
-    public WarrantyModel(ApplicationDbContext context)
+    public WarrantyModel(ApplicationDbContext context, IInstallationAccessHelper access)
     {
         _context = context;
+        _access = access;
     }
 
     public Installation Installation { get; set; } = null!;
@@ -39,6 +42,8 @@ public class WarrantyModel : PageModel
 
     public async Task<IActionResult> OnGetAsync(int id)
     {
+        if (!await _access.CanAccessAsync(id, User)) return Forbid();
+
         var inst = await _context.Installations
             .Include(i => i.WarrantyRecords.OrderByDescending(w => w.WarrantyEndDate))
                 .ThenInclude(w => w.Equipment)
@@ -57,6 +62,8 @@ public class WarrantyModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
+        if (!await _access.CanAccessAsync(Input.InstallationId, User)) return Forbid();
+
         var inst = await _context.Installations.Include(i => i.Equipment)
             .FirstOrDefaultAsync(i => i.Id == Input.InstallationId);
         if (inst == null) return NotFound();

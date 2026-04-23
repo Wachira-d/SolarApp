@@ -159,7 +159,10 @@ public class DeyeAdapter : IInverterApiAdapter
                         BatteryDischargeKwh = SafeGetNullableDecimal(item, "batteryDischarge")
                     });
                 }
-                catch { }
+                catch (Exception itemEx)
+                {
+                    _logger.LogWarning(itemEx, "Deye: skipping malformed history record");
+                }
             }
         }
         catch (Exception ex)
@@ -208,7 +211,10 @@ public class DeyeAdapter : IInverterApiAdapter
                         DeviceName = SafeGetString(item, "deviceSn")
                     });
                 }
-                catch { }
+                catch (Exception itemEx)
+                {
+                    _logger.LogWarning(itemEx, "Deye: skipping malformed alarm record");
+                }
             }
         }
         catch (Exception ex)
@@ -253,7 +259,10 @@ public class DeyeAdapter : IInverterApiAdapter
                         IsOnline = SafeGetInt(item, "status") == 1
                     });
                 }
-                catch { }
+                catch (Exception itemEx)
+                {
+                    _logger.LogWarning(itemEx, "Deye: skipping malformed device record");
+                }
             }
         }
         catch (Exception ex)

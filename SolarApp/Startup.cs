@@ -50,6 +50,10 @@ public class Startup
         builder.Services.AddScoped<Services.ReportExport.IReportExportService, Services.ReportExport.ReportExportService>();
         builder.Services.AddScoped<Services.FileUpload.IFileUploadService, Services.FileUpload.FileUploadService>();
 
+        builder.Services.AddHttpClient("default", c =>
+        {
+            c.Timeout = TimeSpan.FromSeconds(30);
+        });
         builder.Services.AddHttpClient();
         builder.Services.AddScoped<Services.InverterApi.Adapters.HuaweiAdapter>();
         builder.Services.AddScoped<Services.InverterApi.Adapters.FoxEssAdapter>();
@@ -58,6 +62,7 @@ public class Startup
         builder.Services.AddScoped<Services.InverterApi.Adapters.DeyeAdapter>();
         builder.Services.AddScoped<Services.InverterApi.IInverterApiAdapterFactory, Services.InverterApi.InverterApiAdapterFactory>();
         builder.Services.AddScoped<Services.InverterApi.Common.IAdapterDiagnostics, Services.InverterApi.Common.AdapterDiagnostics>();
+        builder.Services.AddScoped<Services.Authorization.IInstallationAccessHelper, Services.Authorization.InstallationAccessHelper>();
         builder.Services.AddScoped<Services.LineApi.ILineMessagingService, Services.LineApi.LineMessagingService>();
         builder.Services.AddValidatorsFromAssemblyContaining<Startup>();
         builder.Services.AddScoped<BackgroundJobs.SolarDataSyncJob>();

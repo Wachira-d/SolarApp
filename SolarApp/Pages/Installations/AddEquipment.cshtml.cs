@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 
 namespace SolarApp.Pages.Installations;
 
@@ -15,11 +16,13 @@ public class AddEquipmentModel : PageModel
 {
     private readonly ApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IInstallationAccessHelper _access;
 
-    public AddEquipmentModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager)
+    public AddEquipmentModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IInstallationAccessHelper access)
     {
         _context = context;
         _userManager = userManager;
+        _access = access;
     }
 
     [BindProperty]
@@ -60,6 +63,8 @@ public class AddEquipmentModel : PageModel
 
     public async Task<IActionResult> OnGetAsync(int installationId)
     {
+        if (!await _access.CanAccessAsync(installationId, User)) return Forbid();
+
         var installation = await _context.Installations
             .Include(i => i.Customer)
             .FirstOrDefaultAsync(i => i.Id == installationId);
@@ -67,41 +72,19 @@ public class AddEquipmentModel : PageModel
         if (installation == null)
             return NotFound();
 
-        var user = await _userManager.GetUserAsync(User);
-        var roles = await _userManager.GetRolesAsync(user!);
-
-        if (!roles.Contains(UserRoles.Admin))
-        {
-            if (roles.Contains(UserRoles.Partner))
-            {
-                if (user!.PartnerId == null || installation.PartnerId != user.PartnerId)
-                    return Forbid();
-            }
-        }
-
         Installation = installation;
         return Page();
     }
 
     public async Task<IActionResult> OnPostAsync(int installationId)
     {
+        if (!await _access.CanAccessAsync(installationId, User)) return Forbid();
+
         var installation = await _context.Installations
             .FirstOrDefaultAsync(i => i.Id == installationId);
 
         if (installation == null)
             return NotFound();
-
-        var user = await _userManager.GetUserAsync(User);
-        var roles = await _userManager.GetRolesAsync(user!);
-
-        if (!roles.Contains(UserRoles.Admin))
-        {
-            if (roles.Contains(UserRoles.Partner))
-            {
-                if (user!.PartnerId == null || installation.PartnerId != user.PartnerId)
-                    return Forbid();
-            }
-        }
 
         if (!ModelState.IsValid)
         {

@@ -201,7 +201,10 @@ public class SolisAdapter : IInverterApiAdapter
                             SelfConsumptionKwh = SafeGetDecimal(item, "homeLoadEnergy")
                         });
                     }
-                    catch { }
+                    catch (Exception itemEx)
+                    {
+                        _logger.LogWarning(itemEx, "Solis: skipping malformed history record");
+                    }
                 }
             }
         }
@@ -244,7 +247,10 @@ public class SolisAdapter : IInverterApiAdapter
                             DeviceName = SafeGetString(item, "inverterSn") ?? SafeGetString(item, "deviceSn")
                         });
                     }
-                    catch { }
+                    catch (Exception itemEx)
+                    {
+                        _logger.LogWarning(itemEx, "Solis: skipping malformed alarm record");
+                    }
                 }
             }
         }
