@@ -32,10 +32,12 @@ public class LineSettingsModel : PageModel
 
     [BindProperty] public string? ChannelAccessToken { get; set; }
     [BindProperty] public string? ChannelSecret { get; set; }
+    [BindProperty] public string? AlertGroupId { get; set; }
     [BindProperty] public string? TestLineUserId { get; set; }
 
     public bool IsTokenConfigured { get; set; }
     public string TokenSource { get; set; } = "Not set";
+    public string? CurrentAlertGroupId { get; set; }
     public List<NotificationLog> RecentNotifications { get; set; } = new();
 
     [TempData] public string? StatusMessage { get; set; }
@@ -45,11 +47,12 @@ public class LineSettingsModel : PageModel
 
     public async Task OnGetAsync()
     {
-        // Load current token
         var dbToken = await _context.SystemSettings
             .FirstOrDefaultAsync(s => s.Key == "Line.ChannelAccessToken");
         var dbSecret = await _context.SystemSettings
             .FirstOrDefaultAsync(s => s.Key == "Line.ChannelSecret");
+        var dbGroupId = await _context.SystemSettings
+            .FirstOrDefaultAsync(s => s.Key == "Line.AlertGroupId");
 
         if (dbToken != null && !string.IsNullOrWhiteSpace(dbToken.Value))
         {
@@ -71,12 +74,13 @@ public class LineSettingsModel : PageModel
         if (dbSecret != null && !string.IsNullOrWhiteSpace(dbSecret.Value))
             ChannelSecret = MaskToken(dbSecret.Value);
 
-        // Prefill test LINE ID with current user's LINE ID
+        CurrentAlertGroupId = dbGroupId?.Value;
+        AlertGroupId = CurrentAlertGroupId;
+
         var currentUser = await _userManager.GetUserAsync(User);
         if (!string.IsNullOrEmpty(currentUser?.LineUserId))
             TestLineUserId = currentUser.LineUserId;
 
-        // Load recent notifications
         RecentNotifications = await _context.NotificationLogs
             .Where(n => n.Channel == NotificationChannel.Line)
             .OrderByDescending(n => n.CreatedAt)
@@ -86,11 +90,10 @@ public class LineSettingsModel : PageModel
 
     public async Task<IActionResult> OnPostSaveAsync()
     {
-        // Only save if user entered new values (not masked value)
         if (!string.IsNullOrWhiteSpace(ChannelAccessToken) && !IsMasked(ChannelAccessToken))
         {
             await UpsertSettingAsync("Line.ChannelAccessToken", ChannelAccessToken,
-                "LINE Messaging API - Channel Access Token (long-lived)");
+                "LINE Messaging API - Channel Access Token");
         }
 
         if (!string.IsNullOrWhiteSpace(ChannelSecret) && !IsMasked(ChannelSecret))
@@ -99,38 +102,57 @@ public class LineSettingsModel : PageModel
                 "LINE Messaging API - Channel Secret");
         }
 
-        StatusMessage = "LINE settings saved successfully";
+        // Alert Group ID (always save, even if empty = clear)
+        await UpsertSettingAsync("Line.AlertGroupId", AlertGroupId?.Trim() ?? "",
+            "LINE Group ID for system alerts (all alerts sent here)");
+
+        StatusMessage = "LINE settings saved!";
         return RedirectToPage();
     }
 
-    public async Task<IActionResult> OnPostTestAsync()
+    public async Task<IActionResult> OnPostTestUserAsync()
     {
         if (string.IsNullOrWhiteSpace(TestLineUserId))
         {
-            ErrorMessage = "Please enter a LINE User ID to test";
+            ErrorMessage = "Enter a LINE User ID to test";
             return RedirectToPage();
         }
 
-        // If user entered a new token in the form, use that for testing (not saved yet)
         string? overrideToken = null;
         if (!string.IsNullOrWhiteSpace(ChannelAccessToken) && !IsMasked(ChannelAccessToken))
             overrideToken = ChannelAccessToken;
 
         var (success, message) = await _lineService.SendTestMessageAsync(TestLineUserId!, overrideToken);
-
         TestSuccess = success;
-        TestResult = message;
+        TestResult = $"[User] {message}";
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostTestGroupAsync()
+    {
+        if (string.IsNullOrWhiteSpace(AlertGroupId))
+        {
+            ErrorMessage = "Enter a Group ID to test";
+            return RedirectToPage();
+        }
+
+        string? overrideToken = null;
+        if (!string.IsNullOrWhiteSpace(ChannelAccessToken) && !IsMasked(ChannelAccessToken))
+            overrideToken = ChannelAccessToken;
+
+        var (success, message) = await _lineService.SendTestMessageAsync(AlertGroupId!, overrideToken);
+        TestSuccess = success;
+        TestResult = $"[Group] {message}";
         return RedirectToPage();
     }
 
     public async Task<IActionResult> OnPostClearTokenAsync()
     {
-        var token = await _context.SystemSettings.FirstOrDefaultAsync(s => s.Key == "Line.ChannelAccessToken");
-        if (token != null) _context.SystemSettings.Remove(token);
-
-        var secret = await _context.SystemSettings.FirstOrDefaultAsync(s => s.Key == "Line.ChannelSecret");
-        if (secret != null) _context.SystemSettings.Remove(secret);
-
+        foreach (var key in new[] { "Line.ChannelAccessToken", "Line.ChannelSecret", "Line.AlertGroupId" })
+        {
+            var s = await _context.SystemSettings.FirstOrDefaultAsync(x => x.Key == key);
+            if (s != null) _context.SystemSettings.Remove(s);
+        }
         await _context.SaveChangesAsync();
         StatusMessage = "LINE settings cleared";
         return RedirectToPage();
@@ -143,9 +165,7 @@ public class LineSettingsModel : PageModel
         {
             _context.SystemSettings.Add(new SystemSetting
             {
-                Key = key,
-                Value = value,
-                Description = description
+                Key = key, Value = value, Description = description
             });
         }
         else

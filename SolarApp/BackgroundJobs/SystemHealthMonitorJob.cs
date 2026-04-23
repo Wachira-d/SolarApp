@@ -178,7 +178,22 @@ public class SystemHealthMonitorJob
         {
             var severity = alert.Severity.ToString();
 
-            // Notify customer via LINE
+            // 1. Send to Alert Group (if configured)
+            var alertGroupId = await _context.SystemSettings
+                .Where(s => s.Key == "Line.AlertGroupId")
+                .Select(s => s.Value)
+                .FirstOrDefaultAsync();
+
+            if (!string.IsNullOrWhiteSpace(alertGroupId))
+            {
+                await _lineService.SendFlexAlertAsync(
+                    alertGroupId,
+                    alert.Installation.SiteName,
+                    alert.Title, alert.Message,
+                    severity, alert.RootCauseAnalysis);
+            }
+
+            // 2. Notify customer via LINE
             if (!string.IsNullOrEmpty(alert.Installation.Customer.LineUserId))
             {
                 await _lineService.SendFlexAlertAsync(
@@ -188,8 +203,7 @@ public class SystemHealthMonitorJob
                     severity, alert.RootCauseAnalysis);
             }
 
-            // Notify partner via LINE
-            // Find partner users with LINE IDs
+            // 3. Notify partner users via LINE
             if (alert.Installation.Partner != null)
             {
                 var partnerUsers = await _context.Users

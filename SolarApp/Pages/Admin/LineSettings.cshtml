@@ -31,42 +31,53 @@
 
 <!-- Setup Guide -->
 <div class="alert alert-info">
-    <h6><i class="bi bi-info-circle"></i> How to get LINE Messaging credentials</h6>
+    <h6><i class="bi bi-info-circle"></i> วิธีตั้งค่า LINE Messaging API</h6>
     <ol class="mb-0 small">
-        <li>Go to <a href="https://developers.line.biz/console/" target="_blank">LINE Developers Console</a></li>
-        <li>Create a Provider + Channel (select "Messaging API")</li>
-        <li>On Channel Settings, copy <strong>Channel Secret</strong></li>
-        <li>On "Messaging API" tab, click "Issue" under Channel access token (long-lived) → copy <strong>Channel Access Token</strong></li>
-        <li>Each user must add your bot as a LINE friend, then their LINE User ID goes into their profile</li>
+        <li>ไปที่ <a href="https://developers.line.biz/console/" target="_blank">LINE Developers Console</a></li>
+        <li>Create Provider → Create Channel → เลือก <strong>Messaging API</strong></li>
+        <li>ที่ Channel Settings → copy <strong>Channel Secret</strong></li>
+        <li>ที่ Messaging API tab → Issue <strong>Channel access token (long-lived)</strong> → copy</li>
+        <li>เพิ่ม Bot เข้ากลุ่ม LINE → ได้ <strong>Group ID</strong> (ดูจาก webhook event)</li>
+        <li>สำหรับ User ID → ให้ user เพิ่มเพื่อน Bot แล้วดู User ID จาก webhook</li>
     </ol>
 </div>
 
 <div class="row">
-    <!-- Configuration -->
+    <!-- Configuration + Save -->
     <div class="col-md-6">
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <div class="card-header bg-white d-flex justify-content-between">
                 <h6 class="mb-0">Configuration</h6>
                 <span class="badge @(Model.IsTokenConfigured ? "bg-success" : "bg-warning")">
                     @(Model.IsTokenConfigured ? "Configured" : "Not Configured")
                 </span>
             </div>
             <div class="card-body">
-                <p class="small text-muted">Source: @Model.TokenSource</p>
+                <p class="small text-muted mb-3">Source: @Model.TokenSource</p>
 
                 <form method="post" asp-page-handler="Save">
                     <div class="mb-3">
                         <label class="form-label fw-bold">Channel Access Token *</label>
-                        <input asp-for="ChannelAccessToken" class="form-control font-monospace"
-                               placeholder="Leave blank to keep existing" />
-                        <small class="text-muted">Long-lived token from LINE Developers Console</small>
+                        <input asp-for="ChannelAccessToken" class="form-control font-monospace" placeholder="Paste new token (leave blank to keep existing)" />
+                        <small class="text-muted">Long-lived token จาก LINE Developers</small>
                     </div>
 
                     <div class="mb-3">
                         <label class="form-label fw-bold">Channel Secret</label>
-                        <input asp-for="ChannelSecret" class="form-control font-monospace"
-                               placeholder="Leave blank to keep existing" />
-                        <small class="text-muted">For webhook signature verification (future use)</small>
+                        <input asp-for="ChannelSecret" class="form-control font-monospace" placeholder="Paste new secret (leave blank to keep existing)" />
+                    </div>
+
+                    <hr />
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            <i class="bi bi-people-fill text-success"></i> Alert Group ID (แจ้งเตือนไปกลุ่ม LINE)
+                        </label>
+                        <input asp-for="AlertGroupId" class="form-control font-monospace"
+                               placeholder="Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+                        <small class="text-muted">
+                            ทุก Alert จะถูกส่งไปกลุ่มนี้ด้วย (นอกเหนือจากส่งให้ Customer/Partner แต่ละคน)
+                        </small>
                     </div>
 
                     <div class="d-flex gap-2">
@@ -76,8 +87,8 @@
                         @if (Model.IsTokenConfigured && Model.TokenSource.Contains("Database"))
                         {
                             <button type="submit" asp-page-handler="ClearToken" class="btn btn-outline-danger ms-auto"
-                                    onclick="return confirm('Clear LINE settings from database?');">
-                                <i class="bi bi-trash"></i> Clear
+                                    onclick="return confirm('Clear all LINE settings?');">
+                                <i class="bi bi-trash"></i> Clear All
                             </button>
                         }
                     </div>
@@ -89,47 +100,57 @@
     <!-- Test -->
     <div class="col-md-6">
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-send-check"></i> Test Notification</h6></div>
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-send-check"></i> Test Notification</h6>
+            </div>
             <div class="card-body">
-                <p class="small text-muted">
-                    Send a test message to verify your LINE setup works. The recipient must have added your bot as friend.
-                </p>
-
-                <form method="post" asp-page-handler="Test">
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">LINE User ID</label>
+                <!-- Test to User -->
+                <form method="post" asp-page-handler="TestUser" class="mb-4">
+                    <h6 class="text-primary">1. ส่งทดสอบไปที่ User</h6>
+                    <div class="input-group mb-2">
                         <input asp-for="TestLineUserId" class="form-control font-monospace"
                                placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
-                        <small class="text-muted">
-                            Get your LINE User ID from the bot (user needs to send a message to the bot first, then use webhook to capture)
-                            or from <a href="https://access.line.me/dialog/bot/mid/get" target="_blank">LINE Profile</a>
-                        </small>
+                        <button type="submit" class="btn btn-outline-success">
+                            <i class="bi bi-send"></i> Test User
+                        </button>
                     </div>
-
-                    <!-- Use entered token (unsaved) or saved token -->
+                    <small class="text-muted">LINE User ID ของคนที่จะส่งทดสอบ</small>
                     <input type="hidden" asp-for="ChannelAccessToken" />
+                </form>
 
-                    <button type="submit" class="btn btn-success">
-                        <i class="bi bi-send"></i> Send Test Message
-                    </button>
-                    <small class="text-muted ms-2">Uses current form token if entered, else saved token</small>
+                <!-- Test to Group -->
+                <form method="post" asp-page-handler="TestGroup">
+                    <h6 class="text-success">2. ส่งทดสอบไปที่ Group</h6>
+                    <div class="input-group mb-2">
+                        <input asp-for="AlertGroupId" class="form-control font-monospace"
+                               placeholder="Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+                        <button type="submit" class="btn btn-outline-success">
+                            <i class="bi bi-send"></i> Test Group
+                        </button>
+                    </div>
+                    <small class="text-muted">Group ID ที่ต้องการทดสอบ (Bot ต้องอยู่ในกลุ่มแล้ว)</small>
+                    <input type="hidden" asp-for="ChannelAccessToken" />
                 </form>
             </div>
         </div>
 
-        <!-- What gets sent -->
+        <!-- How alerts get sent -->
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white"><h6 class="mb-0">What the system notifies</h6></div>
+            <div class="card-header bg-white"><h6 class="mb-0">ระบบส่งแจ้งเตือนอย่างไร</h6></div>
             <div class="card-body small">
+                <p class="mb-2">เมื่อเกิด Alert ระบบจะส่งไปที่:</p>
+                <ol class="mb-2">
+                    <li><strong>Alert Group ID</strong> (กลุ่ม LINE ที่ตั้งค่าด้านบน) — ทุก alert</li>
+                    <li><strong>Customer</strong> (ถ้ามี LINE User ID ใน Customer profile) — เฉพาะ installation ของตัวเอง</li>
+                    <li><strong>Partner Users</strong> (ถ้ามี LINE User ID ใน User profile) — เฉพาะ installation ที่ดูแล</li>
+                </ol>
+                <p class="mb-2 fw-bold">Alert types:</p>
                 <ul class="mb-0">
-                    <li><strong>System Offline</strong> (Critical) - when inverter stops reporting</li>
-                    <li><strong>Cleaning Due</strong> (Medium) - panel cleaning reminder</li>
-                    <li><strong>Warranty Expiring</strong> (Low) - 90 days before expiry</li>
-                    <li><strong>Error/Warning</strong> - from inverter cloud alarms</li>
+                    <li><span class="badge bg-danger">Critical</span> ระบบ Offline</li>
+                    <li><span class="badge bg-warning text-dark">Medium</span> ล้างแผงครบกำหนด</li>
+                    <li><span class="badge bg-info">Low</span> ประกันใกล้หมด (90 วัน)</li>
+                    <li><span class="badge bg-secondary">Warning</span> Error จาก Inverter Cloud</li>
                 </ul>
-                <p class="mb-0 mt-2 text-muted">
-                    Recipients: Customer (if LINE ID set), all Partner users with LINE ID
-                </p>
             </div>
         </div>
     </div>
@@ -137,17 +158,11 @@
 
 <!-- Notification History -->
 <div class="card border-0 shadow-sm">
-    <div class="card-header bg-white"><h6 class="mb-0">Recent LINE Notifications (Last 20)</h6></div>
+    <div class="card-header bg-white"><h6 class="mb-0">Notification History (Last 20)</h6></div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
+        <table class="table table-hover table-sm mb-0">
             <thead class="table-light">
-                <tr>
-                    <th>Time</th>
-                    <th>Recipient</th>
-                    <th>Title</th>
-                    <th>Status</th>
-                    <th>Error</th>
-                </tr>
+                <tr><th>Time</th><th>Recipient</th><th>Title</th><th>Status</th><th>Error</th></tr>
             </thead>
             <tbody>
                 @foreach (var n in Model.RecentNotifications)
@@ -159,17 +174,22 @@
                         SolarApp.Models.Enums.NotificationStatus.Failed => "bg-danger",
                         _ => "bg-secondary"
                     };
+                    var recipientType = n.RecipientLineId?.StartsWith("C") == true ? "Group" :
+                                       n.RecipientLineId?.StartsWith("U") == true ? "User" : "?";
                     <tr>
-                        <td><small>@n.CreatedAt.ToString("dd/MM HH:mm:ss")</small></td>
-                        <td><code class="small">@(n.RecipientLineId?.Length > 20 ? n.RecipientLineId[..20] + "..." : n.RecipientLineId)</code></td>
+                        <td><small>@n.CreatedAt.ToString("dd/MM HH:mm")</small></td>
+                        <td>
+                            <span class="badge bg-secondary me-1">@recipientType</span>
+                            <code class="small">@(n.RecipientLineId?.Length > 16 ? n.RecipientLineId[..16] + "..." : n.RecipientLineId)</code>
+                        </td>
                         <td>@n.Title</td>
                         <td><span class="badge @statusClass">@n.Status</span></td>
-                        <td><small class="text-danger">@(n.ErrorMessage?.Length > 100 ? n.ErrorMessage[..100] + "..." : n.ErrorMessage)</small></td>
+                        <td><small class="text-danger">@(n.ErrorMessage != null && n.ErrorMessage.Length > 80 ? n.ErrorMessage[..80] + "..." : n.ErrorMessage)</small></td>
                     </tr>
                 }
                 @if (!Model.RecentNotifications.Any())
                 {
-                    <tr><td colspan="5" class="text-center text-muted py-4">No LINE notifications sent yet</td></tr>
+                    <tr><td colspan="5" class="text-center text-muted py-4">No notifications yet</td></tr>
                 }
             </tbody>
         </table>
