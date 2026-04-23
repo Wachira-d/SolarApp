@@ -7,9 +7,14 @@ using SolarApp.Services.InverterApi.Models;
 namespace SolarApp.Services.InverterApi.Adapters;
 
 /// <summary>
-/// Adapter for Deye Cloud API.
-/// Authentication: Username/Password -> Access Token -> Bearer Token
-/// Base URL: https://eu1-developer.deyecloud.com/v1.0/
+/// Deye Cloud API adapter (https://developer.deyecloud.com).
+///
+/// Credentials mapping:
+///   ApiKey    = appId (App ID from Deye developer portal)
+///   ApiSecret = appSecret
+///   Username  = email
+///   Password  = password
+///   PlantId   = Station ID or Device SN
 /// </summary>
 public class DeyeAdapter : IInverterApiAdapter
 {
@@ -27,15 +32,21 @@ public class DeyeAdapter : IInverterApiAdapter
 
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
+        if (string.IsNullOrEmpty(credentials.ApiKey)) return (false, "appId (ApiKey) is required");
+        if (string.IsNullOrEmpty(credentials.ApiSecret)) return (false, "appSecret (ApiSecret) is required");
+        if (string.IsNullOrEmpty(credentials.Username)) return (false, "Email (Username) is required");
+        if (string.IsNullOrEmpty(credentials.Password)) return (false, "Password is required");
+
         try
         {
-            var token = await GetTokenAsync(credentials);
-            var ok = !string.IsNullOrEmpty(token);
-            return (ok, ok ? "Connected to Deye Cloud!" : "Login failed: no token returned");
+            var (token, error) = await GetTokenWithDetailAsync(credentials);
+            return !string.IsNullOrEmpty(token)
+                ? (true, "Connected to Deye Cloud!")
+                : (false, $"Deye login failed: {error}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Deye connection test failed");
+            _logger.LogError(ex, "Deye TestConnection failed");
             return (false, $"Deye error: {ex.Message}");
         }
     }
@@ -49,20 +60,25 @@ public class DeyeAdapter : IInverterApiAdapter
 
             var response = await client.PostAsJsonAsync($"{BaseUrl}/station/latest",
                 new { stationId = credentials.PlantId });
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var data = json.GetProperty("data");
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = await ReadJsonAsync(response);
+            if (json == null) return null;
+
+            if (!json.Value.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object) return null;
 
             return new PlantInfo
             {
                 PlantId = credentials.PlantId ?? "",
-                PlantName = data.TryGetProperty("stationName", out var name) ? name.GetString() ?? "" : "",
-                CapacityKw = GetDecimal(data, "installedCapacity"),
-                Address = data.TryGetProperty("locationAddress", out var addr) ? addr.GetString() : null
+                PlantName = SafeGetString(data, "stationName") ?? "",
+                CapacityKw = SafeGetDecimal(data, "installedCapacity"),
+                Address = SafeGetString(data, "locationAddress")
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Deye plant info");
+            _logger.LogError(ex, "Deye GetPlantInfo failed");
             return null;
         }
     }
@@ -76,22 +92,27 @@ public class DeyeAdapter : IInverterApiAdapter
 
             var response = await client.PostAsJsonAsync($"{BaseUrl}/station/latest",
                 new { stationId = credentials.PlantId });
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var data = json.GetProperty("data");
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = await ReadJsonAsync(response);
+            if (json == null) return null;
+
+            if (!json.Value.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object) return null;
 
             return new RealtimeData
             {
                 Timestamp = DateTime.UtcNow,
-                CurrentPowerKw = GetDecimal(data, "generationPower") / 1000m,
-                TodayEnergyKwh = GetDecimal(data, "generationToday"),
-                TotalEnergyKwh = GetDecimal(data, "generationTotal"),
-                BatterySocPercent = GetNullableDecimal(data, "batterySoc"),
-                IsOnline = data.TryGetProperty("status", out var s) && s.GetInt32() == 1
+                CurrentPowerKw = SafeGetDecimal(data, "generationPower") / 1000m,
+                TodayEnergyKwh = SafeGetDecimal(data, "generationToday"),
+                TotalEnergyKwh = SafeGetDecimal(data, "generationTotal"),
+                BatterySocPercent = SafeGetNullableDecimal(data, "batterySoc"),
+                IsOnline = SafeGetInt(data, "status") == 1
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Deye realtime data");
+            _logger.LogError(ex, "Deye GetRealtimeData failed");
             return null;
         }
     }
@@ -111,28 +132,39 @@ public class DeyeAdapter : IInverterApiAdapter
                     startDay = from.ToString("yyyy-MM-dd"),
                     endDay = to.ToString("yyyy-MM-dd")
                 });
+            if (!response.IsSuccessStatusCode) return records;
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            if (json.TryGetProperty("data", out var data))
+            var json = await ReadJsonAsync(response);
+            if (json == null) return records;
+
+            if (!json.Value.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Array) return records;
+
+            foreach (var item in data.EnumerateArray())
             {
-                foreach (var item in data.EnumerateArray())
+                try
                 {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+                    var dateStr = SafeGetString(item, "date");
+                    if (dateStr == null || !DateTime.TryParse(dateStr, out var date)) continue;
+
                     records.Add(new EnergyRecord
                     {
-                        Timestamp = DateTime.Parse(item.GetProperty("date").GetString() ?? ""),
-                        EnergyGenerationKwh = GetDecimal(item, "generation"),
-                        GridExportKwh = GetDecimal(item, "gridExport"),
-                        GridImportKwh = GetDecimal(item, "gridImport"),
-                        SelfConsumptionKwh = GetDecimal(item, "selfConsumption"),
-                        BatteryChargeKwh = GetNullableDecimal(item, "batteryCharge"),
-                        BatteryDischargeKwh = GetNullableDecimal(item, "batteryDischarge")
+                        Timestamp = date,
+                        EnergyGenerationKwh = SafeGetDecimal(item, "generation"),
+                        GridExportKwh = SafeGetDecimal(item, "gridExport"),
+                        GridImportKwh = SafeGetDecimal(item, "gridImport"),
+                        SelfConsumptionKwh = SafeGetDecimal(item, "selfConsumption"),
+                        BatteryChargeKwh = SafeGetNullableDecimal(item, "batteryCharge"),
+                        BatteryDischargeKwh = SafeGetNullableDecimal(item, "batteryDischarge")
                     });
                 }
+                catch { }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Deye historical data");
+            _logger.LogError(ex, "Deye GetHistoricalData failed");
         }
         return records;
     }
@@ -147,26 +179,41 @@ public class DeyeAdapter : IInverterApiAdapter
 
             var response = await client.PostAsJsonAsync($"{BaseUrl}/device/fault",
                 new { deviceSn = credentials.PlantId, pageNo = 1, pageSize = 100 });
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            if (!response.IsSuccessStatusCode) return alarms;
 
-            if (json.TryGetProperty("data", out var data) && data.TryGetProperty("records", out var records))
+            var json = await ReadJsonAsync(response);
+            if (json == null) return alarms;
+
+            if (!json.Value.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object) return alarms;
+
+            if (!data.TryGetProperty("records", out var records)
+                || records.ValueKind != JsonValueKind.Array) return alarms;
+
+            foreach (var item in records.EnumerateArray())
             {
-                foreach (var item in records.EnumerateArray())
+                try
                 {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+                    var dateStr = SafeGetString(item, "createTime");
+                    var occurred = DateTime.UtcNow;
+                    if (dateStr != null) DateTime.TryParse(dateStr, out occurred);
+
                     alarms.Add(new AlarmRecord
                     {
-                        AlarmId = item.GetProperty("id").GetString() ?? "",
-                        AlarmName = item.GetProperty("message").GetString() ?? "",
-                        Severity = item.TryGetProperty("level", out var lv) ? lv.GetInt32() : 3,
-                        OccurredAt = DateTime.Parse(item.GetProperty("createTime").GetString() ?? ""),
-                        DeviceName = item.TryGetProperty("deviceSn", out var sn) ? sn.GetString() : null
+                        AlarmId = SafeGetString(item, "id") ?? "",
+                        AlarmName = SafeGetString(item, "message") ?? "",
+                        Severity = SafeGetInt(item, "level") ?? 3,
+                        OccurredAt = occurred,
+                        DeviceName = SafeGetString(item, "deviceSn")
                     });
                 }
+                catch { }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Deye alarms");
+            _logger.LogError(ex, "Deye GetAlarms failed");
         }
         return alarms;
     }
@@ -181,26 +228,37 @@ public class DeyeAdapter : IInverterApiAdapter
 
             var response = await client.PostAsJsonAsync($"{BaseUrl}/device/list",
                 new { stationId = credentials.PlantId, pageNo = 1, pageSize = 100 });
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            if (!response.IsSuccessStatusCode) return devices;
 
-            if (json.TryGetProperty("data", out var data) && data.TryGetProperty("records", out var records))
+            var json = await ReadJsonAsync(response);
+            if (json == null) return devices;
+
+            if (!json.Value.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object) return devices;
+
+            if (!data.TryGetProperty("records", out var records)
+                || records.ValueKind != JsonValueKind.Array) return devices;
+
+            foreach (var item in records.EnumerateArray())
             {
-                foreach (var item in records.EnumerateArray())
+                try
                 {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
                     devices.Add(new DeviceInfo
                     {
-                        DeviceId = item.GetProperty("deviceSn").GetString() ?? "",
-                        DeviceName = item.TryGetProperty("deviceName", out var name) ? name.GetString() ?? "" : "",
-                        DeviceType = item.TryGetProperty("deviceType", out var dt) ? dt.GetString() ?? "" : "",
-                        SerialNumber = item.GetProperty("deviceSn").GetString(),
-                        IsOnline = item.TryGetProperty("status", out var s) && s.GetInt32() == 1
+                        DeviceId = SafeGetString(item, "deviceSn") ?? "",
+                        DeviceName = SafeGetString(item, "deviceName") ?? "",
+                        DeviceType = SafeGetString(item, "deviceType") ?? "Inverter",
+                        SerialNumber = SafeGetString(item, "deviceSn"),
+                        IsOnline = SafeGetInt(item, "status") == 1
                     });
                 }
+                catch { }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Deye devices");
+            _logger.LogError(ex, "Deye GetDevices failed");
         }
         return devices;
     }
@@ -208,7 +266,7 @@ public class DeyeAdapter : IInverterApiAdapter
     private async Task<HttpClient?> CreateAuthenticatedClientAsync(ApiCredentials credentials)
     {
         var token = await GetTokenAsync(credentials);
-        if (token == null) return null;
+        if (string.IsNullOrEmpty(token)) return null;
 
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -217,32 +275,108 @@ public class DeyeAdapter : IInverterApiAdapter
 
     private async Task<string?> GetTokenAsync(ApiCredentials credentials)
     {
-        var client = _httpClientFactory.CreateClient();
-        var response = await client.PostAsJsonAsync($"{BaseUrl}/token",
-            new
-            {
-                appId = credentials.ApiKey,
-                appSecret = credentials.ApiSecret,
-                email = credentials.Username,
-                password = credentials.Password
-            });
-
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        if (json.TryGetProperty("data", out var data) && data.TryGetProperty("accessToken", out var token))
-            return token.GetString();
-
-        return null;
+        var (token, _) = await GetTokenWithDetailAsync(credentials);
+        return token;
     }
 
-    private static decimal GetDecimal(JsonElement el, string prop)
+    private async Task<(string? Token, string Error)> GetTokenWithDetailAsync(ApiCredentials credentials)
     {
-        if (el.TryGetProperty(prop, out var val) && val.TryGetDecimal(out var d)) return d;
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/account/token",
+                new
+                {
+                    appId = credentials.ApiKey,
+                    appSecret = credentials.ApiSecret,
+                    email = credentials.Username,
+                    password = credentials.Password
+                });
+
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                return (null, $"HTTP {(int)response.StatusCode}: {Truncate(body, 300)}");
+
+            var json = JsonDocument.Parse(body).RootElement;
+            if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                var token = SafeGetString(data, "accessToken");
+                if (!string.IsNullOrEmpty(token)) return (token, "OK");
+            }
+
+            var msg = SafeGetString(json, "msg") ?? SafeGetString(json, "message") ?? "no token in response";
+            return (null, msg);
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.Message);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  Safe JSON helpers
+    // ══════════════════════════════════════════════════════════════
+
+    private static async Task<JsonElement?> ReadJsonAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(body)) return null;
+            return JsonDocument.Parse(body).RootElement;
+        }
+        catch { return null; }
+    }
+
+    private static string? SafeGetString(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        return v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString(),
+            JsonValueKind.Number => v.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null
+        };
+    }
+
+    private static decimal SafeGetDecimal(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return 0;
+        if (!el.TryGetProperty(prop, out var v)) return 0;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
+        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(),
+            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+            return d2;
         return 0;
     }
 
-    private static decimal? GetNullableDecimal(JsonElement el, string prop)
+    private static decimal? SafeGetNullableDecimal(JsonElement el, string prop)
     {
-        if (el.TryGetProperty(prop, out var val) && val.TryGetDecimal(out var d)) return d;
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
+        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(),
+            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+            return d2;
         return null;
     }
+
+    private static int? SafeGetInt(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), out var n2)) return n2;
+        return null;
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "...";
+
+    // Legacy aliases kept for compatibility
+    private static decimal GetDecimal(JsonElement el, string prop) => SafeGetDecimal(el, prop);
+    private static decimal? GetNullableDecimal(JsonElement el, string prop) => SafeGetNullableDecimal(el, prop);
 }

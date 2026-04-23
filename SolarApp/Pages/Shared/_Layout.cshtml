@@ -6,7 +6,8 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#212529" />
     <title>@ViewData["Title"] - SolarApp</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
@@ -15,87 +16,51 @@
 <body>
     @if (SignInManager.IsSignedIn(User))
     {
+        @* ── Mobile Top Bar (visible < lg) ── *@
+        <nav class="navbar navbar-dark bg-dark d-lg-none sticky-top shadow-sm">
+            <div class="container-fluid">
+                <button class="btn btn-outline-light btn-sm" type="button"
+                        data-bs-toggle="offcanvas" data-bs-target="#mobileSidebar" aria-controls="mobileSidebar">
+                    <i class="bi bi-list fs-5"></i>
+                </button>
+                <span class="navbar-brand mb-0 ms-2">
+                    <i class="bi bi-sun-fill text-warning"></i> SolarApp
+                </span>
+                <span class="ms-auto text-white-50 small d-none d-sm-inline">@ViewData["Title"]</span>
+            </div>
+        </nav>
+
+        @* ── Mobile Sidebar (offcanvas) ── *@
+        <div class="offcanvas offcanvas-start bg-dark text-white d-lg-none" tabindex="-1"
+             id="mobileSidebar" aria-labelledby="mobileSidebarLabel" style="width: 280px;">
+            <div class="offcanvas-header border-bottom border-secondary">
+                <h5 class="offcanvas-title" id="mobileSidebarLabel">
+                    <i class="bi bi-sun-fill text-warning"></i> SolarApp
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+            </div>
+            <div class="offcanvas-body p-0">
+                @await Html.PartialAsync("_SideNav")
+            </div>
+        </div>
+
         <div class="d-flex" id="wrapper">
-            <!-- Sidebar -->
-            <div class="bg-dark text-white" id="sidebar" style="min-width: 250px; min-height: 100vh;">
+            @* ── Desktop Sidebar (visible >= lg) ── *@
+            <aside class="bg-dark text-white d-none d-lg-flex flex-column" id="sidebar">
                 <div class="p-3 border-bottom border-secondary">
                     <h5 class="mb-0"><i class="bi bi-sun-fill text-warning"></i> SolarApp</h5>
-                    <small class="text-muted">Solar Management System</small>
+                    <small class="text-muted">Solar Management</small>
                 </div>
-                <nav class="p-2">
-                    <ul class="nav flex-column">
-                        <li class="nav-item">
-                            <a class="nav-link text-white" asp-page="/Dashboard/Index">
-                                <i class="bi bi-speedometer2 me-2"></i>Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-white" asp-page="/Installations/Index">
-                                <i class="bi bi-house-gear me-2"></i>Installations
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-white" asp-page="/Maintenance/Index">
-                                <i class="bi bi-tools me-2"></i>Maintenance
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-white" asp-page="/ServiceTickets/Index">
-                                <i class="bi bi-ticket-detailed me-2"></i>Service Tickets
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-white" asp-page="/Reports/Index">
-                                <i class="bi bi-bar-chart me-2"></i>Reports
-                            </a>
-                        </li>
-                        @if (User.IsInRole("Admin"))
-                        {
-                            <li class="nav-item mt-3">
-                                <small class="text-muted px-3">ADMIN</small>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-white" asp-page="/Admin/Users">
-                                    <i class="bi bi-people me-2"></i>User Management
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-white" asp-page="/Admin/Alerts">
-                                    <i class="bi bi-bell me-2"></i>All Alerts
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-white" asp-page="/Admin/Schedule">
-                                    <i class="bi bi-clock-history me-2"></i>Sync Schedule
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-white" asp-page="/Admin/LineSettings">
-                                    <i class="bi bi-line me-2"></i>LINE Settings
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-white" asp-page="/Admin/AuditLogs">
-                                    <i class="bi bi-journal-text me-2"></i>Audit Logs
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-white" href="/hangfire" target="_blank">
-                                    <i class="bi bi-gear me-2"></i>Hangfire Dashboard
-                                </a>
-                            </li>
-                        }
-                    </ul>
-                </nav>
-            </div>
+                @await Html.PartialAsync("_SideNav")
+            </aside>
 
-            <!-- Page Content -->
-            <div class="flex-grow-1">
-                <!-- Top Navbar -->
-                <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm">
+            @* ── Main content ── *@
+            <div class="flex-grow-1 min-width-0">
+                @* Top bar for desktop *@
+                <nav class="navbar navbar-expand navbar-light bg-white border-bottom shadow-sm d-none d-lg-flex">
                     <div class="container-fluid">
                         <span class="navbar-text fw-bold">@ViewData["Title"]</span>
-                        <div class="d-flex align-items-center">
+                        <div class="ms-auto d-flex align-items-center">
                             <span class="me-3 text-muted">
                                 <i class="bi bi-person-circle me-1"></i>
                                 @UserManager.GetUserName(User)
@@ -109,7 +74,7 @@
                     </div>
                 </nav>
 
-                <div class="container-fluid p-4">
+                <div class="container-fluid p-3 p-md-4">
                     <main role="main">
                         @RenderBody()
                     </main>
@@ -119,7 +84,7 @@
     }
     else
     {
-        <div class="container">
+        <div class="container py-4">
             <main role="main">
                 @RenderBody()
             </main>
@@ -130,6 +95,15 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
+    <script>
+        // Auto-close offcanvas sidebar on link click (mobile UX)
+        document.querySelectorAll('#mobileSidebar .nav-link').forEach(link => {
+            link.addEventListener('click', () => {
+                const off = bootstrap.Offcanvas.getInstance(document.getElementById('mobileSidebar'));
+                off?.hide();
+            });
+        });
+    </script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

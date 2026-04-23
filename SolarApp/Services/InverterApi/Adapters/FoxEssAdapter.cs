@@ -137,25 +137,31 @@ public class FoxEssAdapter : IInverterApiAdapter
             var device = json.Value.GetProperty("result").EnumerateArray().FirstOrDefault();
             if (device.ValueKind == JsonValueKind.Undefined) return null;
 
-            // Build a dictionary of variable -> value
+            // Build a dictionary of variable -> value (safe against null/wrong-type)
             var values = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-            if (device.TryGetProperty("datas", out var datas))
+            if (device.TryGetProperty("datas", out var datas) && datas.ValueKind == JsonValueKind.Array)
             {
                 foreach (var d in datas.EnumerateArray())
                 {
+                    if (d.ValueKind != JsonValueKind.Object) continue;
                     var name = GetString(d, "variable");
                     if (string.IsNullOrEmpty(name)) continue;
-                    if (d.TryGetProperty("value", out var v) && v.TryGetDecimal(out var dec))
+                    var dec = GetDecimal(d, "value");
+                    if (dec != 0 || (d.TryGetProperty("value", out var vv) && vv.ValueKind == JsonValueKind.Number))
                         values[name] = dec;
                 }
             }
 
             decimal Get(string k) => values.TryGetValue(k, out var v) ? v : 0;
 
+            long? timeMs = null;
+            if (device.TryGetProperty("time", out var t) && t.ValueKind == JsonValueKind.Number && t.TryGetInt64(out var tms))
+                timeMs = tms;
+
             return new RealtimeData
             {
-                Timestamp = device.TryGetProperty("time", out var t) && t.TryGetInt64(out var ms)
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime
+                Timestamp = timeMs.HasValue
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(timeMs.Value).UtcDateTime
                     : DateTime.UtcNow,
                 CurrentPowerKw = Get("pvPower") != 0 ? Get("pvPower") : Get("generationPower"),
                 TodayEnergyKwh = Get("todayYield"),
@@ -207,7 +213,14 @@ public class FoxEssAdapter : IInverterApiAdapter
                     var name = GetString(variable, "variable");
                     if (!variable.TryGetProperty("values", out var vals)) continue;
 
-                    var arr = vals.EnumerateArray().Select(v => v.TryGetDecimal(out var d) ? d : 0).ToArray();
+                    var arr = vals.EnumerateArray().Select(v =>
+                    {
+                        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
+                        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(),
+                            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+                            return d2;
+                        return 0m;
+                    }).ToArray();
                     var target = name switch
                     {
                         "generation" => dayValues,
@@ -416,22 +429,35 @@ public class FoxEssAdapter : IInverterApiAdapter
 
     private static int GetErrno(JsonElement el)
     {
-        if (el.TryGetProperty("errno", out var v) && v.TryGetInt32(out var n)) return n;
+        if (el.ValueKind != JsonValueKind.Object) return -1;
+        if (!el.TryGetProperty("errno", out var v)) return -1;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), out var n2)) return n2;
         return -1;
     }
 
     private static string? GetString(JsonElement el, string prop)
     {
-        if (el.ValueKind == JsonValueKind.Undefined) return null;
-        if (el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String)
-            return v.GetString();
-        return null;
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        return v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString(),
+            JsonValueKind.Number => v.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null
+        };
     }
 
     private static decimal GetDecimal(JsonElement el, string prop)
     {
-        if (el.ValueKind == JsonValueKind.Undefined) return 0;
-        if (el.TryGetProperty(prop, out var v) && v.TryGetDecimal(out var d)) return d;
+        if (el.ValueKind != JsonValueKind.Object) return 0;
+        if (!el.TryGetProperty(prop, out var v)) return 0;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
+        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(),
+            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+            return d2;
         return 0;
     }
 

@@ -1,49 +1,65 @@
+/* ═══════════════════════════════════════════════════════════
+   SolarApp - Mobile-First Responsive Design
+   ═══════════════════════════════════════════════════════════ */
+
 html {
-    font-size: 14px;
+    font-size: 15px;
+    -webkit-tap-highlight-color: transparent;
 }
 
 @media (min-width: 768px) {
-    html {
-        font-size: 16px;
-    }
+    html { font-size: 16px; }
 }
 
 body {
     margin: 0;
     padding: 0;
     background-color: #f5f6fa;
+    overflow-x: hidden;
 }
 
+/* ─── Sidebar ─── */
 #sidebar {
-    transition: all 0.3s;
-    position: fixed;
+    width: 250px;
+    min-width: 250px;
+    min-height: 100vh;
+    position: sticky;
     top: 0;
-    left: 0;
-    bottom: 0;
-    z-index: 100;
     overflow-y: auto;
+    max-height: 100vh;
 }
 
-#sidebar .nav-link {
-    padding: 0.6rem 1rem;
+#wrapper {
+    min-height: 100vh;
+}
+
+.min-width-0 { min-width: 0; }
+
+/* Nav links */
+#sidebar .nav-link,
+#mobileSidebar .nav-link {
+    padding: 0.65rem 1rem;
     border-radius: 0.5rem;
     margin: 2px 8px;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
+    color: rgba(255,255,255,0.85) !important;
+    transition: background-color 0.15s ease, color 0.15s ease;
 }
 
-#sidebar .nav-link:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+#sidebar .nav-link:hover,
+#mobileSidebar .nav-link:hover {
+    background-color: rgba(255,255,255,0.1);
+    color: #fff !important;
 }
 
-#sidebar .nav-link.active {
-    background-color: rgba(255, 193, 7, 0.2);
+#sidebar .nav-link.active,
+#mobileSidebar .nav-link.active {
+    background-color: rgba(255,193,7,0.2);
     color: #ffc107 !important;
+    font-weight: 500;
 }
 
-#wrapper > .flex-grow-1 {
-    margin-left: 250px;
-}
-
+/* ─── Cards ─── */
 .card {
     border-radius: 0.75rem;
 }
@@ -52,22 +68,161 @@ body {
     border-radius: 0.75rem 0.75rem 0 0 !important;
 }
 
+/* ─── Tables ─── */
 .table th {
     font-weight: 600;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     text-transform: uppercase;
     color: #6c757d;
+    letter-spacing: 0.02em;
 }
 
+/* Responsive tables - convert to card view on mobile */
+@media (max-width: 767.98px) {
+    .table-mobile-cards thead { display: none; }
+
+    .table-mobile-cards, .table-mobile-cards tbody,
+    .table-mobile-cards tr, .table-mobile-cards td {
+        display: block;
+        width: 100%;
+    }
+
+    .table-mobile-cards tr {
+        background: #fff;
+        border-radius: 0.5rem;
+        margin-bottom: 0.75rem;
+        padding: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    .table-mobile-cards td {
+        padding: 0.35rem 0;
+        border: none;
+        position: relative;
+        padding-left: 40%;
+        text-align: left;
+    }
+
+    .table-mobile-cards td::before {
+        content: attr(data-label);
+        position: absolute;
+        left: 0;
+        width: 35%;
+        font-weight: 600;
+        color: #6c757d;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+    }
+}
+
+/* ─── Buttons ─── */
 .btn-warning {
     color: #212529;
 }
 
-.badge {
-    font-weight: 500;
+/* Touch-friendly tap target on mobile */
+@media (max-width: 767.98px) {
+    .btn-sm {
+        min-height: 38px;
+        padding: 0.4rem 0.75rem;
+    }
+    .btn:not(.btn-sm):not(.btn-lg) {
+        min-height: 44px;
+    }
+    .form-control, .form-select {
+        min-height: 44px;
+        font-size: 16px; /* prevents iOS zoom on focus */
+    }
+    .btn-group-sm > .btn, .btn-sm {
+        min-height: 34px;
+    }
 }
 
-/* Login page specific */
+/* ─── Forms ─── */
+.form-label {
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
+}
+
+/* ─── Badge ─── */
+.badge {
+    font-weight: 500;
+    padding: 0.4em 0.65em;
+}
+
+/* ─── Dashboard status cards ─── */
+.stat-card {
+    background: #fff;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    transition: transform 0.15s;
+    cursor: pointer;
+}
+
+.stat-card:hover { transform: translateY(-2px); }
+
+/* ─── Login page ─── */
 .card.shadow {
     border-radius: 1rem;
+}
+
+/* ─── Action bar (sticky on mobile) ─── */
+.page-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+@media (max-width: 575.98px) {
+    .page-actions {
+        justify-content: flex-end;
+    }
+    .page-actions .btn {
+        flex: 1 1 auto;
+        min-width: 100px;
+    }
+}
+
+/* ─── Container padding for mobile ─── */
+@media (max-width: 767.98px) {
+    .container-fluid {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }
+    h1, h2 { font-size: 1.5rem; }
+    h3 { font-size: 1.3rem; }
+    h4 { font-size: 1.15rem; }
+    h5 { font-size: 1.05rem; }
+    .display-6 { font-size: 1.75rem; }
+}
+
+/* ─── Scroll shadows on horizontal scroll ─── */
+.table-responsive {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* ─── Toolbars/filters on mobile stack vertically ─── */
+@media (max-width: 575.98px) {
+    .card-header.d-flex {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+}
+
+/* ─── Image thumbnails ─── */
+.img-thumbnail {
+    border-radius: 0.5rem;
+}
+
+/* ─── Alert tweaks ─── */
+.alert {
+    border-radius: 0.5rem;
+}
+
+/* ─── Focus/accessibility ─── */
+.btn:focus, .form-control:focus, .form-select:focus {
+    box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25);
 }

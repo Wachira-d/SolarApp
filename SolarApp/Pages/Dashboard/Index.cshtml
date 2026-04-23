@@ -8,11 +8,11 @@
 <!-- ═══ Partner Filter (Admin only) ═══ -->
 @if (d.Partners.Any())
 {
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h5 class="mb-0">Operations Dashboard</h5>
-        <form method="get" class="d-flex gap-2 align-items-center">
-            <label class="form-label mb-0 text-muted small">Filter by Partner:</label>
-            <select name="PartnerId" class="form-select form-select-sm" style="width:250px" onchange="this.form.submit()">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+        <h5 class="mb-0">Operations</h5>
+        <form method="get" class="d-flex gap-2 align-items-center flex-grow-1 flex-md-grow-0"
+              style="max-width: 350px;">
+            <select name="PartnerId" class="form-select form-select-sm" onchange="this.form.submit()">
                 <option value="">All Partners (@d.TotalInstallations sites)</option>
                 @foreach (var p in d.Partners)
                 {
@@ -24,42 +24,42 @@
 }
 
 <!-- ═══ STATUS OVERVIEW ═══ -->
-<div class="row mb-4 g-3">
-    <div class="col">
+<div class="row mb-4 g-2 g-md-3">
+    <div class="col-6 col-md">
         <div class="card border-0 shadow-sm text-center h-100">
-            <div class="card-body py-3">
+            <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold">@d.TotalInstallations</div>
                 <small class="text-muted">Total Sites</small>
             </div>
         </div>
     </div>
-    <div class="col">
-        <div class="card border-0 shadow-sm text-center h-100 @(d.OnlineCount == d.TotalInstallations ? "border-success" : "")">
-            <div class="card-body py-3">
+    <div class="col-6 col-md">
+        <div class="card border-0 shadow-sm text-center h-100 @(d.OnlineCount == d.TotalInstallations && d.TotalInstallations > 0 ? "border-success" : "")">
+            <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold text-success">@d.OnlineCount</div>
                 <small class="text-muted">Online</small>
             </div>
         </div>
     </div>
-    <div class="col">
+    <div class="col-6 col-md">
         <div class="card border-0 shadow-sm text-center h-100 @(d.OfflineCount > 0 ? "border-danger border-2" : "")">
-            <div class="card-body py-3">
+            <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold @(d.OfflineCount > 0 ? "text-danger" : "text-muted")">@d.OfflineCount</div>
                 <small class="text-muted">Offline</small>
             </div>
         </div>
     </div>
-    <div class="col">
+    <div class="col-6 col-md">
         <div class="card border-0 shadow-sm text-center h-100">
-            <div class="card-body py-3">
+            <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold text-warning">@d.MaintenanceCount</div>
                 <small class="text-muted">Maintenance</small>
             </div>
         </div>
     </div>
-    <div class="col">
+    <div class="col-12 col-md">
         <div class="card border-0 shadow-sm text-center h-100">
-            <div class="card-body py-3">
+            <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold text-info">@d.TotalCapacityKw.ToString("N0")</div>
                 <small class="text-muted">Total kWp</small>
             </div>
@@ -83,49 +83,49 @@
             <div class="row g-0">
                 @if (d.OfflineCount > 0)
                 {
-                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-danger">@d.OfflineCount</div>
                         <small>Offline</small>
                     </div>
                 }
                 @if (d.CriticalAlertCount > 0)
                 {
-                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-danger">@d.CriticalAlertCount</div>
-                        <small>Critical Alerts</small>
+                        <small>Critical</small>
                     </div>
                 }
                 @if (d.HighAlertCount > 0)
                 {
-                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-warning">@d.HighAlertCount</div>
                         <small>High Alerts</small>
                     </div>
                 }
                 @if (d.CleaningDueCount > 0)
                 {
-                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-info">@d.CleaningDueCount</div>
                         <small>Cleaning Due</small>
                     </div>
                 }
                 @if (d.PendingMaintenanceCount > 0)
                 {
-                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-primary">@d.PendingMaintenanceCount</div>
                         <small>Pending MA</small>
                     </div>
                 }
                 @if (d.OpenTicketCount > 0)
                 {
-                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-secondary">@d.OpenTicketCount</div>
                         <small>Open Tickets</small>
                     </div>
                 }
                 @if (d.WarrantyExpiringCount > 0)
                 {
-                    <div class="col-auto p-3 text-center" style="min-width:120px">
+                    <div class="col-6 col-sm-4 col-md-auto border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-info">@d.WarrantyExpiringCount</div>
                         <small>Warranty &lt;90d</small>
                     </div>

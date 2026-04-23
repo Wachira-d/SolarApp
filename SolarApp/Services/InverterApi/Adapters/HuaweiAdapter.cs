@@ -6,9 +6,14 @@ using SolarApp.Services.InverterApi.Models;
 namespace SolarApp.Services.InverterApi.Adapters;
 
 /// <summary>
-/// Adapter for Huawei FusionSolar Northbound API.
-/// Authentication: Username/Password -> Session Token
-/// Base URL: https://{region}.fusionsolar.huawei.com/thirdData/
+/// Huawei FusionSolar Northbound API adapter.
+///
+/// Credentials mapping:
+///   Username = Northbound API username
+///   Password = Northbound API password (systemCode)
+///   PlantId  = Station Code (from FusionSolar console)
+///
+/// Rate limit: ~1 req/min enforced strictly by Huawei.
 /// </summary>
 public class HuaweiAdapter : IInverterApiAdapter
 {
@@ -26,16 +31,40 @@ public class HuaweiAdapter : IInverterApiAdapter
 
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
+        if (string.IsNullOrEmpty(credentials.Username))
+            return (false, "Username (Northbound API user) is required");
+        if (string.IsNullOrEmpty(credentials.Password))
+            return (false, "Password (systemCode) is required");
+
         try
         {
             var client = _httpClientFactory.CreateClient();
-            var token = await LoginAsync(client, credentials);
-            var ok = !string.IsNullOrEmpty(token);
-            return (ok, ok ? "Connected to Huawei FusionSolar!" : "Login failed: no token returned");
+            var (token, loginError) = await LoginWithDetailAsync(client, credentials);
+            if (string.IsNullOrEmpty(token))
+                return (false, $"Huawei login failed: {loginError}");
+
+            // Verify token by listing stations
+            client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationList",
+                new { pageNo = 1, pageSize = 1 });
+            var body = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+                return (false, $"Huawei HTTP {(int)response.StatusCode}: {Truncate(body, 300)}");
+
+            var json = JsonDocument.Parse(body).RootElement;
+            var failCode = SafeGetInt(json, "failCode");
+            if (failCode.HasValue && failCode.Value != 0)
+            {
+                var msg = SafeGetString(json, "message") ?? SafeGetString(json, "data");
+                return (false, $"Huawei error code={failCode}: {msg}");
+            }
+
+            return (true, "Connected to Huawei FusionSolar!");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Huawei FusionSolar connection test failed");
+            _logger.LogError(ex, "Huawei TestConnection failed");
             return (false, $"Huawei error: {ex.Message}");
         }
     }
@@ -51,27 +80,36 @@ public class HuaweiAdapter : IInverterApiAdapter
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationList",
                 new { pageNo = 1, pageSize = 1 });
+            if (!response.IsSuccessStatusCode) return null;
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var station = json.GetProperty("data").GetProperty("list").EnumerateArray().FirstOrDefault();
+            var json = await ReadJsonAsync(response);
+            if (json == null) return null;
+
+            var station = FindFirstArrayItem(json.Value, "data", "list");
+            if (station == null) return null;
 
             return new PlantInfo
             {
-                PlantId = station.GetProperty("stationCode").GetString() ?? "",
-                PlantName = station.GetProperty("stationName").GetString() ?? "",
-                CapacityKw = station.GetProperty("capacity").GetDecimal(),
-                Address = station.TryGetProperty("stationAddr", out var addr) ? addr.GetString() : null
+                PlantId = SafeGetString(station.Value, "stationCode")
+                         ?? SafeGetString(station.Value, "plantCode") ?? "",
+                PlantName = SafeGetString(station.Value, "stationName")
+                           ?? SafeGetString(station.Value, "plantName") ?? "",
+                CapacityKw = SafeGetDecimal(station.Value, "capacity"),
+                Address = SafeGetString(station.Value, "stationAddr")
+                         ?? SafeGetString(station.Value, "plantAddress")
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Huawei plant info");
+            _logger.LogError(ex, "Huawei GetPlantInfo failed");
             return null;
         }
     }
 
     public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
     {
+        if (string.IsNullOrEmpty(credentials.PlantId)) return null;
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -81,30 +119,44 @@ public class HuaweiAdapter : IInverterApiAdapter
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationRealKpi",
                 new { stationCodes = credentials.PlantId });
+            if (!response.IsSuccessStatusCode) return null;
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var data = json.GetProperty("data").EnumerateArray().FirstOrDefault();
-            var kpi = data.GetProperty("dataItemMap");
+            var json = await ReadJsonAsync(response);
+            if (json == null) return null;
+
+            if (!json.Value.TryGetProperty("data", out var dataArr)
+                || dataArr.ValueKind != JsonValueKind.Array) return null;
+
+            var first = dataArr.EnumerateArray().FirstOrDefault();
+            if (first.ValueKind != JsonValueKind.Object) return null;
+
+            if (!first.TryGetProperty("dataItemMap", out var kpi)
+                || kpi.ValueKind != JsonValueKind.Object) return null;
+
+            var health = SafeGetDecimal(kpi, "real_health_state");
 
             return new RealtimeData
             {
                 Timestamp = DateTime.UtcNow,
-                CurrentPowerKw = GetDecimal(kpi, "real_health_state") >= 0 ? GetDecimal(kpi, "day_power") : 0,
-                TodayEnergyKwh = GetDecimal(kpi, "day_power"),
-                TotalEnergyKwh = GetDecimal(kpi, "total_power"),
-                IsOnline = GetDecimal(kpi, "real_health_state") >= 1
+                CurrentPowerKw = SafeGetDecimal(kpi, "day_power"),
+                TodayEnergyKwh = SafeGetDecimal(kpi, "day_power"),
+                TotalEnergyKwh = SafeGetDecimal(kpi, "total_power"),
+                IsOnline = health >= 1
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Huawei realtime data");
+            _logger.LogError(ex, "Huawei GetRealtimeData failed");
             return null;
         }
     }
 
-    public async Task<List<EnergyRecord>> GetHistoricalDataAsync(ApiCredentials credentials, DateTime from, DateTime to)
+    public async Task<List<EnergyRecord>> GetHistoricalDataAsync(
+        ApiCredentials credentials, DateTime from, DateTime to)
     {
         var records = new List<EnergyRecord>();
+        if (string.IsNullOrEmpty(credentials.PlantId)) return records;
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -112,38 +164,67 @@ public class HuaweiAdapter : IInverterApiAdapter
             if (token == null) return records;
 
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
-            var collectTime = new DateTimeOffset(from).ToUnixTimeMilliseconds();
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/getKpiStationHour",
-                new { stationCodes = credentials.PlantId, collectTime });
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-            if (json.TryGetProperty("data", out var dataArr))
+            // Iterate each day in range
+            var cur = from.Date;
+            while (cur <= to.Date)
             {
-                foreach (var item in dataArr.EnumerateArray())
+                try
                 {
-                    var kpi = item.GetProperty("dataItemMap");
-                    records.Add(new EnergyRecord
+                    var collectTime = new DateTimeOffset(cur).ToUnixTimeMilliseconds();
+                    var response = await client.PostAsJsonAsync($"{BaseUrl}/getKpiStationDay",
+                        new { stationCodes = credentials.PlantId, collectTime });
+
+                    if (response.IsSuccessStatusCode)
                     {
-                        Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(
-                            item.GetProperty("collectTime").GetInt64()).DateTime,
-                        EnergyGenerationKwh = GetDecimal(kpi, "inverter_power"),
-                        GridExportKwh = GetDecimal(kpi, "ongrid_power"),
-                        SelfConsumptionKwh = GetDecimal(kpi, "selfuse_power")
-                    });
+                        var json = await ReadJsonAsync(response);
+                        if (json.HasValue
+                            && json.Value.TryGetProperty("data", out var dataArr)
+                            && dataArr.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var item in dataArr.EnumerateArray())
+                            {
+                                if (item.ValueKind != JsonValueKind.Object) continue;
+                                if (!item.TryGetProperty("dataItemMap", out var kpi)
+                                    || kpi.ValueKind != JsonValueKind.Object) continue;
+
+                                var ct = SafeGetLong(item, "collectTime");
+                                if (ct == null) continue;
+
+                                records.Add(new EnergyRecord
+                                {
+                                    Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(ct.Value).UtcDateTime,
+                                    EnergyGenerationKwh = SafeGetDecimal(kpi, "inverter_power"),
+                                    GridExportKwh = SafeGetDecimal(kpi, "ongrid_power"),
+                                    SelfConsumptionKwh = SafeGetDecimal(kpi, "selfuse_power")
+                                });
+                            }
+                        }
+                    }
                 }
+                catch (Exception exDay)
+                {
+                    _logger.LogWarning(exDay, "Huawei day {Date} skipped", cur);
+                }
+
+                cur = cur.AddDays(1);
+                // Huawei rate limit: 1 req/min. Use shorter delay since this is historical
+                await Task.Delay(500);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Huawei historical data");
+            _logger.LogError(ex, "Huawei GetHistoricalData failed");
         }
         return records;
     }
 
-    public async Task<List<AlarmRecord>> GetAlarmsAsync(ApiCredentials credentials, DateTime from, DateTime to)
+    public async Task<List<AlarmRecord>> GetAlarmsAsync(
+        ApiCredentials credentials, DateTime from, DateTime to)
     {
         var alarms = new List<AlarmRecord>();
+        if (string.IsNullOrEmpty(credentials.PlantId)) return alarms;
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -155,28 +236,42 @@ public class HuaweiAdapter : IInverterApiAdapter
             var endTime = new DateTimeOffset(to).ToUnixTimeMilliseconds();
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getAlarmList",
                 new { stationCodes = credentials.PlantId, beginTime, endTime, pageNo = 1, pageSize = 100 });
+            if (!response.IsSuccessStatusCode) return alarms;
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var json = await ReadJsonAsync(response);
+            if (json == null) return alarms;
 
-            if (json.TryGetProperty("data", out var data) && data.TryGetProperty("list", out var list))
+            if (!json.Value.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object) return alarms;
+
+            if (!data.TryGetProperty("list", out var list)
+                || list.ValueKind != JsonValueKind.Array) return alarms;
+
+            foreach (var item in list.EnumerateArray())
             {
-                foreach (var item in list.EnumerateArray())
+                try
                 {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+
+                    var raiseTime = SafeGetLong(item, "raiseTime");
+
                     alarms.Add(new AlarmRecord
                     {
-                        AlarmId = item.GetProperty("alarmId").GetString() ?? "",
-                        AlarmName = item.GetProperty("alarmName").GetString() ?? "",
-                        Severity = item.GetProperty("severity").GetInt32(),
-                        OccurredAt = DateTimeOffset.FromUnixTimeMilliseconds(
-                            item.GetProperty("raiseTime").GetInt64()).DateTime,
-                        DeviceName = item.TryGetProperty("devName", out var dev) ? dev.GetString() : null
+                        AlarmId = SafeGetString(item, "alarmId") ?? "",
+                        AlarmName = SafeGetString(item, "alarmName") ?? "",
+                        Severity = SafeGetInt(item, "severity") ?? 3,
+                        OccurredAt = raiseTime.HasValue
+                            ? DateTimeOffset.FromUnixTimeMilliseconds(raiseTime.Value).UtcDateTime
+                            : DateTime.UtcNow,
+                        DeviceName = SafeGetString(item, "devName")
                     });
                 }
+                catch { /* skip bad alarm items */ }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Huawei alarms");
+            _logger.LogError(ex, "Huawei GetAlarms failed");
         }
         return alarms;
     }
@@ -184,6 +279,8 @@ public class HuaweiAdapter : IInverterApiAdapter
     public async Task<List<DeviceInfo>> GetDevicesAsync(ApiCredentials credentials)
     {
         var devices = new List<DeviceInfo>();
+        if (string.IsNullOrEmpty(credentials.PlantId)) return devices;
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -193,50 +290,169 @@ public class HuaweiAdapter : IInverterApiAdapter
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getDevList",
                 new { stationCodes = credentials.PlantId });
+            if (!response.IsSuccessStatusCode) return devices;
 
-            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var json = await ReadJsonAsync(response);
+            if (json == null) return devices;
 
-            if (json.TryGetProperty("data", out var dataArr))
+            if (!json.Value.TryGetProperty("data", out var dataArr)
+                || dataArr.ValueKind != JsonValueKind.Array) return devices;
+
+            foreach (var item in dataArr.EnumerateArray())
             {
-                foreach (var item in dataArr.EnumerateArray())
+                try
                 {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
+
                     devices.Add(new DeviceInfo
                     {
-                        DeviceId = item.GetProperty("id").GetString() ?? "",
-                        DeviceName = item.GetProperty("devName").GetString() ?? "",
-                        DeviceType = item.GetProperty("devTypeId").GetString() ?? "",
-                        SerialNumber = item.TryGetProperty("esnCode", out var esn) ? esn.GetString() : null,
-                        IsOnline = item.TryGetProperty("devStatus", out var s) && s.GetInt32() == 1
+                        DeviceId = SafeGetString(item, "id") ?? SafeGetString(item, "devDn") ?? "",
+                        DeviceName = SafeGetString(item, "devName") ?? "",
+                        DeviceType = SafeGetString(item, "devTypeId") ?? "",
+                        SerialNumber = SafeGetString(item, "esnCode"),
+                        IsOnline = SafeGetInt(item, "devStatus") == 1
                     });
                 }
+                catch { }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get Huawei devices");
+            _logger.LogError(ex, "Huawei GetDevices failed");
         }
         return devices;
     }
 
+    // ══════════════════════════════════════════════════════════════
+    //  Authentication
+    // ══════════════════════════════════════════════════════════════
+
     private async Task<string?> LoginAsync(HttpClient client, ApiCredentials credentials)
     {
-        var response = await client.PostAsJsonAsync($"{BaseUrl}/login",
-            new { userName = credentials.Username, systemCode = credentials.Password });
+        var (token, _) = await LoginWithDetailAsync(client, credentials);
+        return token;
+    }
 
-        if (response.Headers.TryGetValues("XSRF-TOKEN", out var tokens))
-            return tokens.FirstOrDefault();
+    private async Task<(string? Token, string Error)> LoginWithDetailAsync(HttpClient client, ApiCredentials credentials)
+    {
+        try
+        {
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/login",
+                new { userName = credentials.Username, systemCode = credentials.Password });
 
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        if (json.TryGetProperty("data", out var data) && data.TryGetProperty("token", out var token))
-            return token.GetString();
+            // Token is in XSRF-TOKEN header
+            if (response.Headers.TryGetValues("XSRF-TOKEN", out var tokens))
+            {
+                var token = tokens.FirstOrDefault();
+                if (!string.IsNullOrEmpty(token)) return (token, "OK");
+            }
 
+            // Fallback: check response body
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                return (null, $"HTTP {(int)response.StatusCode}: {Truncate(body, 300)}");
+
+            try
+            {
+                var json = JsonDocument.Parse(body).RootElement;
+                var failCode = SafeGetInt(json, "failCode");
+                if (failCode.HasValue && failCode.Value != 0)
+                {
+                    var msg = SafeGetString(json, "message") ?? SafeGetString(json, "data") ?? "Unknown";
+                    return (null, $"Login failed code={failCode}: {msg}");
+                }
+            }
+            catch { }
+
+            return (null, $"No token in response. Body: {Truncate(body, 300)}");
+        }
+        catch (HttpRequestException ex)
+        {
+            return (null, $"Network error: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return (null, $"Exception: {ex.Message}");
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  Safe JSON helpers (never throw on null/wrong-type)
+    // ══════════════════════════════════════════════════════════════
+
+    private static async Task<JsonElement?> ReadJsonAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            if (string.IsNullOrWhiteSpace(body)) return null;
+            return JsonDocument.Parse(body).RootElement;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static JsonElement? FindFirstArrayItem(JsonElement root, params string[] path)
+    {
+        var cur = root;
+        foreach (var key in path)
+        {
+            if (cur.ValueKind != JsonValueKind.Object) return null;
+            if (!cur.TryGetProperty(key, out var next)) return null;
+            cur = next;
+        }
+        if (cur.ValueKind != JsonValueKind.Array) return null;
+        var first = cur.EnumerateArray().FirstOrDefault();
+        return first.ValueKind == JsonValueKind.Undefined ? null : first;
+    }
+
+    private static string? SafeGetString(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        return v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString(),
+            JsonValueKind.Number => v.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => null
+        };
+    }
+
+    private static decimal SafeGetDecimal(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return 0;
+        if (!el.TryGetProperty(prop, out var v)) return 0;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
+        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(),
+            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+            return d2;
+        return 0;
+    }
+
+    private static int? SafeGetInt(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), out var n2)) return n2;
         return null;
     }
 
-    private static decimal GetDecimal(JsonElement element, string property)
+    private static long? SafeGetLong(JsonElement el, string prop)
     {
-        if (element.TryGetProperty(property, out var val) && val.TryGetDecimal(out var d))
-            return d;
-        return 0;
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.String && long.TryParse(v.GetString(), out var n2)) return n2;
+        return null;
     }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "...";
+
+    private static decimal GetDecimal(JsonElement el, string prop) => SafeGetDecimal(el, prop);
 }
