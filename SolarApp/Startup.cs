@@ -90,10 +90,44 @@ public class Startup
         {
             Authorization = new[] { new BackgroundJobs.HangfireAdminAuthorizationFilter() }
         });
+
+        // Load cron schedules from SystemSettings (fallback to recommended defaults)
+        using var scope = app.Services.CreateScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        var syncCron = GetSetting(ctx, "Schedule.DataSync", "*/15 * * * *");
+        var healthCron = GetSetting(ctx, "Schedule.HealthMonitor", "*/5 * * * *");
+
         RecurringJob.AddOrUpdate<BackgroundJobs.SolarDataSyncJob>(
-            "sync-production-data", job => job.ExecuteAsync(), "*/5 * * * *");
+            "sync-production-data", job => job.ExecuteAsync(), syncCron);
         RecurringJob.AddOrUpdate<BackgroundJobs.SystemHealthMonitorJob>(
-            "check-system-health", job => job.ExecuteAsync(), "*/2 * * * *");
+            "check-system-health", job => job.ExecuteAsync(), healthCron);
+    }
+
+    private static string GetSetting(ApplicationDbContext ctx, string key, string defaultValue)
+    {
+        try
+        {
+            var setting = ctx.SystemSettings.FirstOrDefault(s => s.Key == key);
+            if (setting != null && !string.IsNullOrWhiteSpace(setting.Value))
+                return setting.Value;
+
+            // Seed default if missing
+            ctx.SystemSettings.Add(new Models.SystemSetting
+            {
+                Key = key,
+                Value = defaultValue,
+                Description = key == "Schedule.DataSync"
+                    ? "Cron expression for inverter data sync job"
+                    : "Cron expression for system health monitor job"
+            });
+            ctx.SaveChanges();
+            return defaultValue;
+        }
+        catch
+        {
+            return defaultValue;
+        }
     }
 
     // ══════════════════════════════════════════════════════════════

@@ -1,0 +1,201 @@
+@page
+@model SolarApp.Pages.Admin.ScheduleModel
+@{
+    ViewData["Title"] = "Background Job Schedule";
+}
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle"></i> @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<h4 class="mb-4">Background Job Schedule</h4>
+
+<!-- Recommended Settings Info -->
+<div class="alert alert-info">
+    <h6><i class="bi bi-lightbulb"></i> Recommended Settings</h6>
+    <p class="mb-2">ระบบแนะนำให้ใช้ค่า default เหล่านี้ (เหมาะสมกับ API rate limits ของทุกแบรนด์):</p>
+    <ul class="mb-2">
+        <li><strong>Data Sync: ทุก 15 นาที</strong> (96 ครั้ง/วัน/installation) -- ปลอดภัยกับทุก API</li>
+        <li><strong>Health Monitor: ทุก 5 นาที</strong> -- ไม่เรียก cloud API (เช็คจาก local DB เท่านั้น)</li>
+    </ul>
+    <p class="small mb-0 text-muted">
+        เหตุผล: FOX ESS จำกัด 1,440 ครั้ง/วัน/device | Huawei strict ~1 req/min | Solis แนะนำ batch read
+    </p>
+</div>
+
+<div class="row">
+    <!-- Schedule Configuration -->
+    <div class="col-md-7">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white"><h6 class="mb-0">Configure Schedule</h6></div>
+            <div class="card-body">
+                <form method="post" asp-page-handler="Save">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            <i class="bi bi-cloud-download text-primary"></i> Data Sync (ดึงข้อมูลจาก Cloud)
+                        </label>
+                        <input asp-for="DataSyncCron" class="form-control font-monospace" />
+                        <small class="text-muted">
+                            Cron expression (5 fields: minute hour day month weekday)
+                        </small>
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="DataSyncCron" data-val="*/5 * * * *">ทุก 5 นาที (หนัก)</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary cron-preset"
+                                    data-target="DataSyncCron" data-val="*/15 * * * *">ทุก 15 นาที (แนะนำ)</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="DataSyncCron" data-val="*/30 * * * *">ทุก 30 นาที</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="DataSyncCron" data-val="0 * * * *">ทุก 1 ชั่วโมง</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            <i class="bi bi-heart-pulse text-danger"></i> Health Monitor (ตรวจสอบระบบ)
+                        </label>
+                        <input asp-for="HealthMonitorCron" class="form-control font-monospace" />
+                        <small class="text-muted">
+                            ตรวจ offline, warranty ใกล้หมด, cleaning ครบกำหนด (ไม่เรียก cloud API)
+                        </small>
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="HealthMonitorCron" data-val="*/2 * * * *">ทุก 2 นาที</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary cron-preset"
+                                    data-target="HealthMonitorCron" data-val="*/5 * * * *">ทุก 5 นาที (แนะนำ)</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="HealthMonitorCron" data-val="*/10 * * * *">ทุก 10 นาที</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="HealthMonitorCron" data-val="*/30 * * * *">ทุก 30 นาที</button>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-save"></i> Save Schedule
+                        </button>
+                        <button type="submit" asp-page-handler="ApplyRecommended" class="btn btn-outline-primary">
+                            <i class="bi bi-magic"></i> Apply Recommended
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Cron Guide -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white"><h6 class="mb-0">Cron Expression Guide</h6></div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead class="table-light">
+                            <tr><th>Expression</th><th>Meaning</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td class="font-monospace">* * * * *</td><td>ทุกนาที</td></tr>
+                            <tr><td class="font-monospace">*/5 * * * *</td><td>ทุก 5 นาที</td></tr>
+                            <tr><td class="font-monospace">*/15 * * * *</td><td>ทุก 15 นาที</td></tr>
+                            <tr><td class="font-monospace">0 * * * *</td><td>ทุกชั่วโมง นาทีที่ 0</td></tr>
+                            <tr><td class="font-monospace">0 */2 * * *</td><td>ทุก 2 ชั่วโมง</td></tr>
+                            <tr><td class="font-monospace">0 7 * * *</td><td>ทุกวัน 07:00 น.</td></tr>
+                            <tr><td class="font-monospace">0 0 * * 0</td><td>ทุกวันอาทิตย์ เที่ยงคืน</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="small text-muted mt-2 mb-0">
+                    ฟอร์แมต: <code>นาที(0-59) ชั่วโมง(0-23) วันที่(1-31) เดือน(1-12) วันในสัปดาห์(0-6, 0=อาทิตย์)</code>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Job Status -->
+    <div class="col-md-5">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">Current Jobs</h6>
+                <a href="/hangfire" target="_blank" class="btn btn-sm btn-outline-info">
+                    <i class="bi bi-gear"></i> Hangfire Dashboard
+                </a>
+            </div>
+            <div class="card-body p-0">
+                @if (Model.Jobs.Any())
+                {
+                    @foreach (var j in Model.Jobs)
+                    {
+                        <div class="border-bottom p-3">
+                            <div class="d-flex justify-content-between">
+                                <strong>@j.Id</strong>
+                                <span class="badge bg-@(j.LastJobState == "Succeeded" ? "success" : j.LastJobState == "Failed" ? "danger" : "secondary")">
+                                    @(j.LastJobState ?? "Unknown")
+                                </span>
+                            </div>
+                            <div class="small text-muted mt-1">
+                                <div><strong>Schedule:</strong> <code>@j.Cron</code></div>
+                                <div><strong>Last:</strong> @(j.LastExecution?.ToString("dd/MM HH:mm:ss") ?? "Never")</div>
+                                <div><strong>Next:</strong> @(j.NextExecution?.ToString("dd/MM HH:mm:ss") ?? "Not scheduled")</div>
+                            </div>
+                            <form method="post" asp-page-handler="RunNow" class="mt-2">
+                                <input type="hidden" name="jobId" value="@j.Id" />
+                                <button type="submit" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-play-fill"></i> Run Now
+                                </button>
+                            </form>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="p-3 text-center text-muted">
+                        No jobs registered (Hangfire may still be starting up)
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- What the jobs do -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white"><h6 class="mb-0">What each job does</h6></div>
+            <div class="card-body small">
+                <p class="mb-2"><strong><i class="bi bi-cloud-download text-primary"></i> sync-production-data</strong></p>
+                <ul class="mb-3">
+                    <li>Loop through all active installations</li>
+                    <li>Call cloud API: realtime power, energy, battery SOC</li>
+                    <li>Save to <code>EnergyData</code> table</li>
+                    <li>Update <code>LastOnlineAt</code> + Status</li>
+                    <li>Log every API call to <code>InverterApiLogs</code></li>
+                </ul>
+                <p class="mb-2"><strong><i class="bi bi-heart-pulse text-danger"></i> check-system-health</strong></p>
+                <ul class="mb-0">
+                    <li>Check installations offline &gt; threshold -&gt; create alert</li>
+                    <li>Check cleaning due -&gt; create alert</li>
+                    <li>Check warranty expiring in 90 days -&gt; create alert</li>
+                    <li>Send LINE notifications for new alerts</li>
+                    <li>Auto-resolve alerts when systems come back online</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.querySelectorAll('.cron-preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const target = document.querySelector('[name="' + btn.dataset.target + '"]');
+                if (target) target.value = btn.dataset.val;
+            });
+        });
+    </script>
+}
