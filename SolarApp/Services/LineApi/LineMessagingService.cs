@@ -26,14 +26,76 @@ public class LineMessagingService : ILineMessagingService
         _context = context;
     }
 
+    public async Task<(bool Success, string Message)> SendTestMessageAsync(string lineUserId, string? overrideToken = null)
+    {
+        if (string.IsNullOrEmpty(lineUserId))
+            return (false, "LINE User ID is required");
+
+        var token = overrideToken ?? await GetChannelAccessTokenAsync();
+        if (string.IsNullOrEmpty(token))
+            return (false, "Channel Access Token is not configured");
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var testMsg = $"[SolarApp] Test notification\nTime: {DateTime.Now:dd/MM/yyyy HH:mm:ss}\nIf you see this, LINE integration is working!";
+
+            var payload = new
+            {
+                to = lineUserId,
+                messages = new[] { new { type = "text", text = testMsg } }
+            };
+
+            var response = await client.PostAsJsonAsync(PushUrl, payload);
+            var body = await response.Content.ReadAsStringAsync();
+
+            // Log it
+            _context.NotificationLogs.Add(new NotificationLog
+            {
+                RecipientLineId = lineUserId,
+                Channel = NotificationChannel.Line,
+                Title = "Test message",
+                Message = testMsg,
+                RelatedEntityType = "Test",
+                Status = response.IsSuccessStatusCode ? NotificationStatus.Sent : NotificationStatus.Failed,
+                ErrorMessage = !response.IsSuccessStatusCode ? body : null,
+                SentAt = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+            });
+            await _context.SaveChangesAsync();
+
+            if (response.IsSuccessStatusCode)
+                return (true, $"Test message sent successfully to {lineUserId}");
+
+            return (false, $"LINE API error {(int)response.StatusCode}: {body}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send test LINE message");
+            return (false, $"Exception: {ex.Message}");
+        }
+    }
+
+    private async Task<string?> GetChannelAccessTokenAsync()
+    {
+        // Prefer SystemSettings (configurable via UI); fall back to appsettings
+        var dbSetting = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+            .FirstOrDefaultAsync(_context.SystemSettings, s => s.Key == "Line.ChannelAccessToken");
+        if (dbSetting != null && !string.IsNullOrWhiteSpace(dbSetting.Value))
+            return dbSetting.Value;
+
+        return _configuration["LineMessaging:ChannelAccessToken"];
+    }
+
     public async Task SendMessageAsync(string lineUserId, string message)
     {
         if (string.IsNullOrEmpty(lineUserId)) return;
 
-        var token = _configuration["LineMessaging:ChannelAccessToken"];
+        var token = await GetChannelAccessTokenAsync();
         if (string.IsNullOrEmpty(token))
         {
-            _logger.LogWarning("LINE Channel Access Token is not configured");
+            _logger.LogWarning("LINE Channel Access Token is not configured (check Admin > LINE Settings)");
             return;
         }
 
@@ -81,7 +143,7 @@ public class LineMessagingService : ILineMessagingService
     {
         if (string.IsNullOrEmpty(lineUserId)) return;
 
-        var token = _configuration["LineMessaging:ChannelAccessToken"];
+        var token = await GetChannelAccessTokenAsync();
         if (string.IsNullOrEmpty(token)) return;
 
         var severityColor = severity switch
