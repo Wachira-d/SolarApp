@@ -48,6 +48,7 @@ public class Startup
         builder.Services.AddScoped<Services.Interfaces.IMaintenanceService, Services.Implementations.MaintenanceService>();
         builder.Services.AddScoped<Services.Interfaces.IAlertService, Services.Implementations.AlertService>();
         builder.Services.AddScoped<Services.ReportExport.IReportExportService, Services.ReportExport.ReportExportService>();
+        builder.Services.AddScoped<Services.FileUpload.IFileUploadService, Services.FileUpload.FileUploadService>();
 
         builder.Services.AddHttpClient();
         builder.Services.AddScoped<Services.InverterApi.Adapters.HuaweiAdapter>();
@@ -245,6 +246,20 @@ public class Startup
              Sql: "ALTER TABLE [Equipment] ADD [RatingKw] decimal(10,3) NULL"),
             (Table: "Equipment", Column: "RatingWatts",
              Sql: "ALTER TABLE [Equipment] ADD [RatingWatts] int NULL"),
+
+            // Maintenance: category, location, photos, attachments
+            (Table: "MaintenanceRecords", Column: "Category",
+             Sql: "ALTER TABLE [MaintenanceRecords] ADD [Category] nvarchar(100) NULL"),
+            (Table: "MaintenanceRecords", Column: "Location",
+             Sql: "ALTER TABLE [MaintenanceRecords] ADD [Location] nvarchar(200) NULL"),
+            (Table: "MaintenanceRecords", Column: "AttachmentUrls",
+             Sql: "ALTER TABLE [MaintenanceRecords] ADD [AttachmentUrls] nvarchar(max) NULL"),
+
+            // Cleaning: multi-photo support
+            (Table: "CleaningRecords", Column: "BeforePhotos",
+             Sql: "ALTER TABLE [CleaningRecords] ADD [BeforePhotos] nvarchar(max) NULL"),
+            (Table: "CleaningRecords", Column: "AfterPhotos",
+             Sql: "ALTER TABLE [CleaningRecords] ADD [AfterPhotos] nvarchar(max) NULL"),
         };
 
         foreach (var (table, column, sql) in upgrades)

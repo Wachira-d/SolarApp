@@ -8,8 +8,11 @@ using SolarApp.Services.InverterApi.Models;
 namespace SolarApp.BackgroundJobs;
 
 /// <summary>
-/// Hangfire recurring job: syncs energy data from all inverter cloud APIs.
-/// Scheduled: every 5 minutes.
+/// Hangfire recurring job - syncs full data set from all inverter cloud APIs:
+/// 1. Realtime snapshot (every sync)
+/// 2. Daily aggregate (upsert today's record)
+/// 3. Historical daily records (first sync of the day only, backfills last 7 days)
+/// 4. Alarms (last 24 hours)
 /// </summary>
 public class SolarDataSyncJob
 {
@@ -33,7 +36,11 @@ public class SolarDataSyncJob
             .Where(i => i.Status != InstallationStatus.Inactive && i.PlantId != null)
             .ToListAsync();
 
-        _logger.LogInformation("Starting data sync for {Count} installations", installations.Count);
+        _logger.LogInformation("Solar data sync: starting for {Count} installations", installations.Count);
+
+        var totalRealtime = 0;
+        var totalDaily = 0;
+        var totalAlarms = 0;
 
         foreach (var installation in installations)
         {
@@ -49,59 +56,173 @@ public class SolarDataSyncJob
                     PlantId = installation.PlantId
                 };
 
-                var realtimeData = await adapter.GetRealtimeDataAsync(credentials);
-                if (realtimeData != null)
+                // ─── 1. Realtime snapshot ───
+                var realtime = await adapter.GetRealtimeDataAsync(credentials);
+                if (realtime == null)
                 {
-                    installation.LastOnlineAt = realtimeData.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
+                    LogApiCall(installation, "GetRealtimeData", 500, false, "No data returned");
+                    await _context.SaveChangesAsync();
+                    continue;
+                }
 
-                    if (realtimeData.IsOnline && installation.Status == InstallationStatus.Offline)
-                        installation.Status = InstallationStatus.Active;
+                _context.EnergyData.Add(new EnergyData
+                {
+                    InstallationId = installation.Id,
+                    Timestamp = DateTime.UtcNow,
+                    Granularity = DataGranularity.Realtime,
+                    PowerGenerationKw = realtime.CurrentPowerKw,
+                    EnergyGenerationKwh = realtime.TodayEnergyKwh,
+                    GridExportKwh = realtime.GridExportKw ?? 0,
+                    GridImportKwh = realtime.GridImportKw ?? 0,
+                    SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - (realtime.GridExportKw ?? 0)),
+                    BatterySocPercent = realtime.BatterySocPercent
+                });
+                totalRealtime++;
 
+                LogApiCall(installation, "GetRealtimeData", 200, true);
+
+                installation.LastOnlineAt = realtime.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
+                if (realtime.IsOnline && installation.Status == InstallationStatus.Offline)
+                    installation.Status = InstallationStatus.Active;
+
+                // ─── 2. Daily aggregate (upsert today) ───
+                var today = DateTime.UtcNow.Date;
+                var todayRecord = await _context.EnergyData.FirstOrDefaultAsync(e =>
+                    e.InstallationId == installation.Id
+                    && e.Granularity == DataGranularity.Daily
+                    && e.Timestamp.Date == today);
+
+                if (todayRecord == null)
+                {
                     _context.EnergyData.Add(new EnergyData
                     {
                         InstallationId = installation.Id,
-                        Timestamp = DateTime.UtcNow,
-                        Granularity = DataGranularity.Realtime,
-                        PowerGenerationKw = realtimeData.CurrentPowerKw,
-                        EnergyGenerationKwh = realtimeData.TodayEnergyKwh,
-                        GridExportKwh = realtimeData.GridExportKw ?? 0,
-                        GridImportKwh = realtimeData.GridImportKw ?? 0,
-                        BatterySocPercent = realtimeData.BatterySocPercent
+                        Timestamp = today,
+                        Granularity = DataGranularity.Daily,
+                        EnergyGenerationKwh = realtime.TodayEnergyKwh,
+                        GridExportKwh = realtime.GridExportKw ?? 0,
+                        GridImportKwh = realtime.GridImportKw ?? 0,
+                        SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - (realtime.GridExportKw ?? 0)),
+                        BatterySocPercent = realtime.BatterySocPercent
                     });
+                    totalDaily++;
+                }
+                else
+                {
+                    todayRecord.EnergyGenerationKwh = realtime.TodayEnergyKwh;
+                    if (realtime.GridExportKw.HasValue) todayRecord.GridExportKwh = realtime.GridExportKw.Value;
+                    if (realtime.GridImportKw.HasValue) todayRecord.GridImportKwh = realtime.GridImportKw.Value;
+                    todayRecord.SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - todayRecord.GridExportKwh);
+                    todayRecord.BatterySocPercent = realtime.BatterySocPercent;
+                }
 
-                    _context.InverterApiLogs.Add(new InverterApiLog
+                // ─── 3. Historical backfill (only once per day) ───
+                var hasYesterday = await _context.EnergyData.AnyAsync(e =>
+                    e.InstallationId == installation.Id
+                    && e.Granularity == DataGranularity.Daily
+                    && e.Timestamp.Date == today.AddDays(-1));
+
+                if (!hasYesterday)
+                {
+                    var historical = await adapter.GetHistoricalDataAsync(credentials,
+                        today.AddDays(-7), today.AddDays(-1));
+
+                    foreach (var h in historical)
                     {
-                        InstallationId = installation.Id,
-                        ApiProvider = installation.InverterBrand.ToString(),
-                        Endpoint = "GetRealtimeData",
-                        ResponseStatusCode = 200,
-                        IsSuccess = true,
-                        RequestTime = DateTime.UtcNow
-                    });
+                        var exists = await _context.EnergyData.AnyAsync(e =>
+                            e.InstallationId == installation.Id
+                            && e.Granularity == DataGranularity.Daily
+                            && e.Timestamp.Date == h.Timestamp.Date);
+
+                        if (!exists)
+                        {
+                            _context.EnergyData.Add(new EnergyData
+                            {
+                                InstallationId = installation.Id,
+                                Timestamp = h.Timestamp.Date,
+                                Granularity = DataGranularity.Daily,
+                                EnergyGenerationKwh = h.EnergyGenerationKwh,
+                                GridExportKwh = h.GridExportKwh,
+                                GridImportKwh = h.GridImportKwh,
+                                SelfConsumptionKwh = h.SelfConsumptionKwh,
+                                BatteryChargeKwh = h.BatteryChargeKwh,
+                                BatteryDischargeKwh = h.BatteryDischargeKwh
+                            });
+                            totalDaily++;
+                        }
+                    }
+                }
+
+                // ─── 4. Alarms (last 24 hours) ───
+                try
+                {
+                    var alarms = await adapter.GetAlarmsAsync(credentials,
+                        DateTime.UtcNow.AddHours(-24), DateTime.UtcNow);
+
+                    foreach (var a in alarms)
+                    {
+                        var exists = await _context.SystemAlerts.AnyAsync(x =>
+                            x.InstallationId == installation.Id
+                            && x.Title == a.AlarmName
+                            && x.OccurredAt == a.OccurredAt);
+
+                        if (!exists)
+                        {
+                            _context.SystemAlerts.Add(new SystemAlert
+                            {
+                                InstallationId = installation.Id,
+                                AlertType = AlertType.Error,
+                                Severity = a.Severity switch
+                                {
+                                    1 => AlertSeverity.Critical,
+                                    2 => AlertSeverity.High,
+                                    3 => AlertSeverity.Medium,
+                                    _ => AlertSeverity.Low
+                                },
+                                Title = a.AlarmName,
+                                Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
+                                OccurredAt = a.OccurredAt,
+                                ResolvedAt = a.ClearedAt,
+                                IsNotified = false
+                            });
+                            totalAlarms++;
+                        }
+                    }
+                }
+                catch (Exception alarmEx)
+                {
+                    // Alarms are non-critical, don't fail the whole sync
+                    _logger.LogWarning(alarmEx, "Failed to fetch alarms for installation {Id}", installation.Id);
                 }
 
                 await _context.SaveChangesAsync();
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to sync installation {Id} ({Brand})",
+                _logger.LogError(ex, "Sync failed for installation {Id} ({Brand})",
                     installation.Id, installation.InverterBrand);
 
-                _context.InverterApiLogs.Add(new InverterApiLog
-                {
-                    InstallationId = installation.Id,
-                    ApiProvider = installation.InverterBrand.ToString(),
-                    Endpoint = "GetRealtimeData",
-                    ResponseStatusCode = 500,
-                    IsSuccess = false,
-                    ErrorMessage = ex.Message,
-                    RequestTime = DateTime.UtcNow
-                });
-
+                LogApiCall(installation, "GetRealtimeData", 500, false, ex.Message);
                 await _context.SaveChangesAsync();
             }
         }
 
-        _logger.LogInformation("Data sync completed for {Count} installations", installations.Count);
+        _logger.LogInformation(
+            "Sync complete: {Installations} installations, {Realtime} realtime, {Daily} daily, {Alarms} alarms",
+            installations.Count, totalRealtime, totalDaily, totalAlarms);
+    }
+
+    private void LogApiCall(Installation installation, string endpoint, int statusCode, bool success, string? error = null)
+    {
+        _context.InverterApiLogs.Add(new InverterApiLog
+        {
+            InstallationId = installation.Id,
+            ApiProvider = installation.InverterBrand.ToString(),
+            Endpoint = endpoint,
+            ResponseStatusCode = statusCode,
+            IsSuccess = success,
+            ErrorMessage = error,
+            RequestTime = DateTime.UtcNow
+        });
     }
 }

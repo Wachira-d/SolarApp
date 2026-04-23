@@ -5,17 +5,20 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.FileUpload;
 
 namespace SolarApp.Pages.Installations;
 
-[Authorize(Roles = "Admin,Partner")]
+[Authorize]
 public class CleaningModel : PageModel
 {
     private readonly ApplicationDbContext _context;
+    private readonly IFileUploadService _uploader;
 
-    public CleaningModel(ApplicationDbContext context)
+    public CleaningModel(ApplicationDbContext context, IFileUploadService uploader)
     {
         _context = context;
+        _uploader = uploader;
     }
 
     public Installation Installation { get; set; } = null!;
@@ -23,6 +26,9 @@ public class CleaningModel : PageModel
 
     [BindProperty]
     public CleaningInput Input { get; set; } = new();
+
+    [BindProperty] public List<IFormFile> BeforePhotoFiles { get; set; } = new();
+    [BindProperty] public List<IFormFile> AfterPhotoFiles { get; set; } = new();
 
     public class CleaningInput
     {
@@ -78,10 +84,58 @@ public class CleaningModel : PageModel
             installation.UpdatedAt = DateTime.UtcNow;
         }
 
+        // Upload photos
+        foreach (var file in BeforePhotoFiles.Where(f => f != null && f.Length > 0))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, "cleaning-before", Input.InstallationId);
+            if (ok) record.BeforePhotos = _uploader.AddToCsv(record.BeforePhotos, url);
+        }
+        foreach (var file in AfterPhotoFiles.Where(f => f != null && f.Length > 0))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, "cleaning-after", Input.InstallationId);
+            if (ok) record.AfterPhotos = _uploader.AddToCsv(record.AfterPhotos, url);
+        }
+
         _context.CleaningRecords.Add(record);
         await _context.SaveChangesAsync();
 
         return RedirectToPage("Cleaning", new { id = Input.InstallationId });
+    }
+
+    public async Task<IActionResult> OnPostAddPhotoAsync(int recordId, string kind)
+    {
+        var record = await _context.CleaningRecords.FindAsync(recordId);
+        if (record == null) return NotFound();
+
+        var files = kind == "before" ? BeforePhotoFiles : AfterPhotoFiles;
+        foreach (var file in files.Where(f => f != null && f.Length > 0))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, $"cleaning-{kind}", record.InstallationId);
+            if (ok)
+            {
+                if (kind == "before")
+                    record.BeforePhotos = _uploader.AddToCsv(record.BeforePhotos, url);
+                else
+                    record.AfterPhotos = _uploader.AddToCsv(record.AfterPhotos, url);
+            }
+        }
+        await _context.SaveChangesAsync();
+        return RedirectToPage("Cleaning", new { id = record.InstallationId });
+    }
+
+    public async Task<IActionResult> OnPostRemovePhotoAsync(int recordId, string url, string kind)
+    {
+        var record = await _context.CleaningRecords.FindAsync(recordId);
+        if (record == null) return NotFound();
+
+        if (kind == "before")
+            record.BeforePhotos = _uploader.RemoveFromCsv(record.BeforePhotos, url);
+        else
+            record.AfterPhotos = _uploader.RemoveFromCsv(record.AfterPhotos, url);
+
+        _uploader.Delete(url);
+        await _context.SaveChangesAsync();
+        return RedirectToPage("Cleaning", new { id = record.InstallationId });
     }
 
     public async Task<IActionResult> OnPostCompleteAsync(int recordId)

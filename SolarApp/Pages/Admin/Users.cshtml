@@ -164,6 +164,22 @@
                                                     data-bs-toggle="modal" data-bs-target="#editCustomerModal">
                                                 <i class="bi bi-pencil"></i>
                                             </button>
+                                            @if (string.IsNullOrEmpty(c.UserId) && !string.IsNullOrEmpty(c.Email))
+                                            {
+                                                <form method="post" asp-page-handler="InviteCustomer" class="d-inline"
+                                                      onsubmit="return confirm('Create login account for @c.FullName (@c.Email)?');">
+                                                    <input type="hidden" name="customerId" value="@c.Id" />
+                                                    <button type="submit" class="btn btn-outline-success" title="Create login account">
+                                                        <i class="bi bi-person-plus"></i>
+                                                    </button>
+                                                </form>
+                                            }
+                                            else if (!string.IsNullOrEmpty(c.UserId))
+                                            {
+                                                <button type="button" class="btn btn-outline-secondary" disabled title="Login account linked">
+                                                    <i class="bi bi-check-circle"></i>
+                                                </button>
+                                            }
                                             <form method="post" asp-page-handler="DeleteCustomer" class="d-inline"
                                                   onsubmit="return confirm('Delete customer @c.FullName?');">
                                                 <input type="hidden" name="customerId" value="@c.Id" />
@@ -235,6 +251,25 @@
                                                     data-bs-toggle="modal" data-bs-target="#editPartnerModal">
                                                 <i class="bi bi-pencil"></i>
                                             </button>
+                                            @{
+                                                var hasPartnerUser = Model.Users.Any(u => u.PartnerId == p.Id);
+                                            }
+                                            @if (!hasPartnerUser && !string.IsNullOrEmpty(p.ContactEmail))
+                                            {
+                                                <form method="post" asp-page-handler="InvitePartner" class="d-inline"
+                                                      onsubmit="return confirm('Create login account for partner @p.CompanyName (@p.ContactEmail)?');">
+                                                    <input type="hidden" name="partnerId" value="@p.Id" />
+                                                    <button type="submit" class="btn btn-outline-success" title="Create login account">
+                                                        <i class="bi bi-person-plus"></i>
+                                                    </button>
+                                                </form>
+                                            }
+                                            else if (hasPartnerUser)
+                                            {
+                                                <button type="button" class="btn btn-outline-secondary" disabled title="Partner user(s) linked">
+                                                    <i class="bi bi-check-circle"></i>
+                                                </button>
+                                            }
                                             <form method="post" asp-page-handler="DeletePartner" class="d-inline"
                                                   onsubmit="return confirm('Delete partner @p.CompanyName?');">
                                                 <input type="hidden" name="partnerId" value="@p.Id" />

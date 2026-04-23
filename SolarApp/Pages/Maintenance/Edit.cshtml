@@ -24,7 +24,7 @@
     <div class="col-md-8">
         <div class="card border-0 shadow-sm">
             <div class="card-body">
-                <form method="post">
+                <form method="post" enctype="multipart/form-data">
                     <input type="hidden" asp-for="Input.Id" />
 
                     <div class="row">
@@ -35,6 +35,28 @@
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Status</label>
                             <select asp-for="Input.Status" asp-items="Html.GetEnumSelectList<MaintenanceStatus>()" class="form-select"></select>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Category</label>
+                            <input asp-for="Input.Category" class="form-control" list="categoryList"
+                                   placeholder="e.g. Inverter Issue, Grid Connection" />
+                            <datalist id="categoryList">
+                                <option value="Inverter Issue" />
+                                <option value="Panel Cleaning" />
+                                <option value="Panel Damage" />
+                                <option value="Grid Connection" />
+                                <option value="Wiring" />
+                                <option value="Battery Issue" />
+                                <option value="Monitoring System" />
+                                <option value="Routine Inspection" />
+                            </datalist>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Location</label>
+                            <input asp-for="Input.Location" class="form-control" placeholder="e.g. Roof - East section" />
                         </div>
                     </div>
 
@@ -64,6 +86,92 @@
                             <option value="">-- Not assigned --</option>
                         </select>
                     </div>
+
+                    <hr />
+                    <h6 class="mb-3"><i class="bi bi-camera"></i> Photos & Attachments</h6>
+
+                    <!-- Before Photos -->
+                    <div class="mb-3">
+                        <label class="form-label">Before Photos</label>
+                        @if (Model.Record.BeforePhotoList.Any())
+                        {
+                            <div class="d-flex flex-wrap gap-2 mb-2">
+                                @foreach (var url in Model.Record.BeforePhotoList)
+                                {
+                                    <div class="position-relative" style="width:120px">
+                                        <a href="@url" target="_blank">
+                                            <img src="@url" class="img-thumbnail" style="width:120px;height:120px;object-fit:cover" />
+                                        </a>
+                                        <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
+                                            <input type="hidden" name="id" value="@Model.Record.Id" />
+                                            <input type="hidden" name="url" value="@url" />
+                                            <input type="hidden" name="kind" value="before" />
+                                            <button type="submit" class="btn btn-sm btn-danger rounded-circle"
+                                                    style="width:24px;height:24px;padding:0;font-size:12px"
+                                                    onclick="return confirm('Remove this photo?');">×</button>
+                                        </form>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        <input type="file" name="BeforePhotoFiles" class="form-control" multiple accept="image/*" />
+                        <small class="text-muted">Select multiple images (jpg, png, webp)</small>
+                    </div>
+
+                    <!-- After Photos -->
+                    <div class="mb-3">
+                        <label class="form-label">After Photos</label>
+                        @if (Model.Record.AfterPhotoList.Any())
+                        {
+                            <div class="d-flex flex-wrap gap-2 mb-2">
+                                @foreach (var url in Model.Record.AfterPhotoList)
+                                {
+                                    <div class="position-relative" style="width:120px">
+                                        <a href="@url" target="_blank">
+                                            <img src="@url" class="img-thumbnail" style="width:120px;height:120px;object-fit:cover" />
+                                        </a>
+                                        <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
+                                            <input type="hidden" name="id" value="@Model.Record.Id" />
+                                            <input type="hidden" name="url" value="@url" />
+                                            <input type="hidden" name="kind" value="after" />
+                                            <button type="submit" class="btn btn-sm btn-danger rounded-circle"
+                                                    style="width:24px;height:24px;padding:0;font-size:12px"
+                                                    onclick="return confirm('Remove this photo?');">×</button>
+                                        </form>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        <input type="file" name="AfterPhotoFiles" class="form-control" multiple accept="image/*" />
+                    </div>
+
+                    <!-- Attachments (documents) -->
+                    <div class="mb-3">
+                        <label class="form-label">Attachments (PDF/Word/Excel)</label>
+                        @if (Model.Record.AttachmentList.Any())
+                        {
+                            <ul class="list-unstyled mb-2">
+                                @foreach (var url in Model.Record.AttachmentList)
+                                {
+                                    <li class="d-flex align-items-center mb-1">
+                                        <a href="@url" target="_blank" class="me-2">
+                                            <i class="bi bi-file-earmark"></i> @System.IO.Path.GetFileName(url)
+                                        </a>
+                                        <form method="post" asp-page-handler="RemovePhoto" class="d-inline">
+                                            <input type="hidden" name="id" value="@Model.Record.Id" />
+                                            <input type="hidden" name="url" value="@url" />
+                                            <input type="hidden" name="kind" value="attach" />
+                                            <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1"
+                                                    onclick="return confirm('Remove this file?');">×</button>
+                                        </form>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                        <input type="file" name="AttachmentFiles" class="form-control" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" />
+                    </div>
+
+                    <hr />
 
                     <div class="mb-3">
                         <label class="form-label">Notes</label>
@@ -103,7 +211,7 @@
                 <table class="table table-sm table-borderless mb-0">
                     <tr><td class="text-muted">Site</td><td>@Model.Record.Installation.SiteName</td></tr>
                     <tr><td class="text-muted">Customer</td><td>@Model.Record.Installation.Customer.FullName</td></tr>
-                    <tr><td class="text-muted">Created</td><td>@Model.Record.CreatedAt.ToString("dd/MM/yyyy")</td></tr>
+                    <tr><td class="text-muted">Created</td><td>@Model.Record.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
                 </table>
             </div>
         </div>

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.FileUpload;
 using SolarApp.Services.Interfaces;
 
 namespace SolarApp.Pages.Maintenance;
@@ -17,12 +18,15 @@ public class EditModel : PageModel
     private readonly ApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IMaintenanceService _service;
+    private readonly IFileUploadService _uploader;
 
-    public EditModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IMaintenanceService service)
+    public EditModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager,
+        IMaintenanceService service, IFileUploadService uploader)
     {
         _context = context;
         _userManager = userManager;
         _service = service;
+        _uploader = uploader;
     }
 
     [BindProperty]
@@ -43,8 +47,14 @@ public class EditModel : PageModel
         public DateTime? CompletedDate { get; set; }
         public decimal? Cost { get; set; }
         public string? PerformedByUserId { get; set; }
+        public string? Category { get; set; }
+        public string? Location { get; set; }
         public string? Notes { get; set; }
     }
+
+    [BindProperty] public List<IFormFile> BeforePhotoFiles { get; set; } = new();
+    [BindProperty] public List<IFormFile> AfterPhotoFiles { get; set; } = new();
+    [BindProperty] public List<IFormFile> AttachmentFiles { get; set; } = new();
 
     public async Task<IActionResult> OnGetAsync(int id)
     {
@@ -66,6 +76,8 @@ public class EditModel : PageModel
             CompletedDate = record.CompletedDate,
             Cost = record.Cost,
             PerformedByUserId = record.PerformedByUserId,
+            Category = record.Category,
+            Location = record.Location,
             Notes = record.Notes
         };
 
@@ -89,7 +101,26 @@ public class EditModel : PageModel
         record.CompletedDate = Input.CompletedDate;
         record.Cost = Input.Cost;
         record.PerformedByUserId = string.IsNullOrEmpty(Input.PerformedByUserId) ? null : Input.PerformedByUserId;
+        record.Category = Input.Category;
+        record.Location = Input.Location;
         record.Notes = Input.Notes;
+
+        // Handle uploaded files
+        foreach (var file in BeforePhotoFiles.Where(f => f != null && f.Length > 0))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, "maintenance-before", record.InstallationId);
+            if (ok) record.BeforePhotos = _uploader.AddToCsv(record.BeforePhotos, url);
+        }
+        foreach (var file in AfterPhotoFiles.Where(f => f != null && f.Length > 0))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, "maintenance-after", record.InstallationId);
+            if (ok) record.AfterPhotos = _uploader.AddToCsv(record.AfterPhotos, url);
+        }
+        foreach (var file in AttachmentFiles.Where(f => f != null && f.Length > 0))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, "maintenance-docs", record.InstallationId);
+            if (ok) record.AttachmentUrls = _uploader.AddToCsv(record.AttachmentUrls, url);
+        }
 
         // Auto-set CompletedDate when status flips to Completed
         if (Input.Status == MaintenanceStatus.Completed && !wasCompleted)
@@ -133,6 +164,30 @@ public class EditModel : PageModel
         await _context.SaveChangesAsync();
         StatusMessage = "Maintenance record deleted";
         return RedirectToPage("Index");
+    }
+
+    public async Task<IActionResult> OnPostRemovePhotoAsync(int id, string url, string kind)
+    {
+        var record = await _context.MaintenanceRecords.FindAsync(id);
+        if (record == null) return NotFound();
+
+        switch (kind)
+        {
+            case "before":
+                record.BeforePhotos = _uploader.RemoveFromCsv(record.BeforePhotos, url);
+                break;
+            case "after":
+                record.AfterPhotos = _uploader.RemoveFromCsv(record.AfterPhotos, url);
+                break;
+            case "attach":
+                record.AttachmentUrls = _uploader.RemoveFromCsv(record.AttachmentUrls, url);
+                break;
+        }
+        _uploader.Delete(url);
+        await _context.SaveChangesAsync();
+
+        StatusMessage = "File removed";
+        return RedirectToPage(new { id });
     }
 
     private async Task LoadPerformersAsync()

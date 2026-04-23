@@ -435,6 +435,147 @@ public class UsersModel : PageModel
         return RedirectToPage();
     }
 
+    // ══════════════════════════════════════════════════════════════
+    //  Invite: create user account linked to Customer/Partner entity
+    // ══════════════════════════════════════════════════════════════
+
+    public async Task<IActionResult> OnPostInviteCustomerAsync(int customerId, string? password)
+    {
+        var customer = await _context.Customers.FindAsync(customerId);
+        if (customer == null)
+        {
+            ErrorMessage = "Customer not found";
+            return RedirectToPage();
+        }
+
+        if (string.IsNullOrEmpty(customer.Email))
+        {
+            ErrorMessage = $"Customer '{customer.FullName}' has no email. Edit customer first.";
+            return RedirectToPage();
+        }
+
+        if (!string.IsNullOrEmpty(customer.UserId))
+        {
+            ErrorMessage = $"Customer '{customer.FullName}' already has a user account";
+            return RedirectToPage();
+        }
+
+        var existing = await _userManager.FindByEmailAsync(customer.Email);
+        if (existing != null)
+        {
+            // Just link the existing user
+            customer.UserId = existing.Id;
+            await _context.SaveChangesAsync();
+            if (!await _userManager.IsInRoleAsync(existing, UserRoles.Customer))
+                await _userManager.AddToRoleAsync(existing, UserRoles.Customer);
+            StatusMessage = $"Linked existing user '{customer.Email}' to customer '{customer.FullName}'";
+            return RedirectToPage();
+        }
+
+        var defaultPwd = string.IsNullOrWhiteSpace(password) ? GenerateTempPassword() : password;
+
+        var user = new ApplicationUser
+        {
+            UserName = customer.Email,
+            Email = customer.Email,
+            FullName = customer.FullName,
+            PhoneNumber = customer.Phone,
+            LineUserId = customer.LineUserId,
+            IsActive = true,
+            EmailConfirmed = true
+        };
+
+        var result = await _userManager.CreateAsync(user, defaultPwd);
+        if (!result.Succeeded)
+        {
+            ErrorMessage = "Failed to create user: " + string.Join(", ", result.Errors.Select(e => e.Description));
+            return RedirectToPage();
+        }
+
+        await _userManager.AddToRoleAsync(user, UserRoles.Customer);
+
+        customer.UserId = user.Id;
+        await _context.SaveChangesAsync();
+
+        StatusMessage = $"Account created for {customer.Email} | Temp password: {defaultPwd}";
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostInvitePartnerAsync(int partnerId, string? password, string? firstName, string? lastName)
+    {
+        var partner = await _context.Partners.FindAsync(partnerId);
+        if (partner == null)
+        {
+            ErrorMessage = "Partner not found";
+            return RedirectToPage();
+        }
+
+        if (string.IsNullOrEmpty(partner.ContactEmail))
+        {
+            ErrorMessage = $"Partner '{partner.CompanyName}' has no contact email";
+            return RedirectToPage();
+        }
+
+        var existing = await _userManager.FindByEmailAsync(partner.ContactEmail);
+        if (existing != null)
+        {
+            existing.PartnerId = partner.Id;
+            await _userManager.UpdateAsync(existing);
+            if (!await _userManager.IsInRoleAsync(existing, UserRoles.Partner))
+                await _userManager.AddToRoleAsync(existing, UserRoles.Partner);
+            StatusMessage = $"Linked existing user '{partner.ContactEmail}' to partner '{partner.CompanyName}'";
+            return RedirectToPage();
+        }
+
+        var defaultPwd = string.IsNullOrWhiteSpace(password) ? GenerateTempPassword() : password;
+
+        var user = new ApplicationUser
+        {
+            UserName = partner.ContactEmail,
+            Email = partner.ContactEmail,
+            FullName = string.IsNullOrEmpty(firstName) && string.IsNullOrEmpty(lastName)
+                ? partner.CompanyName
+                : $"{firstName} {lastName}".Trim(),
+            CompanyName = partner.CompanyName,
+            PhoneNumber = partner.ContactPhone,
+            PartnerId = partner.Id,
+            IsActive = true,
+            EmailConfirmed = true
+        };
+
+        var result = await _userManager.CreateAsync(user, defaultPwd);
+        if (!result.Succeeded)
+        {
+            ErrorMessage = "Failed to create user: " + string.Join(", ", result.Errors.Select(e => e.Description));
+            return RedirectToPage();
+        }
+
+        await _userManager.AddToRoleAsync(user, UserRoles.Partner);
+
+        StatusMessage = $"Account created for {partner.ContactEmail} | Temp password: {defaultPwd}";
+        return RedirectToPage();
+    }
+
+    private static string GenerateTempPassword()
+    {
+        // Satisfies Identity requirements: uppercase, lowercase, digit, special, 8+
+        var rnd = new Random();
+        var lower = "abcdefghijkmnopqrstuvwxyz";
+        var upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+        var digits = "23456789";
+        var special = "!@#$%&*";
+        var pwd =
+            upper[rnd.Next(upper.Length)].ToString() +
+            lower[rnd.Next(lower.Length)] +
+            lower[rnd.Next(lower.Length)] +
+            lower[rnd.Next(lower.Length)] +
+            lower[rnd.Next(lower.Length)] +
+            digits[rnd.Next(digits.Length)] +
+            digits[rnd.Next(digits.Length)] +
+            special[rnd.Next(special.Length)];
+        return pwd;
+    }
+
     private async Task LoadDataAsync()
     {
         var users = await _userManager.Users
