@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using SolarApp.Models.Enums;
 using SolarApp.Services.InverterApi.Models;
@@ -6,8 +8,21 @@ using SolarApp.Services.InverterApi.Models;
 namespace SolarApp.Services.InverterApi.Adapters;
 
 /// <summary>
-/// Adapter for FOX ESS Cloud API.
-/// Authentication: API Key in header (token)
+/// FOX ESS Cloud API Adapter.
+///
+/// Supports 2 authentication modes (cannot use both simultaneously):
+///
+/// Mode 1 - Private Token (simple):
+///   ApiKey = Private Token from foxesscloud.com > User Profile > API Management
+///   Sent as "token" header on every request.
+///
+/// Mode 2 - OAuth (Client ID + Secret):
+///   Username = Client ID from foxesscloud.com > Authorization Token tab
+///   ApiSecret = Client Secret
+///   Gets an access token via /oauth/token, sent as "Authorization: Bearer" header.
+///
+/// PlantId = Device Serial Number (SN) of the inverter.
+///
 /// Base URL: https://www.foxesscloud.com/op/v0/
 /// </summary>
 public class FoxEssAdapter : IInverterApiAdapter
@@ -24,19 +39,85 @@ public class FoxEssAdapter : IInverterApiAdapter
         _logger = logger;
     }
 
-    private HttpClient CreateClient(ApiCredentials credentials)
+    private async Task<HttpClient> CreateClientAsync(ApiCredentials credentials)
     {
         var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("token", credentials.ApiKey);
         client.DefaultRequestHeaders.Add("lang", "en");
+
+        // Mode 1: Private Token (preferred if available)
+        if (!string.IsNullOrEmpty(credentials.ApiKey))
+        {
+            _logger.LogDebug("FOX ESS: Using Private Token authentication");
+
+            // FOX ESS Open API v1 requires signature
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+            var signature = GenerateSignature(credentials.ApiKey, timestamp);
+
+            client.DefaultRequestHeaders.Add("token", credentials.ApiKey);
+            client.DefaultRequestHeaders.Add("timestamp", timestamp);
+            client.DefaultRequestHeaders.Add("signature", signature);
+        }
+        // Mode 2: OAuth (Client ID + Secret)
+        else if (!string.IsNullOrEmpty(credentials.Username) && !string.IsNullOrEmpty(credentials.ApiSecret))
+        {
+            _logger.LogDebug("FOX ESS: Using OAuth (Client ID + Secret) authentication");
+            var accessToken = await GetOAuthTokenAsync(credentials.Username, credentials.ApiSecret);
+            if (!string.IsNullOrEmpty(accessToken))
+            {
+                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {accessToken}");
+            }
+        }
+        else
+        {
+            _logger.LogWarning("FOX ESS: No credentials provided");
+        }
+
         return client;
+    }
+
+    private static string GenerateSignature(string token, string timestamp)
+    {
+        var signText = $"{token}\\r\\n{timestamp}";
+        var hash = MD5.HashData(Encoding.UTF8.GetBytes(signText));
+        return Convert.ToHexString(hash).ToLower();
+    }
+
+    private async Task<string?> GetOAuthTokenAsync(string clientId, string clientSecret)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var response = await client.PostAsJsonAsync(
+                "https://www.foxesscloud.com/oauth/token",
+                new
+                {
+                    grant_type = "client_credentials",
+                    client_id = clientId,
+                    client_secret = clientSecret
+                });
+
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            if (json.TryGetProperty("access_token", out var token))
+                return token.GetString();
+
+            if (json.TryGetProperty("data", out var data) && data.TryGetProperty("access_token", out var token2))
+                return token2.GetString();
+
+            _logger.LogWarning("FOX ESS OAuth: No access_token in response");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FOX ESS OAuth token request failed");
+            return null;
+        }
     }
 
     public async Task<bool> TestConnectionAsync(ApiCredentials credentials)
     {
         try
         {
-            var client = CreateClient(credentials);
+            var client = await CreateClientAsync(credentials);
             var response = await client.GetAsync($"{BaseUrl}/device/list?pageSize=1&currentPage=1");
             return response.IsSuccessStatusCode;
         }
@@ -51,7 +132,7 @@ public class FoxEssAdapter : IInverterApiAdapter
     {
         try
         {
-            var client = CreateClient(credentials);
+            var client = await CreateClientAsync(credentials);
             var response = await client.GetAsync($"{BaseUrl}/plant/list?pageSize=1&currentPage=1");
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
             var plant = json.GetProperty("result").GetProperty("data").EnumerateArray().FirstOrDefault();
@@ -75,23 +156,33 @@ public class FoxEssAdapter : IInverterApiAdapter
     {
         try
         {
-            var client = CreateClient(credentials);
-            var response = await client.GetAsync(
-                $"{BaseUrl}/device/real/query?sn={credentials.PlantId}");
+            var client = await CreateClientAsync(credentials);
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/device/real/query",
+                new { sn = credentials.PlantId, variables = new[] { "pvPower", "generationPower",
+                    "feedinPower", "gridConsumptionPower", "SoC", "batChargePower",
+                    "batDischargePower", "generationTotal", "todayYield" } });
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var data = json.GetProperty("result");
 
-            return new RealtimeData
+            if (json.TryGetProperty("result", out var result))
             {
-                Timestamp = DateTime.UtcNow,
-                CurrentPowerKw = GetDecimal(data, "pvPower"),
-                TodayEnergyKwh = GetDecimal(data, "todayYield"),
-                TotalEnergyKwh = GetDecimal(data, "cumulativeYield"),
-                GridExportKw = GetDecimal(data, "feedinPower"),
-                GridImportKw = GetDecimal(data, "gridConsumptionPower"),
-                BatterySocPercent = GetNullableDecimal(data, "SoC"),
-                IsOnline = true
-            };
+                var datas = result.EnumerateArray().ToDictionary(
+                    v => v.GetProperty("variable").GetString() ?? "",
+                    v => v.TryGetProperty("value", out var val) && val.TryGetDecimal(out var d) ? d : 0m);
+
+                return new RealtimeData
+                {
+                    Timestamp = DateTime.UtcNow,
+                    CurrentPowerKw = datas.GetValueOrDefault("pvPower"),
+                    TodayEnergyKwh = datas.GetValueOrDefault("todayYield"),
+                    TotalEnergyKwh = datas.GetValueOrDefault("generationTotal"),
+                    GridExportKw = datas.GetValueOrDefault("feedinPower"),
+                    GridImportKw = datas.GetValueOrDefault("gridConsumptionPower"),
+                    BatterySocPercent = datas.TryGetValue("SoC", out var soc) && soc > 0 ? soc : null,
+                    IsOnline = true
+                };
+            }
+
+            return null;
         }
         catch (Exception ex)
         {
@@ -105,7 +196,7 @@ public class FoxEssAdapter : IInverterApiAdapter
         var records = new List<EnergyRecord>();
         try
         {
-            var client = CreateClient(credentials);
+            var client = await CreateClientAsync(credentials);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/device/history/query", new
             {
                 sn = credentials.PlantId,
@@ -144,9 +235,13 @@ public class FoxEssAdapter : IInverterApiAdapter
         var alarms = new List<AlarmRecord>();
         try
         {
-            var client = CreateClient(credentials);
-            var response = await client.GetAsync(
-                $"{BaseUrl}/device/fault/list?sn={credentials.PlantId}&pageSize=100&currentPage=1");
+            var client = await CreateClientAsync(credentials);
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/device/fault/list", new
+            {
+                sn = credentials.PlantId,
+                pageSize = 100,
+                currentPage = 1
+            });
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
 
             if (json.TryGetProperty("result", out var result) && result.TryGetProperty("data", out var data))
@@ -176,7 +271,7 @@ public class FoxEssAdapter : IInverterApiAdapter
         var devices = new List<DeviceInfo>();
         try
         {
-            var client = CreateClient(credentials);
+            var client = await CreateClientAsync(credentials);
             var response = await client.GetAsync($"{BaseUrl}/device/list?pageSize=100&currentPage=1");
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
 
