@@ -108,11 +108,11 @@
                         </div>
                         <div class="col-md-6 d-flex align-items-end">
                             <button type="button" id="testConnectionBtn" class="btn btn-outline-info">
-                                <i class="bi bi-plug"></i> Test Connection
+                                <i class="bi bi-plug"></i> Test Connection & Fetch Data
                             </button>
-                            <span id="testResult" class="ms-3"></span>
                         </div>
                     </div>
+                    <div id="testResult"></div>
 
                     <!-- Warranty & Maintenance -->
                     <h6 class="text-muted mb-3 mt-4">Warranty & Maintenance</h6>
@@ -177,12 +177,50 @@
                 const r = await fetch('/api/test-inverter-connection', { method: 'POST', body: formData });
                 const data = await r.json();
                 if (data.success) {
-                    result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
+                    let html = '<div class="alert alert-success mt-2 mb-0 p-2"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</div>';
+
+                    if (data.plantInfo) {
+                        html += '<div class="card mt-2 border-success"><div class="card-body p-2">';
+                        html += '<h6 class="mb-2 text-success">Plant Info</h6>';
+                        html += '<div><strong>ID:</strong> ' + (data.plantInfo.plantId || '-') + '</div>';
+                        html += '<div><strong>Name:</strong> ' + (data.plantInfo.plantName || '-') + '</div>';
+                        html += '<div><strong>Capacity:</strong> ' + (data.plantInfo.capacityKw || 0) + ' kW</div>';
+                        if (data.plantInfo.address) html += '<div><strong>Address:</strong> ' + data.plantInfo.address + '</div>';
+                        html += '</div></div>';
+                    }
+
+                    if (data.realtime) {
+                        const rt = data.realtime;
+                        html += '<div class="card mt-2 border-info"><div class="card-body p-2">';
+                        html += '<h6 class="mb-2 text-info">Live Data</h6>';
+                        html += '<div><strong>Status:</strong> <span class="badge bg-' + (rt.isOnline ? 'success' : 'secondary') + '">' + (rt.isOnline ? 'ONLINE' : 'OFFLINE') + '</span></div>';
+                        html += '<div><strong>Current Power:</strong> ' + (rt.currentPowerKw || 0).toFixed(2) + ' kW</div>';
+                        html += '<div><strong>Today Energy:</strong> ' + (rt.todayEnergyKwh || 0).toFixed(2) + ' kWh</div>';
+                        html += '<div><strong>Total Energy:</strong> ' + (rt.totalEnergyKwh || 0).toFixed(2) + ' kWh</div>';
+                        if (rt.batterySocPercent !== null) html += '<div><strong>Battery SOC:</strong> ' + rt.batterySocPercent + '%</div>';
+                        html += '<div class="text-muted small">Updated: ' + new Date(rt.timestamp).toLocaleString() + '</div>';
+                        html += '</div></div>';
+                    }
+
+                    if (data.deviceCount > 0) {
+                        html += '<div class="card mt-2 border-warning"><div class="card-body p-2">';
+                        html += '<h6 class="mb-2 text-warning">Devices (' + data.deviceCount + ')</h6>';
+                        for (const d of data.devices) {
+                            html += '<div>• ' + d.deviceName + ' (' + (d.model || d.deviceId) + ') - ' + (d.isOnline ? 'Online' : 'Offline') + '</div>';
+                        }
+                        html += '</div></div>';
+                    }
+
+                    if (!data.plantInfo && !data.realtime) {
+                        html += '<div class="alert alert-warning mt-2 mb-0 p-2"><i class="bi bi-exclamation-triangle"></i> Connected, but no plant/realtime data returned. Check Plant ID.</div>';
+                    }
+
+                    result.innerHTML = html;
                 } else {
-                    result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.message + '</span>';
+                    result.innerHTML = '<div class="alert alert-danger mt-2 mb-0 p-2"><i class="bi bi-x-circle-fill"></i> ' + data.message + '</div>';
                 }
             } catch (e) {
-                result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> Test failed: ' + e.message + '</span>';
+                result.innerHTML = '<div class="alert alert-danger mt-2 mb-0 p-2"><i class="bi bi-x-circle-fill"></i> Test failed: ' + e.message + '</div>';
             } finally {
                 btn.disabled = false;
             }

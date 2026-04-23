@@ -366,6 +366,77 @@ public class Startup
                 "application/pdf", $"Report_{installationId}.pdf");
         }).RequireAuthorization();
 
+        // Manually sync data from cloud for a specific installation
+        app.MapPost("/api/installations/{id:int}/sync", async (
+            int id,
+            Data.ApplicationDbContext db,
+            Services.InverterApi.IInverterApiAdapterFactory factory) =>
+        {
+            var installation = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .FirstOrDefaultAsync(db.Installations, i => i.Id == id);
+            if (installation == null)
+                return Results.Json(new { success = false, message = "Installation not found" });
+
+            if (string.IsNullOrEmpty(installation.PlantId))
+                return Results.Json(new { success = false, message = "No Plant/Station ID configured" });
+
+            try
+            {
+                var adapter = factory.GetAdapter(installation.InverterBrand);
+                var credentials = new Services.InverterApi.Models.ApiCredentials
+                {
+                    ApiKey = installation.CloudApiKey,
+                    ApiSecret = installation.CloudApiSecret,
+                    Username = installation.CloudUsername,
+                    Password = installation.CloudPassword,
+                    PlantId = installation.PlantId
+                };
+
+                var realtime = await adapter.GetRealtimeDataAsync(credentials);
+                if (realtime == null)
+                    return Results.Json(new { success = false, message = "Could not fetch data from cloud" });
+
+                // Save to DB
+                db.EnergyData.Add(new Models.EnergyData
+                {
+                    InstallationId = installation.Id,
+                    Timestamp = DateTime.UtcNow,
+                    Granularity = Models.Enums.DataGranularity.Realtime,
+                    PowerGenerationKw = realtime.CurrentPowerKw,
+                    EnergyGenerationKwh = realtime.TodayEnergyKwh,
+                    GridExportKwh = realtime.GridExportKw ?? 0,
+                    GridImportKwh = realtime.GridImportKw ?? 0,
+                    BatterySocPercent = realtime.BatterySocPercent
+                });
+                installation.LastOnlineAt = realtime.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
+                if (realtime.IsOnline && installation.Status == Models.Enums.InstallationStatus.Offline)
+                    installation.Status = Models.Enums.InstallationStatus.Active;
+
+                await db.SaveChangesAsync();
+
+                return Results.Json(new
+                {
+                    success = true,
+                    message = "Data synced successfully",
+                    data = new
+                    {
+                        timestamp = realtime.Timestamp,
+                        currentPowerKw = realtime.CurrentPowerKw,
+                        todayEnergyKwh = realtime.TodayEnergyKwh,
+                        totalEnergyKwh = realtime.TotalEnergyKwh,
+                        gridExportKw = realtime.GridExportKw,
+                        gridImportKw = realtime.GridImportKw,
+                        batterySocPercent = realtime.BatterySocPercent,
+                        isOnline = realtime.IsOnline
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { success = false, message = $"Sync error: {ex.Message}" });
+            }
+        }).RequireAuthorization();
+
         // Test inverter cloud API connection
         app.MapPost("/api/test-inverter-connection", async (
             HttpRequest req,
@@ -389,7 +460,39 @@ public class Startup
                 var adapter = factory.GetAdapter(brand);
                 var (success, message) = await adapter.TestConnectionAsync(credentials);
 
-                return Results.Json(new { success, message });
+                if (!success)
+                    return Results.Json(new { success, message, plantInfo = (object?)null, realtime = (object?)null });
+
+                // Pull actual data to verify
+                var plant = await adapter.GetPlantInfoAsync(credentials);
+                var realtime = await adapter.GetRealtimeDataAsync(credentials);
+                var devices = await adapter.GetDevicesAsync(credentials);
+
+                return Results.Json(new
+                {
+                    success = true,
+                    message,
+                    plantInfo = plant == null ? null : new
+                    {
+                        plant.PlantId,
+                        plant.PlantName,
+                        plant.CapacityKw,
+                        plant.Address
+                    },
+                    realtime = realtime == null ? null : new
+                    {
+                        realtime.Timestamp,
+                        realtime.CurrentPowerKw,
+                        realtime.TodayEnergyKwh,
+                        realtime.TotalEnergyKwh,
+                        realtime.GridExportKw,
+                        realtime.GridImportKw,
+                        realtime.BatterySocPercent,
+                        realtime.IsOnline
+                    },
+                    deviceCount = devices.Count,
+                    devices = devices.Take(5).Select(d => new { d.DeviceId, d.DeviceName, d.Model, d.IsOnline })
+                });
             }
             catch (Exception ex)
             {
