@@ -276,6 +276,82 @@ public class GoodWeAdapter : IInverterApiAdapter
         if (string.IsNullOrEmpty(credentials.Username) || string.IsNullOrEmpty(credentials.Password))
             return (null, "Username (SEMS email) and Password are required");
 
+        // Step 1: Discover regional server
+        // Global entry point returns the actual regional API URL (e.g. eu/us/au)
+        var (discResult, discError) = await TryLoginAtUrlAsync(DefaultLoginUrl, credentials);
+        if (discResult == null) return (null, discError);
+
+        if (discResult.Value.HasToken)
+        {
+            // Login succeeded directly (single-step)
+            return (BuildSession(discResult.Value), "OK");
+        }
+
+        // Step 2: re-login at regional server
+        // Response contained an 'api' URL but no token - retry at that URL
+        var regionalUrl = discResult.Value.ApiUrl;
+        if (string.IsNullOrEmpty(regionalUrl))
+            return (null, $"Login discovery returned no token and no api URL. Body: {Truncate(discResult.Value.RawBody, 400)}");
+
+        var regionalLoginUrl = CombineUrl(regionalUrl, "v2/Common/CrossLogin");
+        _logger.LogInformation("GoodWe: retrying login at regional server {Url}", regionalLoginUrl);
+
+        var (regResult, regError) = await TryLoginAtUrlAsync(regionalLoginUrl, credentials);
+        if (regResult == null) return (null, $"Regional login failed: {regError}");
+
+        if (!regResult.Value.HasToken)
+        {
+            // Try v1 path if v2 doesn't work
+            var v1Url = CombineUrl(regionalUrl, "v1/Common/CrossLogin");
+            _logger.LogInformation("GoodWe: retrying login at v1 {Url}", v1Url);
+            var (v1Result, v1Error) = await TryLoginAtUrlAsync(v1Url, credentials);
+            if (v1Result == null) return (null, $"V1 login failed: {v1Error}");
+            if (!v1Result.Value.HasToken)
+                return (null, $"Regional login succeeded but no token. Response: {Truncate(v1Result.Value.RawBody, 400)}");
+            return (BuildSession(v1Result.Value), "OK");
+        }
+
+        return (BuildSession(regResult.Value), "OK");
+    }
+
+    private struct LoginResult
+    {
+        public string Uid;
+        public string Token;
+        public string ApiUrl;
+        public long Timestamp;
+        public string RawBody;
+        public bool HasToken => !string.IsNullOrEmpty(Token);
+    }
+
+    private static Session BuildSession(LoginResult r)
+    {
+        var tokenJson = JsonSerializer.Serialize(new
+        {
+            uid = r.Uid,
+            timestamp = r.Timestamp,
+            token = r.Token,
+            client = "web",
+            version = "v2.1.0",
+            language = "en"
+        });
+
+        var apiBase = r.ApiUrl;
+        if (string.IsNullOrEmpty(apiBase)) apiBase = "https://www.semsportal.com/api/";
+        if (!apiBase.EndsWith("/")) apiBase += "/";
+
+        return new Session { ApiBase = apiBase, TokenJson = tokenJson };
+    }
+
+    private static string CombineUrl(string baseUrl, string path)
+    {
+        if (!baseUrl.EndsWith("/")) baseUrl += "/";
+        path = path.TrimStart('/');
+        return baseUrl + path;
+    }
+
+    private async Task<(LoginResult? Result, string Error)> TryLoginAtUrlAsync(string url, ApiCredentials credentials)
+    {
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -290,7 +366,7 @@ public class GoodWeAdapter : IInverterApiAdapter
                 language = "en"
             });
 
-            var req = new HttpRequestMessage(HttpMethod.Post, DefaultLoginUrl)
+            var req = new HttpRequestMessage(HttpMethod.Post, url)
             {
                 Content = JsonContent.Create(new { account = credentials.Username, pwd = credentials.Password })
             };
@@ -298,13 +374,13 @@ public class GoodWeAdapter : IInverterApiAdapter
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SolarApp/1.0");
 
-            _logger.LogInformation("GoodWe: POST {Url} for account={Account}", DefaultLoginUrl, credentials.Username);
+            _logger.LogInformation("GoodWe: POST {Url} for account={Account}", url, credentials.Username);
 
             var response = await client.SendAsync(req);
             var body = await response.Content.ReadAsStringAsync();
 
-            _logger.LogInformation("GoodWe login response: HTTP {Code}, body length={Len}",
-                (int)response.StatusCode, body.Length);
+            _logger.LogInformation("GoodWe {Url} => HTTP {Code}, body length={Len}",
+                url, (int)response.StatusCode, body.Length);
 
             if (!response.IsSuccessStatusCode)
                 return (null, $"HTTP {(int)response.StatusCode}: {Truncate(body, 500)}");
@@ -319,51 +395,42 @@ public class GoodWeAdapter : IInverterApiAdapter
                 return (null, $"SEMS error code={code}: {msg}");
             }
 
-            if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
-                return (null, $"No 'data' in response. Full body: {Truncate(body, 500)}");
+            var result = new LoginResult { RawBody = body };
 
-            var uid = GetString(data, "uid") ?? "";
-            var token = GetString(data, "token") ?? "";
-            var apiUrl = GetString(data, "api") ?? "https://www.semsportal.com/api/";
+            // Try to extract api URL from multiple possible locations
+            // (sometimes at root, sometimes inside data, sometimes inside components)
+            result.ApiUrl = GetString(root, "api") ?? "";
 
-            long timestamp = 0;
-            if (data.TryGetProperty("timestamp", out var ts))
+            if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
             {
-                if (ts.ValueKind == JsonValueKind.Number) ts.TryGetInt64(out timestamp);
-                else if (ts.ValueKind == JsonValueKind.String) long.TryParse(ts.GetString(), out timestamp);
+                result.Uid = GetString(data, "uid") ?? "";
+                result.Token = GetString(data, "token") ?? "";
+                if (string.IsNullOrEmpty(result.ApiUrl))
+                    result.ApiUrl = GetString(data, "api") ?? "";
+
+                if (data.TryGetProperty("timestamp", out var ts))
+                {
+                    if (ts.ValueKind == JsonValueKind.Number) ts.TryGetInt64(out result.Timestamp);
+                    else if (ts.ValueKind == JsonValueKind.String) long.TryParse(ts.GetString(), out result.Timestamp);
+                }
             }
 
-            if (string.IsNullOrEmpty(token))
-                return (null, $"No token in response. uid={uid}, api={apiUrl}, body: {Truncate(body, 300)}");
-
-            var sessionTokenJson = JsonSerializer.Serialize(new
-            {
-                uid,
-                timestamp,
-                token,
-                client = "web",
-                version = "v2.1.0",
-                language = "en"
-            });
-
-            if (!apiUrl.EndsWith("/")) apiUrl += "/";
-
-            _logger.LogInformation("GoodWe login OK. API={Api}, uid={Uid}", apiUrl, uid);
-
-            return (new Session { ApiBase = apiUrl, TokenJson = sessionTokenJson }, "OK");
+            return (result, "OK");
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "GoodWe login network error");
-            return (null, $"Network error: {ex.Message}. Check internet connection.");
+            return (null, $"Network error: {ex.Message}");
         }
         catch (TaskCanceledException)
         {
-            return (null, "Request timed out. SEMS server may be slow or blocked.");
+            return (null, "Request timed out");
+        }
+        catch (JsonException ex)
+        {
+            return (null, $"Invalid JSON response: {ex.Message}");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "GoodWe login exception");
             return (null, $"Exception: {ex.GetType().Name}: {ex.Message}");
         }
     }
