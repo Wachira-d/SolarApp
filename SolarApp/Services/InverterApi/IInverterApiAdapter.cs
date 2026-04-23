@@ -6,7 +6,7 @@ namespace SolarApp.Services.InverterApi;
 public interface IInverterApiAdapter
 {
     InverterBrand Brand { get; }
-    Task<bool> TestConnectionAsync(ApiCredentials credentials);
+    Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials);
     Task<PlantInfo?> GetPlantInfoAsync(ApiCredentials credentials);
     Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials);
     Task<List<EnergyRecord>> GetHistoricalDataAsync(ApiCredentials credentials, DateTime from, DateTime to);

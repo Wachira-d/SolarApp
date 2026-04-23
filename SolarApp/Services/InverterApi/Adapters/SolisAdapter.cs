@@ -26,17 +26,17 @@ public class SolisAdapter : IInverterApiAdapter
         _logger = logger;
     }
 
-    public async Task<bool> TestConnectionAsync(ApiCredentials credentials)
+    public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
         try
         {
             var result = await GetPlantInfoAsync(credentials);
-            return result != null;
+            return (result != null, result != null ? "Connected to Solis Cloud!" : "Failed to get plant info from Solis");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Solis connection test failed");
-            return false;
+            return (false, $"Solis error: {ex.Message}");
         }
     }
 

@@ -387,15 +387,9 @@ public class Startup
                 };
 
                 var adapter = factory.GetAdapter(brand);
-                var success = await adapter.TestConnectionAsync(credentials);
+                var (success, message) = await adapter.TestConnectionAsync(credentials);
 
-                return Results.Json(new
-                {
-                    success,
-                    message = success
-                        ? $"Connected to {brand} successfully!"
-                        : $"Cannot connect to {brand}. Check credentials and Plant ID."
-                });
+                return Results.Json(new { success, message });
             }
             catch (Exception ex)
             {

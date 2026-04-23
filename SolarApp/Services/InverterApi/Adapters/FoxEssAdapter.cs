@@ -52,18 +52,19 @@ public class FoxEssAdapter : IInverterApiAdapter
     //  PUBLIC API METHODS
     // ══════════════════════════════════════════════════════════════
 
-    public async Task<bool> TestConnectionAsync(ApiCredentials credentials)
+    public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
         try
         {
             var json = await SendPostAsync(credentials, "/op/v0/plant/list",
                 new { currentPage = 1, pageSize = 1 });
-            return json.HasValue && GetErrno(json.Value) == 0;
+            var ok = json.HasValue && GetErrno(json.Value) == 0;
+            return (ok, ok ? "Connected to FOX ESS!" : $"FOX ESS errno={GetErrno(json ?? default)}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "FOX ESS TestConnection failed");
-            return false;
+            return (false, $"FOX ESS error: {ex.Message}");
         }
     }
 

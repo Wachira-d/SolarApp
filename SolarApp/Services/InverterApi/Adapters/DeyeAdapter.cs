@@ -25,17 +25,18 @@ public class DeyeAdapter : IInverterApiAdapter
         _logger = logger;
     }
 
-    public async Task<bool> TestConnectionAsync(ApiCredentials credentials)
+    public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
         try
         {
             var token = await GetTokenAsync(credentials);
-            return !string.IsNullOrEmpty(token);
+            var ok = !string.IsNullOrEmpty(token);
+            return (ok, ok ? "Connected to Deye Cloud!" : "Login failed: no token returned");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Deye connection test failed");
-            return false;
+            return (false, $"Deye error: {ex.Message}");
         }
     }
 

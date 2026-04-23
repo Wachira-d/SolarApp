@@ -45,17 +45,36 @@ public class GoodWeAdapter : IInverterApiAdapter
         _logger = logger;
     }
 
-    public async Task<bool> TestConnectionAsync(ApiCredentials credentials)
+    public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
         try
         {
-            var session = await LoginAsync(credentials);
-            return session != null;
+            if (string.IsNullOrEmpty(credentials.Username))
+                return (false, "Username (SEMS email) is required");
+            if (string.IsNullOrEmpty(credentials.Password))
+                return (false, "Password is required");
+
+            var (session, loginError) = await LoginWithDetailAsync(credentials);
+            if (session == null)
+                return (false, $"Login failed: {loginError}");
+
+            if (!string.IsNullOrEmpty(credentials.PlantId))
+            {
+                var json = await PostAsync(session, "v2/PowerStation/GetMonitorDetailByPowerstationId",
+                    new { powerStationId = credentials.PlantId });
+                if (json == null)
+                    return (false, $"Login OK but Plant ID '{credentials.PlantId}' not accessible. Check Station ID.");
+
+                if (json.Value.TryGetProperty("hasError", out var he) && he.ValueKind == JsonValueKind.True)
+                    return (false, $"Login OK but Plant query error: {GetString(json.Value, "msg") ?? "unknown"}");
+            }
+
+            return (true, $"Connected to GoodWe SEMS! API: {session.ApiBase}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "GoodWe test connection error");
-            return false;
+            return (false, $"Exception: {ex.Message}");
         }
     }
 
@@ -248,17 +267,19 @@ public class GoodWeAdapter : IInverterApiAdapter
 
     private async Task<Session?> LoginAsync(ApiCredentials credentials)
     {
+        var (session, _) = await LoginWithDetailAsync(credentials);
+        return session;
+    }
+
+    private async Task<(Session? Session, string Error)> LoginWithDetailAsync(ApiCredentials credentials)
+    {
         if (string.IsNullOrEmpty(credentials.Username) || string.IsNullOrEmpty(credentials.Password))
-        {
-            _logger.LogWarning("GoodWe: Username (email) and Password are required");
-            return null;
-        }
+            return (null, "Username (SEMS email) and Password are required");
 
         try
         {
             var client = _httpClientFactory.CreateClient();
 
-            // Step 1: Initial Token header (client info only - no user token yet)
             var initialToken = JsonSerializer.Serialize(new
             {
                 uid = "",
@@ -277,32 +298,29 @@ public class GoodWeAdapter : IInverterApiAdapter
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SolarApp/1.0");
 
+            _logger.LogInformation("GoodWe: POST {Url} for account={Account}", DefaultLoginUrl, credentials.Username);
+
             var response = await client.SendAsync(req);
             var body = await response.Content.ReadAsStringAsync();
 
+            _logger.LogInformation("GoodWe login response: HTTP {Code}, body length={Len}",
+                (int)response.StatusCode, body.Length);
+
             if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("GoodWe login HTTP {Code}: {Body}",
-                    (int)response.StatusCode, Truncate(body, 300));
-                return null;
-            }
+                return (null, $"HTTP {(int)response.StatusCode}: {Truncate(body, 500)}");
 
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
 
-            // Check for error
             if (root.TryGetProperty("hasError", out var he) && he.ValueKind == JsonValueKind.True)
             {
                 var msg = GetString(root, "msg") ?? "unknown";
-                _logger.LogWarning("GoodWe login rejected: {Msg}", msg);
-                return null;
+                var code = root.TryGetProperty("code", out var c) ? c.ToString() : "?";
+                return (null, $"SEMS error code={code}: {msg}");
             }
 
             if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
-            {
-                _logger.LogWarning("GoodWe login: no data in response. Body: {Body}", Truncate(body, 300));
-                return null;
-            }
+                return (null, $"No 'data' in response. Full body: {Truncate(body, 500)}");
 
             var uid = GetString(data, "uid") ?? "";
             var token = GetString(data, "token") ?? "";
@@ -316,12 +334,8 @@ public class GoodWeAdapter : IInverterApiAdapter
             }
 
             if (string.IsNullOrEmpty(token))
-            {
-                _logger.LogWarning("GoodWe login: no token returned. Body: {Body}", Truncate(body, 300));
-                return null;
-            }
+                return (null, $"No token in response. uid={uid}, api={apiUrl}, body: {Truncate(body, 300)}");
 
-            // Build subsequent-request Token header (full session info)
             var sessionTokenJson = JsonSerializer.Serialize(new
             {
                 uid,
@@ -332,17 +346,25 @@ public class GoodWeAdapter : IInverterApiAdapter
                 language = "en"
             });
 
-            // Ensure API URL ends with "/"
             if (!apiUrl.EndsWith("/")) apiUrl += "/";
 
-            _logger.LogDebug("GoodWe login OK. API={Api}", apiUrl);
+            _logger.LogInformation("GoodWe login OK. API={Api}, uid={Uid}", apiUrl, uid);
 
-            return new Session { ApiBase = apiUrl, TokenJson = sessionTokenJson };
+            return (new Session { ApiBase = apiUrl, TokenJson = sessionTokenJson }, "OK");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "GoodWe login network error");
+            return (null, $"Network error: {ex.Message}. Check internet connection.");
+        }
+        catch (TaskCanceledException)
+        {
+            return (null, "Request timed out. SEMS server may be slow or blocked.");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "GoodWe login exception");
-            return null;
+            return (null, $"Exception: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
