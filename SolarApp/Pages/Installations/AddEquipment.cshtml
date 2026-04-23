@@ -41,20 +41,28 @@
                     </div>
 
                     <div class="row mb-3">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label asp-for="Input.Quantity" class="form-label">Quantity *</label>
                             <input asp-for="Input.Quantity" class="form-control" />
                             <span asp-validation-for="Input.Quantity" class="text-danger"></span>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3" id="ratingKwWrap">
+                            <label asp-for="Input.RatingKw" class="form-label">
+                                Rating (kW) <span class="text-muted small" id="ratingKwHint">Power per unit</span>
+                            </label>
+                            <input asp-for="Input.RatingKw" class="form-control" type="number" step="0.01" placeholder="e.g. 10" />
+                        </div>
+                        <div class="col-md-3" id="ratingWattsWrap" style="display:none">
+                            <label asp-for="Input.RatingWatts" class="form-label">Wattage per Panel (W)</label>
+                            <input asp-for="Input.RatingWatts" class="form-control" type="number" placeholder="e.g. 450" />
+                        </div>
+                        <div class="col-md-3">
                             <label asp-for="Input.WarrantyYears" class="form-label">Warranty (Years) *</label>
                             <input asp-for="Input.WarrantyYears" class="form-control" />
-                            <span asp-validation-for="Input.WarrantyYears" class="text-danger"></span>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label asp-for="Input.InstalledDate" class="form-label">Installed Date *</label>
                             <input asp-for="Input.InstalledDate" class="form-control" type="date" />
-                            <span asp-validation-for="Input.InstalledDate" class="text-danger"></span>
                         </div>
                     </div>
 
@@ -75,4 +83,30 @@
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+    <script>
+        // Show the right rating field based on equipment type
+        const typeSelect = document.querySelector('[name="Input.EquipmentType"]');
+        const kwWrap = document.getElementById('ratingKwWrap');
+        const wattsWrap = document.getElementById('ratingWattsWrap');
+        const kwHint = document.getElementById('ratingKwHint');
+
+        function updateRatingField() {
+            const val = typeSelect.value;
+            // SolarPanel = 2
+            if (val === '2' || val === 'SolarPanel') {
+                kwWrap.style.display = 'none';
+                wattsWrap.style.display = '';
+            } else {
+                kwWrap.style.display = '';
+                wattsWrap.style.display = 'none';
+
+                // Inverter=1, Battery=3, Meter=4
+                if (val === '1' || val === 'Inverter') kwHint.textContent = 'kW per inverter';
+                else if (val === '3' || val === 'Battery') kwHint.textContent = 'kWh per battery';
+                else kwHint.textContent = 'Power per unit';
+            }
+        }
+        typeSelect?.addEventListener('change', updateRatingField);
+        updateRatingField();
+    </script>
 }

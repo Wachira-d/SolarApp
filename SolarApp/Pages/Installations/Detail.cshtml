@@ -58,9 +58,22 @@
             <div class="card-header bg-white"><h6 class="mb-0">System Info</h6></div>
             <div class="card-body">
                 <table class="table table-sm table-borderless mb-0">
-                    <tr><td class="text-muted">Inverter Brand</td><td class="text-end fw-bold">@inst.InverterBrand</td></tr>
-                    <tr><td class="text-muted">Capacity</td><td class="text-end">@inst.SystemCapacityKw kWp</td></tr>
-                    <tr><td class="text-muted">Panels</td><td class="text-end">@inst.NumberOfPanels x @inst.PanelWattage W</td></tr>
+                    <tr><td class="text-muted">Inverter Brand</td><td class="text-end fw-bold">@inst.InverterBrand @(string.IsNullOrEmpty(inst.InverterModel) ? "" : $"({inst.InverterModel})")</td></tr>
+                    <tr>
+                        <td class="text-muted">Inverter Size</td>
+                        <td class="text-end">
+                            @if (inst.InverterSizeKw > 0)
+                            {
+                                <span>@inst.InverterSizeKw kW × @inst.InverterCount = <strong>@inst.TotalInverterCapacityKw kW</strong></span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">Not set</span>
+                            }
+                        </td>
+                    </tr>
+                    <tr><td class="text-muted">System Capacity</td><td class="text-end">@inst.SystemCapacityKw kWp (DC)</td></tr>
+                    <tr><td class="text-muted">Panels</td><td class="text-end">@inst.NumberOfPanels × @inst.PanelWattage W</td></tr>
                     <tr><td class="text-muted">Customer</td><td class="text-end">@inst.Customer.FullName</td></tr>
                     <tr><td class="text-muted">Partner</td><td class="text-end">@(inst.Partner?.CompanyName ?? "Direct")</td></tr>
                     <tr><td class="text-muted">Installed</td><td class="text-end">@inst.InstallationDate.ToString("dd/MM/yyyy")</td></tr>
@@ -141,17 +154,32 @@
     <div class="card-body p-0">
         <table class="table table-hover mb-0">
             <thead class="table-light">
-                <tr><th>Type</th><th>Brand</th><th>Model</th><th>Serial</th><th>Qty</th><th>Warranty</th></tr>
+                <tr><th>Type</th><th>Brand</th><th>Model</th><th>Serial</th><th>Qty</th><th>Rating</th><th>Total</th><th>Warranty</th></tr>
             </thead>
             <tbody>
                 @foreach (var eq in inst.Equipment)
                 {
+                    var ratingText = "";
+                    var totalText = "";
+                    if (eq.RatingKw.HasValue && eq.RatingKw > 0)
+                    {
+                        var unit = eq.EquipmentType == SolarApp.Models.Enums.EquipmentType.Battery ? "kWh" : "kW";
+                        ratingText = $"{eq.RatingKw.Value:N2} {unit}";
+                        totalText = $"{eq.RatingKw.Value * eq.Quantity:N2} {unit}";
+                    }
+                    else if (eq.RatingWatts.HasValue && eq.RatingWatts > 0)
+                    {
+                        ratingText = $"{eq.RatingWatts.Value} W";
+                        totalText = $"{(eq.RatingWatts.Value * eq.Quantity) / 1000.0:N2} kW";
+                    }
                     <tr>
                         <td>@eq.EquipmentType</td>
                         <td>@eq.Brand</td>
                         <td>@eq.Model</td>
-                        <td>@eq.SerialNumber</td>
+                        <td><small>@eq.SerialNumber</small></td>
                         <td>@eq.Quantity</td>
+                        <td>@(string.IsNullOrEmpty(ratingText) ? "-" : ratingText)</td>
+                        <td class="fw-bold">@(string.IsNullOrEmpty(totalText) ? "-" : totalText)</td>
                         <td class="@(eq.IsWarrantyExpired ? "text-danger" : "")">
                             @(eq.WarrantyExpiryDate?.ToString("dd/MM/yyyy") ?? "-")
                         </td>
@@ -159,7 +187,7 @@
                 }
                 @if (!inst.Equipment.Any())
                 {
-                    <tr><td colspan="6" class="text-center text-muted">No equipment recorded</td></tr>
+                    <tr><td colspan="8" class="text-center text-muted">No equipment recorded</td></tr>
                 }
             </tbody>
         </table>

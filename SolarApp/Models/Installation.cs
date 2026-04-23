@@ -24,6 +24,8 @@ public class Installation
     public InverterBrand InverterBrand { get; set; }
     public string? InverterModel { get; set; }
     public int InverterCount { get; set; } = 1;
+    public decimal InverterSizeKw { get; set; }       // กำลังของ inverter แต่ละตัว (kW)
+    public decimal TotalInverterCapacityKw => InverterSizeKw * InverterCount;
     public string? CloudApiKey { get; set; }
     public string? CloudApiSecret { get; set; }
     public string? CloudUsername { get; set; }

@@ -44,6 +44,10 @@ public class AddEquipmentModel : PageModel
         [Range(1, 10000)]
         public int Quantity { get; set; } = 1;
 
+        // Power/capacity per unit
+        public decimal? RatingKw { get; set; }    // Inverter (kW), Battery (kWh as kW equivalent)
+        public int? RatingWatts { get; set; }     // Panel (W)
+
         [Required]
         [Range(1, 30)]
         public int WarrantyYears { get; set; } = 10;
@@ -113,6 +117,8 @@ public class AddEquipmentModel : PageModel
             Model = Input.Model,
             SerialNumber = Input.SerialNumber,
             Quantity = Input.Quantity,
+            RatingKw = Input.RatingKw,
+            RatingWatts = Input.RatingWatts,
             WarrantyYears = Input.WarrantyYears,
             InstalledDate = Input.InstalledDate,
             WarrantyExpiryDate = Input.InstalledDate.AddYears(Input.WarrantyYears),

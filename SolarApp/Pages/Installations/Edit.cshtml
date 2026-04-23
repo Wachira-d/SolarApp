@@ -65,11 +65,25 @@
                             <select asp-for="Input.InverterBrand" asp-items="Html.GetEnumSelectList<InverterBrand>()" class="form-select"></select>
                         </div>
                         <div class="col-md-3">
-                            <label asp-for="Input.SystemCapacityKw" class="form-label">Capacity (kWp) *</label>
+                            <label asp-for="Input.InverterModel" class="form-label">Inverter Model</label>
+                            <input asp-for="Input.InverterModel" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.InverterSizeKw" class="form-label">Inverter Size (kW) *</label>
+                            <input asp-for="Input.InverterSizeKw" class="form-control" type="number" step="0.1" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.InverterCount" class="form-label"># of Inverters *</label>
+                            <input asp-for="Input.InverterCount" class="form-control" type="number" min="1" />
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label asp-for="Input.SystemCapacityKw" class="form-label">System Capacity (kWp) *</label>
                             <input asp-for="Input.SystemCapacityKw" class="form-control" />
                         </div>
                         <div class="col-md-3">
-                            <label asp-for="Input.NumberOfPanels" class="form-label">Panels *</label>
+                            <label asp-for="Input.NumberOfPanels" class="form-label"># of Panels *</label>
                             <input asp-for="Input.NumberOfPanels" class="form-control" />
                         </div>
                         <div class="col-md-3">

@@ -219,9 +219,51 @@ public class Startup
                 log($"DB: Seed inner: {ex.InnerException.Message}");
         }
 
-        // ── Step E: Final verification ──
+        // ── Step E: Schema migrations (add missing columns without drop) ──
+        log("DB: Running schema upgrades...");
+        await RunSchemaUpgradesAsync(context, log);
+
+        // ── Step F: Final verification ──
         log("DB: Running final verification...");
         await VerifyDatabaseAsync(context, log);
+    }
+
+    /// <summary>
+    /// Adds missing columns to existing tables without dropping data.
+    /// Each upgrade uses IF NOT EXISTS so it's idempotent.
+    /// </summary>
+    private static async Task RunSchemaUpgradesAsync(ApplicationDbContext context, Action<string> log)
+    {
+        var upgrades = new[]
+        {
+            // Installation: inverter size in kW (per unit)
+            (Table: "Installations", Column: "InverterSizeKw",
+             Sql: "ALTER TABLE [Installations] ADD [InverterSizeKw] decimal(10,3) NOT NULL DEFAULT 0"),
+
+            // Equipment: per-unit power rating
+            (Table: "Equipment", Column: "RatingKw",
+             Sql: "ALTER TABLE [Equipment] ADD [RatingKw] decimal(10,3) NULL"),
+            (Table: "Equipment", Column: "RatingWatts",
+             Sql: "ALTER TABLE [Equipment] ADD [RatingWatts] int NULL"),
+        };
+
+        foreach (var (table, column, sql) in upgrades)
+        {
+            try
+            {
+                var exists = await context.Database.ExecuteSqlRawAsync(
+                    $@"IF NOT EXISTS (SELECT 1 FROM sys.columns
+                         WHERE Name = N'{column}' AND Object_ID = Object_ID(N'[{table}]'))
+                       BEGIN
+                         {sql};
+                       END");
+                log($"DB: Schema upgrade '{table}.{column}' applied/skipped");
+            }
+            catch (Exception ex)
+            {
+                log($"DB: Schema upgrade '{table}.{column}' failed: {ex.Message}");
+            }
+        }
     }
 
     private static async Task<bool> TestSqlServerAsync(string connectionString, Action<string> log)

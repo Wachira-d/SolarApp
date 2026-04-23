@@ -84,6 +84,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(i => i.Status);
 
             entity.Property(i => i.SystemCapacityKw).HasPrecision(10, 3);
+            entity.Property(i => i.InverterSizeKw).HasPrecision(10, 3);
+            entity.Ignore(i => i.TotalInverterCapacityKw);
             entity.Property(i => i.ElectricityRatePerKwh).HasPrecision(10, 4);
             entity.Property(i => i.FeedInTariffRate).HasPrecision(10, 4);
             entity.Property(i => i.ContractValue).HasPrecision(18, 2);
@@ -100,6 +102,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany(i => i.Equipment)
                 .HasForeignKey(e => e.InstallationId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            entity.Property(e => e.RatingKw).HasPrecision(10, 3);
         });
 
         // ── EnergyData ──

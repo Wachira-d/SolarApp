@@ -51,6 +51,7 @@ public class CreateModel : PageModel
         [Required] public InverterBrand InverterBrand { get; set; }
         public string? InverterModel { get; set; }
         public int InverterCount { get; set; } = 1;
+        public decimal InverterSizeKw { get; set; }
         public SystemType SystemType { get; set; } = SystemType.OnGrid;
         public string? CloudApiKey { get; set; }
         public string? CloudApiSecret { get; set; }
@@ -111,6 +112,7 @@ public class CreateModel : PageModel
             InverterBrand = Input.InverterBrand,
             InverterModel = Input.InverterModel,
             InverterCount = Input.InverterCount,
+            InverterSizeKw = Input.InverterSizeKw,
             SystemType = Input.SystemType,
             CloudApiKey = Input.CloudApiKey,
             CloudApiSecret = Input.CloudApiSecret,
