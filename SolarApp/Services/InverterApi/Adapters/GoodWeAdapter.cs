@@ -127,6 +127,32 @@ public class GoodWeAdapter : IInverterApiAdapter
 
         var kpi = data.TryGetProperty("kpi", out var k) ? k : default;
         var info = data.TryGetProperty("info", out var i) ? i : default;
+        var powerflow = data.TryGetProperty("powerflow", out var pf) ? pf : default;
+        var soc = data.TryGetProperty("soc", out var socEl) ? socEl : default;
+
+        // Extract power flow values (SEMS uses "gridActivePower", "load", etc.)
+        decimal gridExportKw = 0, gridImportKw = 0, selfConsumptionKw = 0;
+        decimal? batterySoc = null, batteryPowerKw = null;
+
+        if (powerflow.ValueKind == JsonValueKind.Object)
+        {
+            // gridStatus: 1=consuming(import), -1=selling(export)
+            var gridStatus = GetDecimal(powerflow, "gridStatus");
+            var gridPower = GetDecimal(powerflow, "grid") / 1000m;  // usually in Watts
+            if (gridStatus < 0) gridExportKw = Math.Abs(gridPower);
+            else gridImportKw = gridPower;
+
+            selfConsumptionKw = GetDecimal(powerflow, "load") / 1000m;
+
+            var bettStatus = GetDecimal(powerflow, "bettStatus");
+            var bettPower = GetDecimal(powerflow, "bett") / 1000m;
+            if (bettPower != 0) batteryPowerKw = bettStatus < 0 ? -bettPower : bettPower;
+        }
+
+        if (soc.ValueKind == JsonValueKind.Object)
+        {
+            batterySoc = GetNullableDecimal(soc, "power");  // SEMS puts SOC% in "power"
+        }
 
         return new RealtimeData
         {
@@ -134,7 +160,10 @@ public class GoodWeAdapter : IInverterApiAdapter
             CurrentPowerKw = GetDecimal(kpi, "pac") / 1000m,  // SEMS returns Watts
             TodayEnergyKwh = GetDecimal(kpi, "power"),         // already in kWh
             TotalEnergyKwh = GetDecimal(kpi, "total_power"),
-            BatterySocPercent = GetNullableDecimal(kpi, "soc"),
+            GridExportKw = gridExportKw,
+            GridImportKw = gridImportKw,
+            BatterySocPercent = batterySoc ?? GetNullableDecimal(kpi, "soc"),
+            BatteryPowerKw = batteryPowerKw,
             IsOnline = info.ValueKind != JsonValueKind.Undefined
                 && info.TryGetProperty("status", out var s)
                 && (s.ValueKind == JsonValueKind.Number ? s.GetInt32() == 1 : false)

@@ -472,7 +472,7 @@ public class Startup
                 if (realtime == null)
                     return Results.Json(new { success = false, message = "Could not fetch data from cloud" });
 
-                // Save to DB
+                // 1. Save realtime snapshot
                 db.EnergyData.Add(new Models.EnergyData
                 {
                     InstallationId = installation.Id,
@@ -484,6 +484,100 @@ public class Startup
                     GridImportKwh = realtime.GridImportKw ?? 0,
                     BatterySocPercent = realtime.BatterySocPercent
                 });
+
+                // 2. Upsert today's daily aggregate (used by Dashboard/Reports charts)
+                var today = DateTime.UtcNow.Date;
+                var todayRecord = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                    .FirstOrDefaultAsync(db.EnergyData,
+                        e => e.InstallationId == installation.Id
+                          && e.Granularity == Models.Enums.DataGranularity.Daily
+                          && e.Timestamp.Date == today);
+
+                if (todayRecord == null)
+                {
+                    db.EnergyData.Add(new Models.EnergyData
+                    {
+                        InstallationId = installation.Id,
+                        Timestamp = today,
+                        Granularity = Models.Enums.DataGranularity.Daily,
+                        EnergyGenerationKwh = realtime.TodayEnergyKwh,
+                        GridExportKwh = realtime.GridExportKw ?? 0,
+                        GridImportKwh = realtime.GridImportKw ?? 0,
+                        SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - (realtime.GridExportKw ?? 0)),
+                        BatterySocPercent = realtime.BatterySocPercent
+                    });
+                }
+                else
+                {
+                    todayRecord.EnergyGenerationKwh = realtime.TodayEnergyKwh;
+                    if (realtime.GridExportKw.HasValue) todayRecord.GridExportKwh = realtime.GridExportKw.Value;
+                    if (realtime.GridImportKw.HasValue) todayRecord.GridImportKwh = realtime.GridImportKw.Value;
+                    todayRecord.SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - todayRecord.GridExportKwh);
+                    todayRecord.BatterySocPercent = realtime.BatterySocPercent;
+                }
+
+                // 3. Fetch last 30 days historical + save if missing
+                var histFrom = today.AddDays(-30);
+                var historicalRecords = await adapter.GetHistoricalDataAsync(credentials, histFrom, today.AddDays(-1));
+                var addedHistorical = 0;
+                foreach (var h in historicalRecords)
+                {
+                    var exists = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                        .AnyAsync(db.EnergyData,
+                            e => e.InstallationId == installation.Id
+                              && e.Granularity == Models.Enums.DataGranularity.Daily
+                              && e.Timestamp.Date == h.Timestamp.Date);
+                    if (!exists)
+                    {
+                        db.EnergyData.Add(new Models.EnergyData
+                        {
+                            InstallationId = installation.Id,
+                            Timestamp = h.Timestamp.Date,
+                            Granularity = Models.Enums.DataGranularity.Daily,
+                            EnergyGenerationKwh = h.EnergyGenerationKwh,
+                            GridExportKwh = h.GridExportKwh,
+                            GridImportKwh = h.GridImportKwh,
+                            SelfConsumptionKwh = h.SelfConsumptionKwh,
+                            BatteryChargeKwh = h.BatteryChargeKwh,
+                            BatteryDischargeKwh = h.BatteryDischargeKwh
+                        });
+                        addedHistorical++;
+                    }
+                }
+
+                // 4. Fetch alarms (last 7 days)
+                var alarmRecords = await adapter.GetAlarmsAsync(credentials, today.AddDays(-7), DateTime.UtcNow);
+                var addedAlarms = 0;
+                foreach (var a in alarmRecords)
+                {
+                    var exists = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                        .AnyAsync(db.SystemAlerts,
+                            x => x.InstallationId == installation.Id
+                              && x.Title == a.AlarmName
+                              && x.OccurredAt == a.OccurredAt);
+                    if (!exists)
+                    {
+                        db.SystemAlerts.Add(new Models.SystemAlert
+                        {
+                            InstallationId = installation.Id,
+                            AlertType = Models.Enums.AlertType.Error,
+                            Severity = a.Severity switch
+                            {
+                                1 => Models.Enums.AlertSeverity.Critical,
+                                2 => Models.Enums.AlertSeverity.High,
+                                3 => Models.Enums.AlertSeverity.Medium,
+                                _ => Models.Enums.AlertSeverity.Low
+                            },
+                            Title = a.AlarmName,
+                            Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
+                            OccurredAt = a.OccurredAt,
+                            ResolvedAt = a.ClearedAt,
+                            IsNotified = a.ClearedAt.HasValue
+                        });
+                        addedAlarms++;
+                    }
+                }
+
                 installation.LastOnlineAt = realtime.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
                 if (realtime.IsOnline && installation.Status == Models.Enums.InstallationStatus.Offline)
                     installation.Status = Models.Enums.InstallationStatus.Active;
@@ -493,7 +587,7 @@ public class Startup
                 return Results.Json(new
                 {
                     success = true,
-                    message = "Data synced successfully",
+                    message = $"Synced! Realtime + {addedHistorical} daily records + {addedAlarms} alarms",
                     data = new
                     {
                         timestamp = realtime.Timestamp,
@@ -503,7 +597,10 @@ public class Startup
                         gridExportKw = realtime.GridExportKw,
                         gridImportKw = realtime.GridImportKw,
                         batterySocPercent = realtime.BatterySocPercent,
-                        isOnline = realtime.IsOnline
+                        batteryPowerKw = realtime.BatteryPowerKw,
+                        isOnline = realtime.IsOnline,
+                        historicalDaysAdded = addedHistorical,
+                        alarmsAdded = addedAlarms
                     }
                 });
             }
