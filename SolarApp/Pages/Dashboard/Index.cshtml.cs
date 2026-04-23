@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
@@ -22,12 +23,15 @@ public class IndexModel : PageModel
 
     public DashboardViewModel Dashboard { get; set; } = new();
 
+    [BindProperty(SupportsGet = true)]
+    public int? PartnerId { get; set; }
+
     public async Task OnGetAsync()
     {
         var user = await _userManager.GetUserAsync(User);
         var roles = await _userManager.GetRolesAsync(user!);
         var role = roles.FirstOrDefault() ?? UserRoles.Customer;
 
-        Dashboard = await _dashboardService.GetDashboardAsync(user!.Id, role);
+        Dashboard = await _dashboardService.GetDashboardAsync(user!.Id, role, PartnerId);
     }
 }

@@ -1,240 +1,311 @@
 @page
 @model SolarApp.Pages.Dashboard.IndexModel
-@using System.Text.Json
 @{
-    ViewData["Title"] = "Dashboard";
+    ViewData["Title"] = "Operations Dashboard";
+    var d = Model.Dashboard;
 }
 
-<!-- Summary Cards -->
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card border-0 shadow-sm">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="text-muted">Total Installations</h6>
-                        <h3>@Model.Dashboard.TotalInstallations</h3>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-house-gear text-primary" style="font-size: 2rem;"></i>
-                    </div>
-                </div>
-                <small class="text-success">@Model.Dashboard.ActiveInstallations active</small>
-                @if (Model.Dashboard.OfflineInstallations > 0)
+<!-- ═══ Partner Filter (Admin only) ═══ -->
+@if (d.Partners.Any())
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Operations Dashboard</h5>
+        <form method="get" class="d-flex gap-2 align-items-center">
+            <label class="form-label mb-0 text-muted small">Filter by Partner:</label>
+            <select name="PartnerId" class="form-select form-select-sm" style="width:250px" onchange="this.form.submit()">
+                <option value="">All Partners (@d.TotalInstallations sites)</option>
+                @foreach (var p in d.Partners)
                 {
-                    <small class="text-danger ms-2">@Model.Dashboard.OfflineInstallations offline</small>
+                    <option value="@p.Id" selected="@(d.SelectedPartnerId == p.Id)">@p.Name (@p.InstallationCount)</option>
                 }
+            </select>
+        </form>
+    </div>
+}
+
+<!-- ═══ STATUS OVERVIEW ═══ -->
+<div class="row mb-4 g-3">
+    <div class="col">
+        <div class="card border-0 shadow-sm text-center h-100">
+            <div class="card-body py-3">
+                <div class="display-6 fw-bold">@d.TotalInstallations</div>
+                <small class="text-muted">Total Sites</small>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 shadow-sm">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="text-muted">Today's Generation</h6>
-                        <h3>@Model.Dashboard.TodayGenerationKwh.ToString("N1") <small class="text-muted">kWh</small></h3>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-lightning-charge text-warning" style="font-size: 2rem;"></i>
-                    </div>
-                </div>
-                <small class="text-success">Savings: @Model.Dashboard.TodaySavingsThb.ToString("N0") THB</small>
+    <div class="col">
+        <div class="card border-0 shadow-sm text-center h-100 @(d.OnlineCount == d.TotalInstallations ? "border-success" : "")">
+            <div class="card-body py-3">
+                <div class="display-6 fw-bold text-success">@d.OnlineCount</div>
+                <small class="text-muted">Online</small>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 shadow-sm">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="text-muted">Monthly Generation</h6>
-                        <h3>@Model.Dashboard.MonthlyGenerationKwh.ToString("N0") <small class="text-muted">kWh</small></h3>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-calendar-check text-info" style="font-size: 2rem;"></i>
-                    </div>
-                </div>
-                <small class="text-success">Savings: @Model.Dashboard.MonthlySavingsThb.ToString("N0") THB</small>
+    <div class="col">
+        <div class="card border-0 shadow-sm text-center h-100 @(d.OfflineCount > 0 ? "border-danger border-2" : "")">
+            <div class="card-body py-3">
+                <div class="display-6 fw-bold @(d.OfflineCount > 0 ? "text-danger" : "text-muted")">@d.OfflineCount</div>
+                <small class="text-muted">Offline</small>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card border-0 shadow-sm">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="text-muted">Total Capacity</h6>
-                        <h3>@Model.Dashboard.TotalCapacityKw.ToString("N1") <small class="text-muted">kWp</small></h3>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-sun text-warning" style="font-size: 2rem;"></i>
-                    </div>
-                </div>
+    <div class="col">
+        <div class="card border-0 shadow-sm text-center h-100">
+            <div class="card-body py-3">
+                <div class="display-6 fw-bold text-warning">@d.MaintenanceCount</div>
+                <small class="text-muted">Maintenance</small>
+            </div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="card border-0 shadow-sm text-center h-100">
+            <div class="card-body py-3">
+                <div class="display-6 fw-bold text-info">@d.TotalCapacityKw.ToString("N0")</div>
+                <small class="text-muted">Total kWp</small>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Alert Summary -->
-@if (Model.Dashboard.ActiveAlertCount > 0 || Model.Dashboard.CleaningDueCount > 0)
-{
-    <div class="row mb-4">
-        @if (Model.Dashboard.ActiveAlertCount > 0)
-        {
-            <div class="col-md-4">
-                <div class="card border-danger border-0 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-exclamation-triangle text-danger" style="font-size: 1.5rem;"></i>
-                        <h5 class="mt-2">@Model.Dashboard.ActiveAlertCount Active Alerts</h5>
-                    </div>
-                </div>
-            </div>
-        }
-        @if (Model.Dashboard.CleaningDueCount > 0)
-        {
-            <div class="col-md-4">
-                <div class="card border-warning border-0 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-droplet text-warning" style="font-size: 1.5rem;"></i>
-                        <h5 class="mt-2">@Model.Dashboard.CleaningDueCount Cleaning Due</h5>
-                    </div>
-                </div>
-            </div>
-        }
-        @if (Model.Dashboard.WarrantyExpiringCount > 0)
-        {
-            <div class="col-md-4">
-                <div class="card border-info border-0 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-shield-exclamation text-info" style="font-size: 1.5rem;"></i>
-                        <h5 class="mt-2">@Model.Dashboard.WarrantyExpiringCount Warranty Expiring</h5>
-                    </div>
-                </div>
-            </div>
-        }
-    </div>
+<!-- ═══ ACTION REQUIRED ═══ -->
+@{
+    var hasAction = d.CriticalAlertCount + d.HighAlertCount + d.OfflineCount + d.CleaningDueCount
+                    + d.WarrantyExpiringCount + d.PendingMaintenanceCount + d.OpenTicketCount;
 }
-
-<!-- Charts -->
-<div class="row mb-4">
-    <div class="col-md-8">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white">
-                <h6 class="mb-0">Daily Energy Production (Last 30 Days)</h6>
-            </div>
-            <div class="card-body">
-                <canvas id="dailyChart" height="250"></canvas>
+@if (hasAction > 0)
+{
+    <div class="card border-danger border-2 shadow-sm mb-4">
+        <div class="card-header bg-danger text-white d-flex justify-content-between">
+            <h6 class="mb-0"><i class="bi bi-exclamation-triangle-fill"></i> Action Required</h6>
+            <span class="badge bg-white text-danger">@hasAction items</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="row g-0">
+                @if (d.OfflineCount > 0)
+                {
+                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                        <div class="fs-3 fw-bold text-danger">@d.OfflineCount</div>
+                        <small>Offline</small>
+                    </div>
+                }
+                @if (d.CriticalAlertCount > 0)
+                {
+                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                        <div class="fs-3 fw-bold text-danger">@d.CriticalAlertCount</div>
+                        <small>Critical Alerts</small>
+                    </div>
+                }
+                @if (d.HighAlertCount > 0)
+                {
+                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                        <div class="fs-3 fw-bold text-warning">@d.HighAlertCount</div>
+                        <small>High Alerts</small>
+                    </div>
+                }
+                @if (d.CleaningDueCount > 0)
+                {
+                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                        <div class="fs-3 fw-bold text-info">@d.CleaningDueCount</div>
+                        <small>Cleaning Due</small>
+                    </div>
+                }
+                @if (d.PendingMaintenanceCount > 0)
+                {
+                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                        <div class="fs-3 fw-bold text-primary">@d.PendingMaintenanceCount</div>
+                        <small>Pending MA</small>
+                    </div>
+                }
+                @if (d.OpenTicketCount > 0)
+                {
+                    <div class="col-auto border-end p-3 text-center" style="min-width:120px">
+                        <div class="fs-3 fw-bold text-secondary">@d.OpenTicketCount</div>
+                        <small>Open Tickets</small>
+                    </div>
+                }
+                @if (d.WarrantyExpiringCount > 0)
+                {
+                    <div class="col-auto p-3 text-center" style="min-width:120px">
+                        <div class="fs-3 fw-bold text-info">@d.WarrantyExpiringCount</div>
+                        <small>Warranty &lt;90d</small>
+                    </div>
+                }
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white">
-                <h6 class="mb-0">Recent Alerts</h6>
-            </div>
-            <div class="card-body" style="max-height: 300px; overflow-y: auto;">
-                @if (Model.Dashboard.RecentAlerts.Any())
-                {
-                    @foreach (var alert in Model.Dashboard.RecentAlerts.Take(5))
+}
+else
+{
+    <div class="alert alert-success mb-4">
+        <i class="bi bi-check-circle-fill"></i> <strong>All systems normal</strong> — No action required
+    </div>
+}
+
+<div class="row mb-4">
+    <!-- ═══ OFFLINE INSTALLATIONS ═══ -->
+    @if (d.OfflineInstallations.Any())
+    {
+        <div class="col-md-6 mb-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white"><h6 class="mb-0 text-danger"><i class="bi bi-wifi-off"></i> Offline Installations</h6></div>
+                <div class="card-body p-0">
+                    @foreach (var inst in d.OfflineInstallations)
                     {
-                        var badgeClass = alert.Severity switch
-                        {
-                            SolarApp.Models.Enums.AlertSeverity.Critical => "bg-danger",
-                            SolarApp.Models.Enums.AlertSeverity.High => "bg-warning",
-                            SolarApp.Models.Enums.AlertSeverity.Medium => "bg-info",
-                            _ => "bg-secondary"
-                        };
-                        <div class="d-flex align-items-start mb-3">
-                            <span class="badge @badgeClass me-2 mt-1">@alert.Severity</span>
+                        <div class="d-flex justify-content-between align-items-center border-bottom p-3">
                             <div>
-                                <strong>@alert.Title</strong>
-                                <br /><small class="text-muted">@alert.OccurredAt.ToString("dd/MM HH:mm")</small>
+                                <strong>@inst.SiteName</strong>
+                                <br /><small class="text-muted">@inst.CustomerName @(inst.PartnerName != null ? $"• {inst.PartnerName}" : "")</small>
+                                <br /><small class="text-danger">Last online: @inst.OnlineAgo</small>
                             </div>
+                            <a asp-page="/Installations/Detail" asp-route-id="@inst.Id" class="btn btn-sm btn-outline-danger">View</a>
                         </div>
                     }
-                }
-                else
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- ═══ ACTIVE ALERTS ═══ -->
+    <div class="@(d.OfflineInstallations.Any() ? "col-md-6" : "col-12") mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white d-flex justify-content-between">
+                <h6 class="mb-0"><i class="bi bi-bell-fill text-warning"></i> Active Alerts (@d.ActiveAlerts.Count)</h6>
+                @if (User.IsInRole("Admin"))
                 {
-                    <p class="text-muted text-center mb-0">No active alerts</p>
+                    <a asp-page="/Admin/Alerts" class="btn btn-sm btn-outline-warning">Manage All</a>
+                }
+            </div>
+            <div class="card-body p-0" style="max-height:280px;overflow-y:auto">
+                @foreach (var alert in d.ActiveAlerts)
+                {
+                    var badge = alert.Severity switch
+                    {
+                        SolarApp.Models.Enums.AlertSeverity.Critical => "bg-danger",
+                        SolarApp.Models.Enums.AlertSeverity.High => "bg-warning text-dark",
+                        SolarApp.Models.Enums.AlertSeverity.Medium => "bg-info",
+                        _ => "bg-secondary"
+                    };
+                    <div class="d-flex align-items-start border-bottom p-2 px-3">
+                        <span class="badge @badge me-2 mt-1" style="min-width:70px">@alert.Severity</span>
+                        <div class="flex-grow-1">
+                            <strong>@alert.Title</strong>
+                            <br /><small class="text-muted">@alert.Installation.SiteName • @alert.OccurredAt.ToString("dd/MM HH:mm")</small>
+                        </div>
+                    </div>
+                }
+                @if (!d.ActiveAlerts.Any())
+                {
+                    <p class="text-center text-muted py-3 mb-0">No active alerts</p>
                 }
             </div>
         </div>
     </div>
 </div>
 
-<!-- Monthly Chart -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white">
-                <h6 class="mb-0">Monthly Energy Production (Last 12 Months)</h6>
-            </div>
-            <div class="card-body">
-                <canvas id="monthlyChart" height="200"></canvas>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Installations Table -->
+<!-- ═══ ALL INSTALLATIONS TABLE ═══ -->
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <h6 class="mb-0">Installations Overview</h6>
-        @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
-        {
-            <a asp-page="/Installations/Create" class="btn btn-warning btn-sm">
-                <i class="bi bi-plus"></i> New Installation
-            </a>
-        }
+        <h6 class="mb-0">All Installations</h6>
+        <div class="d-flex gap-2 align-items-center">
+            <input type="text" id="searchInput" class="form-control form-control-sm" style="width:200px"
+                   placeholder="Search site/customer..." />
+            @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+            {
+                <a asp-page="/Installations/Create" class="btn btn-warning btn-sm">
+                    <i class="bi bi-plus"></i> New
+                </a>
+            }
+        </div>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
+            <table class="table table-hover mb-0" id="installationsTable">
                 <thead class="table-light">
                     <tr>
-                        <th>Site Name</th>
-                        <th>Customer</th>
-                        <th>Brand</th>
-                        <th>Capacity</th>
-                        <th>Today</th>
-                        <th>This Month</th>
                         <th>Status</th>
+                        <th>Site</th>
+                        <th>Customer</th>
+                        @if (User.IsInRole("Admin")) { <th>Partner</th> }
+                        <th>Inverter</th>
+                        <th>Capacity</th>
+                        <th>Last Online</th>
                         <th>Alerts</th>
+                        <th>Cleaning</th>
+                        <th>Warranty</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var inst in Model.Dashboard.Installations)
+                    @foreach (var inst in d.AllInstallations)
                     {
-                        var statusClass = inst.Status switch
-                        {
-                            "Active" => "bg-success",
-                            "Offline" => "bg-danger",
-                            "Maintenance" => "bg-warning",
-                            _ => "bg-secondary"
-                        };
-                        <tr>
-                            <td><strong>@inst.SiteName</strong></td>
+                        <tr class="searchable" data-search="@inst.SiteName @inst.CustomerName @inst.PartnerName @inst.InverterBrand">
+                            <td><span class="badge @inst.StatusBadgeClass">@inst.Status</span></td>
+                            <td>
+                                <a asp-page="/Installations/Detail" asp-route-id="@inst.Id" class="text-decoration-none">
+                                    <strong>@inst.SiteName</strong>
+                                </a>
+                                <br /><small class="text-muted">@inst.SiteCode</small>
+                            </td>
                             <td>@inst.CustomerName</td>
-                            <td>@inst.InverterBrand</td>
+                            @if (User.IsInRole("Admin"))
+                            {
+                                <td><small>@(inst.PartnerName ?? "Direct")</small></td>
+                            }
+                            <td>
+                                <small>@inst.InverterBrand</small>
+                                @if (inst.InverterSizeKw > 0)
+                                {
+                                    <br /><small class="text-muted">@inst.InverterSizeKw kW ×@inst.InverterCount</small>
+                                }
+                            </td>
                             <td>@inst.CapacityKw kWp</td>
-                            <td>@inst.TodayKwh.ToString("N1") kWh</td>
-                            <td>@inst.MonthKwh.ToString("N0") kWh</td>
-                            <td><span class="badge @statusClass">@inst.Status</span></td>
+                            <td class="@(inst.Status == "Offline" ? "text-danger fw-bold" : "")">
+                                <small>@inst.OnlineAgo</small>
+                            </td>
                             <td>
                                 @if (inst.ActiveAlerts > 0)
                                 {
                                     <span class="badge bg-danger">@inst.ActiveAlerts</span>
                                 }
+                                else
+                                {
+                                    <span class="text-success"><i class="bi bi-check-circle"></i></span>
+                                }
                             </td>
                             <td>
-                                <a asp-page="/Installations/Detail" asp-route-id="@inst.Id"
-                                   class="btn btn-sm btn-outline-primary">
+                                @if (inst.IsCleaningDue)
+                                {
+                                    <span class="badge bg-warning text-dark" title="@inst.NextCleaningDate?.ToString("dd/MM/yyyy")">Due!</span>
+                                }
+                                else
+                                {
+                                    <small class="text-muted">@inst.RemainingCleanings left</small>
+                                }
+                            </td>
+                            <td>
+                                @if (inst.WarrantyDaysLeft <= 0)
+                                {
+                                    <span class="badge bg-danger">Expired</span>
+                                }
+                                else if (inst.WarrantyDaysLeft <= 90)
+                                {
+                                    <span class="badge bg-warning text-dark">@inst.WarrantyDaysLeft d</span>
+                                }
+                                else
+                                {
+                                    <small class="text-muted">@inst.WarrantyExpiry.ToString("MM/yyyy")</small>
+                                }
+                            </td>
+                            <td>
+                                <a asp-page="/Installations/Detail" asp-route-id="@inst.Id" class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-eye"></i>
                                 </a>
                             </td>
                         </tr>
+                    }
+                    @if (!d.AllInstallations.Any())
+                    {
+                        <tr><td colspan="11" class="text-center text-muted py-4">No installations</td></tr>
                     }
                 </tbody>
             </table>
@@ -244,62 +315,12 @@
 
 @section Scripts {
     <script>
-        // Daily Production Chart
-        const dailyCtx = document.getElementById('dailyChart').getContext('2d');
-        const dailyData = @Html.Raw(JsonSerializer.Serialize(Model.Dashboard.DailyProductionChart));
-        new Chart(dailyCtx, {
-            type: 'bar',
-            data: {
-                labels: dailyData.map(d => d.label),
-                datasets: [{
-                    label: 'Generation (kWh)',
-                    data: dailyData.map(d => d.value),
-                    backgroundColor: 'rgba(255, 193, 7, 0.7)',
-                    borderColor: 'rgba(255, 193, 7, 1)',
-                    borderWidth: 1
-                }, {
-                    label: 'Self Consumption (kWh)',
-                    data: dailyData.map(d => d.value2 || 0),
-                    backgroundColor: 'rgba(13, 202, 240, 0.5)',
-                    borderColor: 'rgba(13, 202, 240, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { y: { beginAtZero: true } }
-            }
-        });
-
-        // Monthly Production Chart
-        const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
-        const monthlyData = @Html.Raw(JsonSerializer.Serialize(Model.Dashboard.MonthlyProductionChart));
-        new Chart(monthlyCtx, {
-            type: 'line',
-            data: {
-                labels: monthlyData.map(d => d.label),
-                datasets: [{
-                    label: 'Generation (kWh)',
-                    data: monthlyData.map(d => d.value),
-                    borderColor: 'rgba(255, 193, 7, 1)',
-                    backgroundColor: 'rgba(255, 193, 7, 0.1)',
-                    fill: true,
-                    tension: 0.3
-                }, {
-                    label: 'Grid Export (kWh)',
-                    data: monthlyData.map(d => d.value2 || 0),
-                    borderColor: 'rgba(40, 167, 69, 1)',
-                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
-                    fill: true,
-                    tension: 0.3
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: { y: { beginAtZero: true } }
-            }
+        // Search filter
+        document.getElementById('searchInput')?.addEventListener('input', function () {
+            const q = this.value.toLowerCase();
+            document.querySelectorAll('#installationsTable .searchable').forEach(row => {
+                row.style.display = row.dataset.search.toLowerCase().includes(q) ? '' : 'none';
+            });
         });
     </script>
 }
