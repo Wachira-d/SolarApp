@@ -145,10 +145,19 @@ public class ScheduleModel : PageModel
     private static bool IsValidCron(string cron)
     {
         if (string.IsNullOrWhiteSpace(cron)) return false;
+
+        // Basic validation: 5 or 6 space-separated fields.
+        // Hangfire will throw at AddOrUpdate if the expression itself is invalid.
+        var parts = cron.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 5 || parts.Length > 6) return false;
+
         try
         {
-            // Cronos is bundled with Hangfire
-            Cronos.CronExpression.Parse(cron);
+            // Let Hangfire try to parse via its own internal validator.
+            // If invalid, AddOrUpdate will throw - we catch that.
+            var testJobId = $"_cron-validation-{Guid.NewGuid():N}";
+            Hangfire.RecurringJob.AddOrUpdate(testJobId, () => Console.WriteLine("noop"), cron);
+            Hangfire.RecurringJob.RemoveIfExists(testJobId);
             return true;
         }
         catch
