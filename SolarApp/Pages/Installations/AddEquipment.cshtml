@@ -50,7 +50,7 @@
                             <label asp-for="Input.RatingKw" class="form-label">
                                 Rating (kW) <span class="text-muted small" id="ratingKwHint">Power per unit</span>
                             </label>
-                            <input asp-for="Input.RatingKw" class="form-control" type="number" step="0.01" placeholder="e.g. 10" />
+                            <input asp-for="Input.RatingKw" class="form-control" type="number" step="any" placeholder="e.g. 10" />
                         </div>
                         <div class="col-md-3" id="ratingWattsWrap" style="display:none">
                             <label asp-for="Input.RatingWatts" class="form-label">Wattage per Panel (W)</label>
