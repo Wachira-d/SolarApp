@@ -1,0 +1,184 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.DiagnosticsModel
+@{
+    ViewData["Title"] = $"Diagnostics - {Model.Installation.SiteName}";
+    var inst = Model.Installation;
+    var r = Model.Report;
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0">Connection Diagnostics</h4>
+        <small class="text-muted">@inst.SiteName · @inst.InverterBrand</small>
+    </div>
+    <div class="d-flex gap-2">
+        <a asp-page="Detail" asp-route-id="@inst.Id" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Back
+        </a>
+        <a asp-page="Diagnostics" asp-route-id="@inst.Id" asp-route-run="true" class="btn btn-warning btn-sm">
+            <i class="bi bi-arrow-clockwise"></i> Run Full Check
+        </a>
+    </div>
+</div>
+
+<!-- Installation Summary -->
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <div class="row g-2 small">
+            <div class="col-6 col-md-3">
+                <div class="text-muted">Brand</div>
+                <strong>@inst.InverterBrand</strong>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted">Plant ID</div>
+                <strong class="text-break">@(inst.PlantId ?? "-")</strong>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted">Status</div>
+                <span class="badge @(inst.Status.ToString() == "Active" ? "bg-success" : "bg-secondary")">@inst.Status</span>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="text-muted">Last Online</div>
+                <strong>@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "Never")</strong>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (r == null)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-clipboard-check text-muted" style="font-size:3rem"></i>
+            <h5 class="mt-3">Connection Diagnostics</h5>
+            <p class="text-muted">Run comprehensive connection tests including:</p>
+            <ul class="list-unstyled small text-start d-inline-block mb-4">
+                <li>✓ Credentials validation</li>
+                <li>✓ Authentication / Login</li>
+                <li>✓ Plant Info retrieval</li>
+                <li>✓ Real-time data</li>
+                <li>✓ Historical data (7 days)</li>
+                <li>✓ Device list</li>
+                <li>✓ Alarms check</li>
+            </ul>
+            <div>
+                <a asp-page="Diagnostics" asp-route-id="@inst.Id" asp-route-run="true" class="btn btn-warning">
+                    <i class="bi bi-play-fill"></i> Run Diagnostics Now
+                </a>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    var alertClass = r.OverallSuccess ? "alert-success" : r.FailedCount >= 3 ? "alert-danger" : "alert-warning";
+    <div class="alert @alertClass d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h6 class="mb-1">
+                @if (r.OverallSuccess)
+                {
+                    <span><i class="bi bi-check-circle-fill"></i> All Checks Passed</span>
+                }
+                else
+                {
+                    <span><i class="bi bi-exclamation-triangle-fill"></i> Some Checks Failed</span>
+                }
+            </h6>
+            <div class="small">@r.Summary · Ran at @r.RunAt.ToString("HH:mm:ss")</div>
+        </div>
+        <div class="d-flex gap-3">
+            <div class="text-center">
+                <div class="fs-4 fw-bold text-success">@r.PassedCount</div>
+                <small>Passed</small>
+            </div>
+            <div class="text-center">
+                <div class="fs-4 fw-bold text-danger">@r.FailedCount</div>
+                <small>Failed</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Step-by-step results -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white"><h6 class="mb-0">Step-by-Step Results</h6></div>
+        <div class="list-group list-group-flush">
+            @foreach (var step in r.Steps)
+            {
+                var icon = step.Success ? "check-circle-fill text-success" : "x-circle-fill text-danger";
+                <div class="list-group-item">
+                    <div class="d-flex align-items-start gap-3">
+                        <i class="bi bi-@icon fs-5 mt-1"></i>
+                        <div class="flex-grow-1 min-width-0">
+                            <div class="d-flex justify-content-between flex-wrap gap-2">
+                                <strong>@step.Name</strong>
+                                <div class="small text-muted">
+                                    @if (step.ItemCount > 0)
+                                    {
+                                        <span class="me-2"><i class="bi bi-list-ol"></i> @step.ItemCount items</span>
+                                    }
+                                    <span><i class="bi bi-clock"></i> @step.DurationMs ms</span>
+                                </div>
+                            </div>
+                            <div class="mt-1 @(step.Success ? "" : "text-danger")">@step.Message</div>
+                            @if (!string.IsNullOrEmpty(step.Detail))
+                            {
+                                <div class="small text-muted mt-1">
+                                    <code class="text-body-secondary">@step.Detail</code>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<!-- Recent API Call Logs -->
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white">
+        <h6 class="mb-0">Recent API Calls (Last 20)</h6>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Time</th>
+                        <th>Endpoint</th>
+                        <th>Status</th>
+                        <th>HTTP</th>
+                        <th>Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in Model.RecentLogs)
+                    {
+                        <tr>
+                            <td class="text-nowrap"><small>@log.RequestTime.ToString("dd/MM HH:mm:ss")</small></td>
+                            <td><small>@log.Endpoint</small></td>
+                            <td>
+                                @if (log.IsSuccess)
+                                {
+                                    <span class="badge bg-success">OK</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-danger">FAIL</span>
+                                }
+                            </td>
+                            <td><small>@log.ResponseStatusCode</small></td>
+                            <td class="text-truncate" style="max-width:300px">
+                                <small class="text-danger">@log.ErrorMessage</small>
+                            </td>
+                        </tr>
+                    }
+                    @if (!Model.RecentLogs.Any())
+                    {
+                        <tr><td colspan="5" class="text-center text-muted py-3">No API call logs yet</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
