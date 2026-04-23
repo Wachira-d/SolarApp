@@ -4,6 +4,16 @@
     ViewData["Title"] = "Maintenance";
 }
 
+<div class="d-flex justify-content-between mb-3">
+    <h4>Maintenance</h4>
+    @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+    {
+        <a asp-page="Create" class="btn btn-warning btn-sm">
+            <i class="bi bi-plus-lg"></i> New Maintenance
+        </a>
+    }
+</div>
+
 @if (Model.CleaningDue.Any())
 {
     <div class="alert alert-warning mb-4">
@@ -38,6 +48,10 @@
                     <th>By</th>
                     <th>Cost</th>
                     <th>Notes</th>
+                    @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+                    {
+                        <th class="text-end">Actions</th>
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -56,11 +70,19 @@
                         <td>@(r.PerformedByUser?.FullName ?? "-")</td>
                         <td>@(r.Cost?.ToString("N0") ?? "-")</td>
                         <td><small>@(r.Notes ?? "-")</small></td>
+                        @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+                        {
+                            <td class="text-end">
+                                <a asp-page="Edit" asp-route-id="@r.Id" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                            </td>
+                        }
                     </tr>
                 }
                 @if (!Model.Records.Any())
                 {
-                    <tr><td colspan="8" class="text-center text-muted py-4">No maintenance records</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted py-4">No maintenance records</td></tr>
                 }
             </tbody>
         </table>

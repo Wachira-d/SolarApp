@@ -1,0 +1,104 @@
+@page "{id:int}"
+@model SolarApp.Pages.ServiceTickets.EditModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = $"Ticket {Model.Ticket.TicketNumber}";
+}
+
+<div class="d-flex justify-content-between mb-3">
+    <h4>@Model.Ticket.TicketNumber - @Model.Ticket.Subject</h4>
+    <a asp-page="Index" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Tickets
+    </a>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <form method="post">
+                    <input type="hidden" asp-for="Input.Id" />
+
+                    <div class="mb-3">
+                        <label class="form-label">Subject *</label>
+                        <input asp-for="Input.Subject" class="form-control" required />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description *</label>
+                        <textarea asp-for="Input.Description" class="form-control" rows="4" required></textarea>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Priority</label>
+                            <select asp-for="Input.Priority" asp-items="Html.GetEnumSelectList<TicketPriority>()" class="form-select"></select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Status</label>
+                            <select asp-for="Input.Status" asp-items="Html.GetEnumSelectList<TicketStatus>()" class="form-select"></select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Assigned To</label>
+                            <select asp-for="Input.AssignedToUserId" asp-items="Model.Assignees" class="form-select">
+                                <option value="">-- Unassigned --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Resolution</label>
+                        <textarea asp-for="Input.Resolution" class="form-control" rows="3"
+                                  placeholder="How was this issue resolved?"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Internal Notes</label>
+                        <textarea asp-for="Input.Notes" class="form-control" rows="2"></textarea>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-save"></i> Save Changes
+                        </button>
+                        @if (User.IsInRole("Admin"))
+                        {
+                            <button type="submit" asp-page-handler="Delete" asp-route-id="@Model.Ticket.Id"
+                                    class="btn btn-outline-danger ms-auto"
+                                    onclick="return confirm('Delete this ticket permanently?');">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        }
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white"><h6 class="mb-0">Ticket Info</h6></div>
+            <div class="card-body">
+                <table class="table table-sm table-borderless mb-0">
+                    <tr><td class="text-muted">Site</td><td>@Model.Ticket.Installation.SiteName</td></tr>
+                    <tr><td class="text-muted">Customer</td><td>@Model.Ticket.Installation.Customer.FullName</td></tr>
+                    <tr><td class="text-muted">Reported By</td><td>@Model.Ticket.ReportedByUser.FullName</td></tr>
+                    <tr><td class="text-muted">Created</td><td>@Model.Ticket.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                    <tr><td class="text-muted">Updated</td><td>@Model.Ticket.UpdatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                    @if (Model.Ticket.ResolvedAt.HasValue)
+                    {
+                        <tr><td class="text-muted">Resolved</td><td>@Model.Ticket.ResolvedAt?.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                    }
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

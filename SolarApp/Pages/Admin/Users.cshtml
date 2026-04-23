@@ -5,21 +5,41 @@
     ViewData["Title"] = "User Management";
 }
 
-<!-- Tabs -->
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="bi bi-check-circle"></i> @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
 <ul class="nav nav-tabs mb-4">
     <li class="nav-item">
-        <a class="nav-link active" data-bs-toggle="tab" href="#users">Users</a>
+        <a class="nav-link active" data-bs-toggle="tab" href="#users">
+            <i class="bi bi-person"></i> Users (@Model.Users.Count)
+        </a>
     </li>
     <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#customers">Customers (@Model.CustomerList.Count)</a>
+        <a class="nav-link" data-bs-toggle="tab" href="#customers">
+            <i class="bi bi-people"></i> Customers (@Model.CustomerList.Count)
+        </a>
     </li>
     <li class="nav-item">
-        <a class="nav-link" data-bs-toggle="tab" href="#partners">Partners (@Model.PartnerList.Count)</a>
+        <a class="nav-link" data-bs-toggle="tab" href="#partners">
+            <i class="bi bi-building"></i> Partners (@Model.PartnerList.Count)
+        </a>
     </li>
 </ul>
 
 <div class="tab-content">
-    <!-- Users Tab -->
+    <!-- ───── USERS TAB ───── -->
     <div class="tab-pane fade show active" id="users">
         <div class="d-flex justify-content-between mb-3">
             <h5>System Users</h5>
@@ -29,30 +49,76 @@
         </div>
         <div class="card border-0 shadow-sm">
             <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead class="table-light">
-                        <tr><th>Name</th><th>Email</th><th>Company</th><th>Role</th><th>Status</th><th>Created</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var u in Model.Users)
-                        {
-                            var roleClass = u.Role switch { "Admin" => "bg-danger", "Partner" => "bg-primary", "Customer" => "bg-success", _ => "bg-secondary" };
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
                             <tr>
-                                <td><strong>@u.FullName</strong></td>
-                                <td>@u.Email</td>
-                                <td>@(u.CompanyName ?? "-")</td>
-                                <td><span class="badge @roleClass">@u.Role</span></td>
-                                <td><span class="badge @(u.IsActive ? "bg-success" : "bg-secondary")">@(u.IsActive ? "Active" : "Inactive")</span></td>
-                                <td>@u.CreatedAt.ToString("dd/MM/yyyy")</td>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Role</th>
+                                <th>Partner</th>
+                                <th>Status</th>
+                                <th>Last Login</th>
+                                <th class="text-end">Actions</th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (var u in Model.Users)
+                            {
+                                var roleClass = u.Role switch { "Admin" => "bg-danger", "Partner" => "bg-primary", "Customer" => "bg-success", _ => "bg-secondary" };
+                                <tr>
+                                    <td><strong>@u.FullName</strong></td>
+                                    <td>@u.Email</td>
+                                    <td>@(u.PhoneNumber ?? "-")</td>
+                                    <td><span class="badge @roleClass">@u.Role</span></td>
+                                    <td>@(u.PartnerName ?? "-")</td>
+                                    <td>
+                                        <span class="badge @(u.IsActive ? "bg-success" : "bg-secondary")">
+                                            @(u.IsActive ? "Active" : "Inactive")
+                                        </span>
+                                    </td>
+                                    <td><small>@(u.LastLoginAt?.ToString("dd/MM HH:mm") ?? "-")</small></td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-primary edit-user-btn" type="button"
+                                                    data-id="@u.Id" data-fullname="@u.FullName" data-email="@u.Email"
+                                                    data-phone="@u.PhoneNumber" data-company="@u.CompanyName"
+                                                    data-line="@u.LineUserId" data-role="@u.Role"
+                                                    data-partner="@u.PartnerId" data-active="@u.IsActive.ToString().ToLower()"
+                                                    data-bs-toggle="modal" data-bs-target="#editUserModal">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <button class="btn btn-outline-warning reset-pw-btn" type="button"
+                                                    data-id="@u.Id" data-email="@u.Email"
+                                                    data-bs-toggle="modal" data-bs-target="#resetPwModal" title="Reset Password">
+                                                <i class="bi bi-key"></i>
+                                            </button>
+                                            <form method="post" asp-page-handler="ToggleUserActive" class="d-inline">
+                                                <input type="hidden" name="userId" value="@u.Id" />
+                                                <button type="submit" class="btn btn-outline-secondary" title="@(u.IsActive ? "Deactivate" : "Activate")">
+                                                    <i class="bi bi-@(u.IsActive ? "lock" : "unlock")"></i>
+                                                </button>
+                                            </form>
+                                            <form method="post" asp-page-handler="DeleteUser" class="d-inline"
+                                                  onsubmit="return confirm('Delete user @u.Email?');">
+                                                <input type="hidden" name="userId" value="@u.Id" />
+                                                <button type="submit" class="btn btn-outline-danger">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Customers Tab -->
+    <!-- ───── CUSTOMERS TAB ───── -->
     <div class="tab-pane fade" id="customers">
         <div class="d-flex justify-content-between mb-3">
             <h5>Customers</h5>
@@ -62,33 +128,65 @@
         </div>
         <div class="card border-0 shadow-sm">
             <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead class="table-light">
-                        <tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>LINE</th><th>Status</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var c in Model.CustomerList)
-                        {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
                             <tr>
-                                <td><strong>@c.FullName</strong></td>
-                                <td>@(c.Email ?? "-")</td>
-                                <td>@c.Phone</td>
-                                <td><small>@c.Address, @c.City @c.Province</small></td>
-                                <td>@(!string.IsNullOrEmpty(c.LineUserId) ? "Connected" : "-")</td>
-                                <td><span class="badge @(c.IsActive ? "bg-success" : "bg-secondary")">@(c.IsActive ? "Active" : "Inactive")</span></td>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Address</th>
+                                <th>LINE</th>
+                                <th>Sites</th>
+                                <th>Status</th>
+                                <th class="text-end">Actions</th>
                             </tr>
-                        }
-                        @if (!Model.CustomerList.Any())
-                        {
-                            <tr><td colspan="6" class="text-center text-muted py-3">No customers</td></tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in Model.CustomerList)
+                            {
+                                <tr>
+                                    <td><strong>@c.FullName</strong></td>
+                                    <td>@(c.Email ?? "-")</td>
+                                    <td>@c.Phone</td>
+                                    <td><small>@c.Address @(string.IsNullOrEmpty(c.City) ? "" : ", " + c.City)</small></td>
+                                    <td>@(string.IsNullOrEmpty(c.LineUserId) ? "-" : "Yes")</td>
+                                    <td><span class="badge bg-info">@c.Installations.Count</span></td>
+                                    <td><span class="badge @(c.IsActive ? "bg-success" : "bg-secondary")">@(c.IsActive ? "Active" : "Inactive")</span></td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-primary edit-customer-btn" type="button"
+                                                    data-id="@c.Id" data-firstname="@c.FirstName" data-lastname="@c.LastName"
+                                                    data-email="@c.Email" data-phone="@c.Phone" data-line="@c.LineUserId"
+                                                    data-address="@c.Address" data-city="@c.City" data-province="@c.Province"
+                                                    data-postal="@c.PostalCode" data-taxid="@c.TaxId" data-userid="@c.UserId"
+                                                    data-active="@c.IsActive.ToString().ToLower()" data-notes="@c.Notes"
+                                                    data-bs-toggle="modal" data-bs-target="#editCustomerModal">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <form method="post" asp-page-handler="DeleteCustomer" class="d-inline"
+                                                  onsubmit="return confirm('Delete customer @c.FullName?');">
+                                                <input type="hidden" name="customerId" value="@c.Id" />
+                                                <button type="submit" class="btn btn-outline-danger">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                            @if (!Model.CustomerList.Any())
+                            {
+                                <tr><td colspan="8" class="text-center text-muted py-3">No customers</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Partners Tab -->
+    <!-- ───── PARTNERS TAB ───── -->
     <div class="tab-pane fade" id="partners">
         <div class="d-flex justify-content-between mb-3">
             <h5>Partners</h5>
@@ -98,53 +196,101 @@
         </div>
         <div class="card border-0 shadow-sm">
             <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead class="table-light">
-                        <tr><th>Company</th><th>Email</th><th>Phone</th><th>Commission</th><th>Tax ID</th><th>Status</th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var p in Model.PartnerList)
-                        {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
                             <tr>
-                                <td><strong>@p.CompanyName</strong></td>
-                                <td>@p.ContactEmail</td>
-                                <td>@p.ContactPhone</td>
-                                <td>@(p.CommissionRate?.ToString("N1") ?? "-")%</td>
-                                <td>@(p.TaxId ?? "-")</td>
-                                <td><span class="badge @(p.IsActive ? "bg-success" : "bg-secondary")">@(p.IsActive ? "Active" : "Inactive")</span></td>
+                                <th>Company</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Commission</th>
+                                <th>Sites</th>
+                                <th>Contract</th>
+                                <th>Status</th>
+                                <th class="text-end">Actions</th>
                             </tr>
-                        }
-                        @if (!Model.PartnerList.Any())
-                        {
-                            <tr><td colspan="6" class="text-center text-muted py-3">No partners</td></tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in Model.PartnerList)
+                            {
+                                <tr>
+                                    <td><strong>@p.CompanyName</strong></td>
+                                    <td>@p.ContactEmail</td>
+                                    <td>@p.ContactPhone</td>
+                                    <td>@(p.CommissionRate?.ToString("N1") ?? "-")%</td>
+                                    <td><span class="badge bg-info">@p.Installations.Count</span></td>
+                                    <td><small>@(p.ContractEndDate?.ToString("dd/MM/yyyy") ?? "-")</small></td>
+                                    <td><span class="badge @(p.IsActive ? "bg-success" : "bg-secondary")">@(p.IsActive ? "Active" : "Inactive")</span></td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-primary edit-partner-btn" type="button"
+                                                    data-id="@p.Id" data-company="@p.CompanyName"
+                                                    data-email="@p.ContactEmail" data-phone="@p.ContactPhone"
+                                                    data-address="@p.Address" data-city="@p.City" data-province="@p.Province"
+                                                    data-postal="@p.PostalCode" data-commission="@p.CommissionRate"
+                                                    data-taxid="@p.TaxId" data-active="@p.IsActive.ToString().ToLower()"
+                                                    data-contractstart="@p.ContractStartDate?.ToString("yyyy-MM-dd")"
+                                                    data-contractend="@p.ContractEndDate?.ToString("yyyy-MM-dd")"
+                                                    data-notes="@p.Notes"
+                                                    data-bs-toggle="modal" data-bs-target="#editPartnerModal">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <form method="post" asp-page-handler="DeletePartner" class="d-inline"
+                                                  onsubmit="return confirm('Delete partner @p.CompanyName?');">
+                                                <input type="hidden" name="partnerId" value="@p.Id" />
+                                                <button type="submit" class="btn btn-outline-danger">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                            @if (!Model.PartnerList.Any())
+                            {
+                                <tr><td colspan="8" class="text-center text-muted py-3">No partners</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Create User Modal -->
+<!-- ═══════════════════ MODALS ═══════════════════ -->
+
+<!-- Create User -->
 <div class="modal fade" id="createUserModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="post" asp-page-handler="CreateUser">
                 <div class="modal-header"><h5 class="modal-title">Add User</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-3"><label class="form-label">Full Name *</label><input asp-for="NewUser.FullName" class="form-control" required /></div>
-                    <div class="mb-3"><label class="form-label">Email *</label><input asp-for="NewUser.Email" class="form-control" type="email" required /></div>
-                    <div class="mb-3"><label class="form-label">Password *</label><input asp-for="NewUser.Password" class="form-control" type="password" required /></div>
-                    <div class="mb-3"><label class="form-label">Role *</label>
-                        <select asp-for="NewUser.Role" class="form-select">
+                    <div class="mb-2"><label class="form-label">Full Name *</label><input asp-for="NewUser.FullName" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">Email *</label><input asp-for="NewUser.Email" class="form-control" type="email" required /></div>
+                    <div class="mb-2"><label class="form-label">Password *</label><input asp-for="NewUser.Password" class="form-control" type="password" required minlength="8" />
+                        <small class="text-muted">Min 8 chars, uppercase, digit, special char</small></div>
+                    <div class="mb-2"><label class="form-label">Role *</label>
+                        <select asp-for="NewUser.Role" class="form-select" id="newUserRole">
                             <option value="@UserRoles.Customer">Customer</option>
                             <option value="@UserRoles.Partner">Partner</option>
                             <option value="@UserRoles.Admin">Admin</option>
                         </select>
                     </div>
-                    <div class="mb-3"><label class="form-label">Company</label><input asp-for="NewUser.CompanyName" class="form-control" /></div>
-                    <div class="mb-3"><label class="form-label">Phone</label><input asp-for="NewUser.Phone" class="form-control" /></div>
-                    <div class="mb-3"><label class="form-label">LINE User ID</label><input asp-for="NewUser.LineUserId" class="form-control" /></div>
+                    <div class="mb-2 partner-select" style="display:none">
+                        <label class="form-label">Partner Company</label>
+                        <select asp-for="NewUser.PartnerId" class="form-select">
+                            <option value="">-- Select Partner --</option>
+                            @foreach (var p in Model.PartnerList)
+                            {
+                                <option value="@p.Id">@p.CompanyName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-2"><label class="form-label">Phone</label><input asp-for="NewUser.Phone" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="NewUser.LineUserId" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">Company</label><input asp-for="NewUser.CompanyName" class="form-control" /></div>
                 </div>
                 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Create</button></div>
             </form>
@@ -152,27 +298,99 @@
     </div>
 </div>
 
-<!-- Create Customer Modal -->
-<div class="modal fade" id="createCustomerModal" tabindex="-1">
+<!-- Edit User -->
+<div class="modal fade" id="editUserModal" tabindex="-1">
     <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" asp-page-handler="EditUser">
+                <input type="hidden" asp-for="EditUser.Id" id="editUserId" />
+                <div class="modal-header"><h5 class="modal-title">Edit User</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="mb-2"><label class="form-label">Full Name *</label><input asp-for="EditUser.FullName" id="editFullName" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">Email *</label><input asp-for="EditUser.Email" id="editEmail" class="form-control" type="email" required /></div>
+                    <div class="mb-2"><label class="form-label">Role *</label>
+                        <select asp-for="EditUser.Role" id="editRole" class="form-select">
+                            <option value="@UserRoles.Customer">Customer</option>
+                            <option value="@UserRoles.Partner">Partner</option>
+                            <option value="@UserRoles.Admin">Admin</option>
+                        </select>
+                    </div>
+                    <div class="mb-2 partner-select-edit">
+                        <label class="form-label">Partner Company</label>
+                        <select asp-for="EditUser.PartnerId" id="editPartnerId" class="form-select">
+                            <option value="">-- None --</option>
+                            @foreach (var p in Model.PartnerList)
+                            {
+                                <option value="@p.Id">@p.CompanyName</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-2"><label class="form-label">Phone</label><input asp-for="EditUser.Phone" id="editPhone" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="EditUser.LineUserId" id="editLineUserId" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">Company</label><input asp-for="EditUser.CompanyName" id="editCompany" class="form-control" /></div>
+                    <div class="form-check"><input asp-for="EditUser.IsActive" id="editIsActive" class="form-check-input" /><label class="form-check-label">Active</label></div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Reset Password -->
+<div class="modal fade" id="resetPwModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" asp-page-handler="ResetPassword">
+                <input type="hidden" asp-for="PwReset.UserId" id="resetUserId" />
+                <div class="modal-header"><h5 class="modal-title">Reset Password</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <p>Reset password for <strong id="resetEmail"></strong></p>
+                    <div class="mb-2">
+                        <label class="form-label">New Password *</label>
+                        <input asp-for="PwReset.NewPassword" class="form-control" type="password" required minlength="8" />
+                        <small class="text-muted">Min 8 chars, uppercase, digit, special char (e.g. Test@1234)</small>
+                    </div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Reset</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Create Customer -->
+<div class="modal fade" id="createCustomerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="post" asp-page-handler="CreateCustomer">
                 <div class="modal-header"><h5 class="modal-title">Add Customer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="row mb-3">
-                        <div class="col-6"><label class="form-label">First Name *</label><input asp-for="NewCustomer.FirstName" class="form-control" required /></div>
-                        <div class="col-6"><label class="form-label">Last Name *</label><input asp-for="NewCustomer.LastName" class="form-control" required /></div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">First Name *</label><input asp-for="NewCustomer.FirstName" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Last Name *</label><input asp-for="NewCustomer.LastName" class="form-control" required /></div>
                     </div>
-                    <div class="mb-3"><label class="form-label">Email</label><input asp-for="NewCustomer.Email" class="form-control" type="email" /></div>
-                    <div class="mb-3"><label class="form-label">Phone *</label><input asp-for="NewCustomer.Phone" class="form-control" required /></div>
-                    <div class="mb-3"><label class="form-label">LINE User ID</label><input asp-for="NewCustomer.LineUserId" class="form-control" /></div>
-                    <div class="mb-3"><label class="form-label">Address *</label><input asp-for="NewCustomer.Address" class="form-control" required /></div>
-                    <div class="row mb-3">
-                        <div class="col-4"><label class="form-label">City</label><input asp-for="NewCustomer.City" class="form-control" /></div>
-                        <div class="col-4"><label class="form-label">Province</label><input asp-for="NewCustomer.Province" class="form-control" /></div>
-                        <div class="col-4"><label class="form-label">Postal Code</label><input asp-for="NewCustomer.PostalCode" class="form-control" /></div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Email</label><input asp-for="NewCustomer.Email" class="form-control" type="email" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Phone *</label><input asp-for="NewCustomer.Phone" class="form-control" required /></div>
                     </div>
-                    <div class="mb-3"><label class="form-label">Tax ID</label><input asp-for="NewCustomer.TaxId" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="NewCustomer.LineUserId" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">Address *</label><input asp-for="NewCustomer.Address" class="form-control" required /></div>
+                    <div class="row">
+                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="NewCustomer.City" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="NewCustomer.Province" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="NewCustomer.PostalCode" class="form-control" /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="NewCustomer.TaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Link to User Account</label>
+                            <select asp-for="NewCustomer.UserId" class="form-select">
+                                <option value="">-- None --</option>
+                                @foreach (var u in Model.Users.Where(x => x.Role == "Customer"))
+                                {
+                                    <option value="@u.Id">@u.FullName (@u.Email)</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Create</button></div>
             </form>
@@ -180,24 +398,75 @@
     </div>
 </div>
 
-<!-- Create Partner Modal -->
+<!-- Edit Customer -->
+<div class="modal fade" id="editCustomerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" asp-page-handler="EditCustomer">
+                <input type="hidden" asp-for="EditCustomer.Id" id="editCustId" />
+                <div class="modal-header"><h5 class="modal-title">Edit Customer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">First Name *</label><input asp-for="EditCustomer.FirstName" id="editCustFirst" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Last Name *</label><input asp-for="EditCustomer.LastName" id="editCustLast" class="form-control" required /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Email</label><input asp-for="EditCustomer.Email" id="editCustEmail" class="form-control" type="email" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Phone *</label><input asp-for="EditCustomer.Phone" id="editCustPhone" class="form-control" required /></div>
+                    </div>
+                    <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="EditCustomer.LineUserId" id="editCustLine" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">Address *</label><input asp-for="EditCustomer.Address" id="editCustAddress" class="form-control" required /></div>
+                    <div class="row">
+                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="EditCustomer.City" id="editCustCity" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="EditCustomer.Province" id="editCustProvince" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="EditCustomer.PostalCode" id="editCustPostal" class="form-control" /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="EditCustomer.TaxId" id="editCustTaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Link to User</label>
+                            <select asp-for="EditCustomer.UserId" id="editCustUserId" class="form-select">
+                                <option value="">-- None --</option>
+                                @foreach (var u in Model.Users.Where(x => x.Role == "Customer"))
+                                {
+                                    <option value="@u.Id">@u.FullName (@u.Email)</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-2"><label class="form-label">Notes</label><textarea asp-for="EditCustomer.Notes" id="editCustNotes" class="form-control" rows="2"></textarea></div>
+                    <div class="form-check"><input asp-for="EditCustomer.IsActive" id="editCustActive" class="form-check-input" /><label class="form-check-label">Active</label></div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Create Partner -->
 <div class="modal fade" id="createPartnerModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="post" asp-page-handler="CreatePartner">
                 <div class="modal-header"><h5 class="modal-title">Add Partner</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-3"><label class="form-label">Company Name *</label><input asp-for="NewPartner.CompanyName" class="form-control" required /></div>
-                    <div class="mb-3"><label class="form-label">Contact Email *</label><input asp-for="NewPartner.ContactEmail" class="form-control" type="email" required /></div>
-                    <div class="mb-3"><label class="form-label">Contact Phone *</label><input asp-for="NewPartner.ContactPhone" class="form-control" required /></div>
-                    <div class="mb-3"><label class="form-label">Address</label><input asp-for="NewPartner.Address" class="form-control" /></div>
-                    <div class="row mb-3">
-                        <div class="col-6"><label class="form-label">City</label><input asp-for="NewPartner.City" class="form-control" /></div>
-                        <div class="col-6"><label class="form-label">Province</label><input asp-for="NewPartner.Province" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">Company Name *</label><input asp-for="NewPartner.CompanyName" class="form-control" required /></div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Contact Email *</label><input asp-for="NewPartner.ContactEmail" class="form-control" type="email" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Contact Phone *</label><input asp-for="NewPartner.ContactPhone" class="form-control" required /></div>
                     </div>
-                    <div class="row mb-3">
-                        <div class="col-6"><label class="form-label">Commission Rate (%)</label><input asp-for="NewPartner.CommissionRate" class="form-control" /></div>
-                        <div class="col-6"><label class="form-label">Tax ID</label><input asp-for="NewPartner.TaxId" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">Address</label><input asp-for="NewPartner.Address" class="form-control" /></div>
+                    <div class="row">
+                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="NewPartner.City" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="NewPartner.Province" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="NewPartner.PostalCode" class="form-control" /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="NewPartner.TaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Commission Rate (%)</label><input asp-for="NewPartner.CommissionRate" class="form-control" type="number" step="0.1" /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Contract Start</label><input asp-for="NewPartner.ContractStartDate" class="form-control" type="date" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Contract End</label><input asp-for="NewPartner.ContractEndDate" class="form-control" type="date" /></div>
                     </div>
                 </div>
                 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Create</button></div>
@@ -205,3 +474,119 @@
         </div>
     </div>
 </div>
+
+<!-- Edit Partner -->
+<div class="modal fade" id="editPartnerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post" asp-page-handler="EditPartner">
+                <input type="hidden" asp-for="EditPartner.Id" id="editPartnerId" />
+                <div class="modal-header"><h5 class="modal-title">Edit Partner</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <div class="mb-2"><label class="form-label">Company Name *</label><input asp-for="EditPartner.CompanyName" id="editPartnerCompany" class="form-control" required /></div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Contact Email *</label><input asp-for="EditPartner.ContactEmail" id="editPartnerEmail" class="form-control" type="email" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Contact Phone *</label><input asp-for="EditPartner.ContactPhone" id="editPartnerPhone" class="form-control" required /></div>
+                    </div>
+                    <div class="mb-2"><label class="form-label">Address</label><input asp-for="EditPartner.Address" id="editPartnerAddress" class="form-control" /></div>
+                    <div class="row">
+                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="EditPartner.City" id="editPartnerCity" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="EditPartner.Province" id="editPartnerProvince" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="EditPartner.PostalCode" id="editPartnerPostal" class="form-control" /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="EditPartner.TaxId" id="editPartnerTaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Commission Rate (%)</label><input asp-for="EditPartner.CommissionRate" id="editPartnerCommission" class="form-control" type="number" step="0.1" /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">Contract Start</label><input asp-for="EditPartner.ContractStartDate" id="editPartnerStart" class="form-control" type="date" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">Contract End</label><input asp-for="EditPartner.ContractEndDate" id="editPartnerEnd" class="form-control" type="date" /></div>
+                    </div>
+                    <div class="mb-2"><label class="form-label">Notes</label><textarea asp-for="EditPartner.Notes" id="editPartnerNotes" class="form-control" rows="2"></textarea></div>
+                    <div class="form-check"><input asp-for="EditPartner.IsActive" id="editPartnerActive" class="form-check-input" /><label class="form-check-label">Active</label></div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Show/hide partner select based on role
+        function togglePartnerSelect(roleSelect, partnerSelectClass) {
+            const isPartner = roleSelect.value === 'Partner';
+            document.querySelectorAll('.' + partnerSelectClass).forEach(el => {
+                el.style.display = isPartner ? '' : 'none';
+            });
+        }
+
+        const newRoleSelect = document.getElementById('newUserRole');
+        if (newRoleSelect) {
+            newRoleSelect.addEventListener('change', () => togglePartnerSelect(newRoleSelect, 'partner-select'));
+        }
+
+        // Edit User - populate modal
+        document.querySelectorAll('.edit-user-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.getElementById('editUserId').value = btn.dataset.id;
+                document.getElementById('editFullName').value = btn.dataset.fullname || '';
+                document.getElementById('editEmail').value = btn.dataset.email || '';
+                document.getElementById('editPhone').value = btn.dataset.phone || '';
+                document.getElementById('editCompany').value = btn.dataset.company || '';
+                document.getElementById('editLineUserId').value = btn.dataset.line || '';
+                document.getElementById('editRole').value = btn.dataset.role || 'Customer';
+                document.getElementById('editPartnerId').value = btn.dataset.partner || '';
+                document.getElementById('editIsActive').checked = btn.dataset.active === 'true';
+            });
+        });
+
+        // Reset Password - populate modal
+        document.querySelectorAll('.reset-pw-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.getElementById('resetUserId').value = btn.dataset.id;
+                document.getElementById('resetEmail').textContent = btn.dataset.email;
+            });
+        });
+
+        // Edit Customer - populate modal
+        document.querySelectorAll('.edit-customer-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.getElementById('editCustId').value = btn.dataset.id;
+                document.getElementById('editCustFirst').value = btn.dataset.firstname || '';
+                document.getElementById('editCustLast').value = btn.dataset.lastname || '';
+                document.getElementById('editCustEmail').value = btn.dataset.email || '';
+                document.getElementById('editCustPhone').value = btn.dataset.phone || '';
+                document.getElementById('editCustLine').value = btn.dataset.line || '';
+                document.getElementById('editCustAddress').value = btn.dataset.address || '';
+                document.getElementById('editCustCity').value = btn.dataset.city || '';
+                document.getElementById('editCustProvince').value = btn.dataset.province || '';
+                document.getElementById('editCustPostal').value = btn.dataset.postal || '';
+                document.getElementById('editCustTaxId').value = btn.dataset.taxid || '';
+                document.getElementById('editCustUserId').value = btn.dataset.userid || '';
+                document.getElementById('editCustNotes').value = btn.dataset.notes || '';
+                document.getElementById('editCustActive').checked = btn.dataset.active === 'true';
+            });
+        });
+
+        // Edit Partner - populate modal
+        document.querySelectorAll('.edit-partner-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.getElementById('editPartnerId').value = btn.dataset.id;
+                document.getElementById('editPartnerCompany').value = btn.dataset.company || '';
+                document.getElementById('editPartnerEmail').value = btn.dataset.email || '';
+                document.getElementById('editPartnerPhone').value = btn.dataset.phone || '';
+                document.getElementById('editPartnerAddress').value = btn.dataset.address || '';
+                document.getElementById('editPartnerCity').value = btn.dataset.city || '';
+                document.getElementById('editPartnerProvince').value = btn.dataset.province || '';
+                document.getElementById('editPartnerPostal').value = btn.dataset.postal || '';
+                document.getElementById('editPartnerTaxId').value = btn.dataset.taxid || '';
+                document.getElementById('editPartnerCommission').value = btn.dataset.commission || '';
+                document.getElementById('editPartnerStart').value = btn.dataset.contractstart || '';
+                document.getElementById('editPartnerEnd').value = btn.dataset.contractend || '';
+                document.getElementById('editPartnerNotes').value = btn.dataset.notes || '';
+                document.getElementById('editPartnerActive').checked = btn.dataset.active === 'true';
+            });
+        });
+    </script>
+}

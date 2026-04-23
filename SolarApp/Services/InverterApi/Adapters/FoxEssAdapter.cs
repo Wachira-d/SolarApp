@@ -77,7 +77,7 @@ public class FoxEssAdapter : IInverterApiAdapter
 
     private static string GenerateSignature(string token, string timestamp)
     {
-        var signText = $"{token}\\r\\n{timestamp}";
+        var signText = $"{token}\r\n{timestamp}";
         var hash = MD5.HashData(Encoding.UTF8.GetBytes(signText));
         return Convert.ToHexString(hash).ToLower();
     }

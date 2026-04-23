@@ -106,6 +106,12 @@
                             <label asp-for="Input.CloudApiSecret" class="form-label">API Secret</label>
                             <input asp-for="Input.CloudApiSecret" class="form-control" type="password" />
                         </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <button type="button" id="testConnectionBtn" class="btn btn-outline-info">
+                                <i class="bi bi-plug"></i> Test Connection
+                            </button>
+                            <span id="testResult" class="ms-3"></span>
+                        </div>
                     </div>
 
                     <!-- Warranty & Maintenance -->
@@ -152,4 +158,34 @@
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+    <script>
+        document.getElementById('testConnectionBtn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('testConnectionBtn');
+            const result = document.getElementById('testResult');
+            const formData = new FormData();
+            formData.append('brand', document.querySelector('[name="Input.InverterBrand"]').value);
+            formData.append('apiKey', document.querySelector('[name="Input.CloudApiKey"]').value);
+            formData.append('apiSecret', document.querySelector('[name="Input.CloudApiSecret"]').value);
+            formData.append('username', document.querySelector('[name="Input.CloudUsername"]').value);
+            formData.append('password', document.querySelector('[name="Input.CloudPassword"]').value);
+            formData.append('plantId', document.querySelector('[name="Input.PlantId"]').value);
+
+            btn.disabled = true;
+            result.innerHTML = '<span class="text-muted"><i class="spinner-border spinner-border-sm"></i> Testing...</span>';
+
+            try {
+                const r = await fetch('/api/test-inverter-connection', { method: 'POST', body: formData });
+                const data = await r.json();
+                if (data.success) {
+                    result.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + data.message + '</span>';
+                } else {
+                    result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + data.message + '</span>';
+                }
+            } catch (e) {
+                result.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle-fill"></i> Test failed: ' + e.message + '</span>';
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    </script>
 }

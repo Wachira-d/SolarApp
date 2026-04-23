@@ -4,9 +4,16 @@
     ViewData["Title"] = "Service Tickets";
 }
 
+<div class="d-flex justify-content-between mb-3">
+    <h4>Service Tickets</h4>
+    <a asp-page="Create" class="btn btn-warning btn-sm">
+        <i class="bi bi-plus-lg"></i> New Ticket
+    </a>
+</div>
+
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between">
-        <h6 class="mb-0">Service Tickets</h6>
+        <h6 class="mb-0">All Tickets</h6>
     </div>
     <div class="card-body p-0">
         <table class="table table-hover mb-0">
@@ -20,6 +27,7 @@
                     <th>Reported By</th>
                     <th>Assigned To</th>
                     <th>Created</th>
+                    <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -49,11 +57,16 @@
                         <td>@t.ReportedByUser.FullName</td>
                         <td>@(t.AssignedToUser?.FullName ?? "-")</td>
                         <td>@t.CreatedAt.ToString("dd/MM/yyyy")</td>
+                        <td class="text-end">
+                            <a asp-page="Edit" asp-route-id="@t.Id" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-pencil"></i> Edit
+                            </a>
+                        </td>
                     </tr>
                 }
                 @if (!Model.Tickets.Any())
                 {
-                    <tr><td colspan="8" class="text-center text-muted py-4">No service tickets</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted py-4">No service tickets</td></tr>
                 }
             </tbody>
         </table>

@@ -1,0 +1,111 @@
+@page "{id:int}"
+@model SolarApp.Pages.Maintenance.EditModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = "Edit Maintenance";
+}
+
+<div class="d-flex justify-content-between mb-3">
+    <h4>Edit Maintenance Record</h4>
+    <a asp-page="Index" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back
+    </a>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <form method="post">
+                    <input type="hidden" asp-for="Input.Id" />
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Type</label>
+                            <select asp-for="Input.MaintenanceType" asp-items="Html.GetEnumSelectList<MaintenanceType>()" class="form-select"></select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Status</label>
+                            <select asp-for="Input.Status" asp-items="Html.GetEnumSelectList<MaintenanceStatus>()" class="form-select"></select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description *</label>
+                        <textarea asp-for="Input.Description" class="form-control" rows="3" required></textarea>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Scheduled Date</label>
+                            <input asp-for="Input.ScheduledDate" class="form-control" type="date" />
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Completed Date</label>
+                            <input asp-for="Input.CompletedDate" class="form-control" type="date" />
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Cost (THB)</label>
+                            <input asp-for="Input.Cost" class="form-control" type="number" step="0.01" />
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Performed By</label>
+                        <select asp-for="Input.PerformedByUserId" asp-items="Model.Performers" class="form-select">
+                            <option value="">-- Not assigned --</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        <textarea asp-for="Input.Notes" class="form-control" rows="2"></textarea>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-save"></i> Save
+                        </button>
+                        @if (Model.Record.Status != MaintenanceStatus.Completed)
+                        {
+                            <button type="submit" asp-page-handler="Complete" asp-route-id="@Model.Record.Id"
+                                    class="btn btn-success"
+                                    onclick="return confirm('Mark this maintenance as completed?');">
+                                <i class="bi bi-check-circle"></i> Mark Completed
+                            </button>
+                        }
+                        @if (User.IsInRole("Admin"))
+                        {
+                            <button type="submit" asp-page-handler="Delete" asp-route-id="@Model.Record.Id"
+                                    class="btn btn-outline-danger ms-auto"
+                                    onclick="return confirm('Delete this maintenance record?');">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        }
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white"><h6 class="mb-0">Site Info</h6></div>
+            <div class="card-body">
+                <table class="table table-sm table-borderless mb-0">
+                    <tr><td class="text-muted">Site</td><td>@Model.Record.Installation.SiteName</td></tr>
+                    <tr><td class="text-muted">Customer</td><td>@Model.Record.Installation.Customer.FullName</td></tr>
+                    <tr><td class="text-muted">Created</td><td>@Model.Record.CreatedAt.ToString("dd/MM/yyyy")</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
