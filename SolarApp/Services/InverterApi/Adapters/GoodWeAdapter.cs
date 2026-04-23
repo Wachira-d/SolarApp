@@ -164,9 +164,9 @@ public class GoodWeAdapter : IInverterApiAdapter
             GridImportKw = gridImportKw,
             BatterySocPercent = batterySoc ?? GetNullableDecimal(kpi, "soc"),
             BatteryPowerKw = batteryPowerKw,
-            IsOnline = info.ValueKind != JsonValueKind.Undefined
+            IsOnline = info.ValueKind == JsonValueKind.Object
                 && info.TryGetProperty("status", out var s)
-                && (s.ValueKind == JsonValueKind.Number ? s.GetInt32() == 1 : false)
+                && (ToInt(s) ?? 0) == 1
         };
     }
 
@@ -191,19 +191,27 @@ public class GoodWeAdapter : IInverterApiAdapter
         {
             foreach (var item in data.EnumerateArray())
             {
-                if (!item.TryGetProperty("date", out var dt)) continue;
-                if (!DateTime.TryParse(dt.GetString(), out var date)) continue;
-
-                records.Add(new EnergyRecord
+                try
                 {
-                    Timestamp = date,
-                    EnergyGenerationKwh = GetDecimal(item, "pv"),
-                    GridExportKwh = GetDecimal(item, "sell"),
-                    GridImportKwh = GetDecimal(item, "buy"),
-                    SelfConsumptionKwh = GetDecimal(item, "load"),
-                    BatteryChargeKwh = GetNullableDecimal(item, "charge"),
-                    BatteryDischargeKwh = GetNullableDecimal(item, "discharge")
-                });
+                    if (!item.TryGetProperty("date", out var dt)) continue;
+                    var date = ToDateTime(dt);
+                    if (date == null) continue;
+
+                    records.Add(new EnergyRecord
+                    {
+                        Timestamp = date.Value,
+                        EnergyGenerationKwh = GetDecimal(item, "pv"),
+                        GridExportKwh = GetDecimal(item, "sell"),
+                        GridImportKwh = GetDecimal(item, "buy"),
+                        SelfConsumptionKwh = GetDecimal(item, "load"),
+                        BatteryChargeKwh = GetNullableDecimal(item, "charge"),
+                        BatteryDischargeKwh = GetNullableDecimal(item, "discharge")
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Skipped bad historical item");
+                }
             }
         }
 
@@ -235,17 +243,30 @@ public class GoodWeAdapter : IInverterApiAdapter
         {
             foreach (var item in list.EnumerateArray())
             {
-                alarms.Add(new AlarmRecord
+                try
                 {
-                    AlarmId = GetString(item, "warningid") ?? Guid.NewGuid().ToString(),
-                    AlarmName = GetString(item, "warning") ?? "",
-                    Severity = item.TryGetProperty("level", out var lv) && lv.TryGetInt32(out var n) ? n : 3,
-                    OccurredAt = item.TryGetProperty("happentime", out var ht)
-                        && DateTime.TryParse(ht.GetString(), out var dt)
-                        ? dt : DateTime.UtcNow,
-                    DeviceName = GetString(item, "device_sn"),
-                    Description = GetString(item, "warning_desc")
-                });
+                    int severity = 3;
+                    if (item.TryGetProperty("level", out var lv))
+                        severity = ToInt(lv) ?? 3;
+
+                    DateTime occurredAt = DateTime.UtcNow;
+                    if (item.TryGetProperty("happentime", out var ht))
+                        occurredAt = ToDateTime(ht) ?? DateTime.UtcNow;
+
+                    alarms.Add(new AlarmRecord
+                    {
+                        AlarmId = GetString(item, "warningid") ?? Guid.NewGuid().ToString(),
+                        AlarmName = GetString(item, "warning") ?? "",
+                        Severity = severity,
+                        OccurredAt = occurredAt,
+                        DeviceName = GetString(item, "device_sn"),
+                        Description = GetString(item, "warning_desc")
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Skipped bad alarm item");
+                }
             }
         }
 
@@ -276,7 +297,7 @@ public class GoodWeAdapter : IInverterApiAdapter
                     SerialNumber = GetString(item, "sn"),
                     Model = GetString(item, "model") ?? GetString(item, "model_type"),
                     IsOnline = item.TryGetProperty("status", out var st)
-                        && st.ValueKind == JsonValueKind.Number && st.GetInt32() == 1
+                        && (ToInt(st) ?? 0) == 1
                 });
             }
         }
@@ -519,17 +540,56 @@ public class GoodWeAdapter : IInverterApiAdapter
     {
         if (el.ValueKind != JsonValueKind.Object) return 0;
         if (!el.TryGetProperty(prop, out var v)) return 0;
-        if (v.TryGetDecimal(out var d)) return d;
-        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(), out var d2)) return d2;
-        return 0;
+        return ToDecimal(v) ?? 0;
     }
 
     private static decimal? GetNullableDecimal(JsonElement el, string prop)
     {
         if (el.ValueKind != JsonValueKind.Object) return null;
         if (!el.TryGetProperty(prop, out var v)) return null;
-        if (v.TryGetDecimal(out var d)) return d;
-        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(), out var d2)) return d2;
+        return ToDecimal(v);
+    }
+
+    // Safe JSON conversions - check ValueKind BEFORE calling TryGet* methods
+    // (System.Text.Json throws InvalidOperationException if kind is wrong)
+
+    private static decimal? ToDecimal(JsonElement v)
+    {
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
+        if (v.ValueKind == JsonValueKind.String)
+        {
+            var s = v.GetString();
+            if (decimal.TryParse(s, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var d2)) return d2;
+        }
+        return null;
+    }
+
+    private static int? ToInt(JsonElement v)
+    {
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.True) return 1;
+        if (v.ValueKind == JsonValueKind.False) return 0;
+        if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), out var n2)) return n2;
+        return null;
+    }
+
+    private static long? ToLong(JsonElement v)
+    {
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.String && long.TryParse(v.GetString(), out var n2)) return n2;
+        return null;
+    }
+
+    private static DateTime? ToDateTime(JsonElement v)
+    {
+        if (v.ValueKind == JsonValueKind.String)
+        {
+            var s = v.GetString();
+            if (DateTime.TryParse(s, out var dt)) return dt;
+        }
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var ms))
+            return DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
         return null;
     }
 
