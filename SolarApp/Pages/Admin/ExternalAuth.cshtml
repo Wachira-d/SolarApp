@@ -65,6 +65,17 @@
                     <input asp-for="MsClientSecret" type="password" class="form-control"
                            placeholder="@(Model.MsConfiguredNow ? "•••••••••••• (keep current)" : "Paste new secret")" />
                 </div>
+                <div class="col-12">
+                    <label class="form-label">
+                        Tenant ID <small class="text-muted">(required if app is single-tenant)</small>
+                    </label>
+                    <input asp-for="MsTenantId" class="form-control font-monospace"
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (leave blank for multi-tenant)" />
+                    <small class="text-muted">
+                        Find this on Azure portal → App registrations → Overview → <strong>Directory (tenant) ID</strong>.
+                        Leave blank ONLY if your Azure app is registered as multi-tenant.
+                    </small>
+                </div>
             </div>
             <div class="mt-2 small text-muted">
                 Source: <strong>@Model.MsConfigSource</strong>

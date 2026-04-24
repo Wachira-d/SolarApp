@@ -27,6 +27,7 @@ public class ExternalAuthModel : PageModel
 
     [BindProperty] public string? MsClientId { get; set; }
     [BindProperty] public string? MsClientSecret { get; set; }
+    [BindProperty] public string? MsTenantId { get; set; }
     [BindProperty] public string? LineClientId { get; set; }
     [BindProperty] public string? LineClientSecret { get; set; }
 
@@ -46,10 +47,12 @@ public class ExternalAuthModel : PageModel
         // Pull values from DB first, fall back to appsettings.json
         var dbMsId = await GetSettingAsync("Auth.Microsoft.ClientId");
         var dbMsSecret = await GetSettingAsync("Auth.Microsoft.ClientSecret");
+        var dbMsTenant = await GetSettingAsync("Auth.Microsoft.TenantId");
         var dbLineId = await GetSettingAsync("Auth.LINE.ClientId");
         var dbLineSecret = await GetSettingAsync("Auth.LINE.ClientSecret");
 
         MsClientId = dbMsId ?? _configuration["Authentication:Microsoft:ClientId"];
+        MsTenantId = dbMsTenant ?? _configuration["Authentication:Microsoft:TenantId"];
         // Don't echo secret back to form for security — show masked length instead
         MsClientSecret = null;
         LineClientId = dbLineId ?? _configuration["Authentication:LINE:ClientId"];
@@ -77,9 +80,10 @@ public class ExternalAuthModel : PageModel
     {
         if (string.IsNullOrWhiteSpace(MsClientId) && string.IsNullOrWhiteSpace(MsClientSecret))
         {
-            // User wants to clear → remove both settings
+            // User wants to clear → remove all settings
             await RemoveSettingAsync("Auth.Microsoft.ClientId");
             await RemoveSettingAsync("Auth.Microsoft.ClientSecret");
+            await RemoveSettingAsync("Auth.Microsoft.TenantId");
             await _context.SaveChangesAsync();
             StatusMessage = "Microsoft auth settings cleared. Restart the app pool to apply.";
             return RedirectToPage();
@@ -94,12 +98,21 @@ public class ExternalAuthModel : PageModel
         await UpsertSettingAsync("Auth.Microsoft.ClientId", MsClientId.Trim(), encrypted: false,
             "Microsoft/Azure AD Application (Client) ID for external login");
 
-        // Only overwrite the secret if the admin typed a new value. Empty input
-        // keeps the existing stored value (don't accidentally wipe it).
         if (!string.IsNullOrWhiteSpace(MsClientSecret))
         {
             await UpsertSettingAsync("Auth.Microsoft.ClientSecret", MsClientSecret.Trim(), encrypted: true,
                 "Microsoft client secret (encrypted at rest)");
+        }
+
+        // TenantId is optional: leave blank for multi-tenant apps (/common endpoint)
+        if (!string.IsNullOrWhiteSpace(MsTenantId))
+        {
+            await UpsertSettingAsync("Auth.Microsoft.TenantId", MsTenantId.Trim(), encrypted: false,
+                "Azure AD tenant ID (for single-tenant apps)");
+        }
+        else
+        {
+            await RemoveSettingAsync("Auth.Microsoft.TenantId");
         }
 
         await _context.SaveChangesAsync();

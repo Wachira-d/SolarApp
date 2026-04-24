@@ -73,7 +73,7 @@ public class Startup
         // Config precedence: DB SystemSettings > appsettings.json > empty
         // Admins configure these via /Admin/ExternalAuth; secrets stored encrypted.
         var authBuilder = builder.Services.AddAuthentication();
-        var (msClientId, msClientSecret, lineClientId, lineClientSecret) =
+        var (msClientId, msClientSecret, msTenantId, lineClientId, lineClientSecret) =
             ReadExternalAuthConfig(builder);
 
         var msRegistered = false;
@@ -87,6 +87,18 @@ public class Startup
                 options.ClientSecret = msClientSecret;
                 options.CallbackPath = "/signin-microsoft";
                 options.SaveTokens = true;
+
+                // If a specific tenant ID is configured, use that tenant's endpoint
+                // (single-tenant app). Otherwise use /common (multi-tenant + personal).
+                // Fixes AADSTS50194 when the app is registered as single-tenant.
+                if (!string.IsNullOrWhiteSpace(msTenantId))
+                {
+                    options.AuthorizationEndpoint =
+                        $"https://login.microsoftonline.com/{msTenantId}/oauth2/v2.0/authorize";
+                    options.TokenEndpoint =
+                        $"https://login.microsoftonline.com/{msTenantId}/oauth2/v2.0/token";
+                }
+
                 // Request profile + email scopes so we can create a local user
                 options.Scope.Add("User.Read");
             });
@@ -304,19 +316,20 @@ public class Startup
             "or set environment variable SOLARAPP_KEYS_PATH to a writable folder.");
     }
 
-    private static (string? MsId, string? MsSecret, string? LineId, string? LineSecret)
+    private static (string? MsId, string? MsSecret, string? MsTenantId, string? LineId, string? LineSecret)
         ReadExternalAuthConfig(WebApplicationBuilder builder)
     {
         // appsettings fallback first
         var msId = builder.Configuration["Authentication:Microsoft:ClientId"];
         var msSecret = builder.Configuration["Authentication:Microsoft:ClientSecret"];
+        var msTenant = builder.Configuration["Authentication:Microsoft:TenantId"];
         var lineId = builder.Configuration["Authentication:LINE:ClientId"];
         var lineSecret = builder.Configuration["Authentication:LINE:ClientSecret"];
 
         try
         {
             var cs = builder.Configuration.GetConnectionString("DefaultConnection");
-            if (string.IsNullOrWhiteSpace(cs)) return (msId, msSecret, lineId, lineSecret);
+            if (string.IsNullOrWhiteSpace(cs)) return (msId, msSecret, msTenant, lineId, lineSecret);
 
             // Use raw ADO.NET — no DI container needed, no EF mapping risk.
             // Fail silently if table doesn't exist yet (fresh install).
@@ -328,7 +341,7 @@ public class Startup
             {
                 check.CommandText = "SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.tables WHERE name='SystemSettings') THEN 1 ELSE 0 END";
                 if ((int)(check.ExecuteScalar() ?? 0) == 0)
-                    return (msId, msSecret, lineId, lineSecret);
+                    return (msId, msSecret, msTenant, lineId, lineSecret);
             }
 
             string? ReadRaw(string key)
@@ -341,6 +354,7 @@ public class Startup
 
             var dbMsId = ReadRaw("Auth.Microsoft.ClientId");
             var dbMsSecret = ReadRaw("Auth.Microsoft.ClientSecret");
+            var dbMsTenant = ReadRaw("Auth.Microsoft.TenantId");
             var dbLineId = ReadRaw("Auth.LINE.ClientId");
             var dbLineSecret = ReadRaw("Auth.LINE.ClientSecret");
 
@@ -368,6 +382,7 @@ public class Startup
             return (
                 dbMsId ?? msId,
                 TryDecrypt(dbMsSecret) ?? msSecret,
+                dbMsTenant ?? msTenant,
                 dbLineId ?? lineId,
                 TryDecrypt(dbLineSecret) ?? lineSecret
             );
@@ -376,7 +391,7 @@ public class Startup
         {
             // DB not reachable at startup — fall back to config file only.
             // Never throw; app MUST be able to start without external auth.
-            return (msId, msSecret, lineId, lineSecret);
+            return (msId, msSecret, msTenant, lineId, lineSecret);
         }
     }
 
