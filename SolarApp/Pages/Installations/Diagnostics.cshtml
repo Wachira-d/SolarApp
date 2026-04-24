@@ -16,7 +16,10 @@
             <i class="bi bi-arrow-left"></i> Back
         </a>
         <a asp-page="Diagnostics" asp-route-id="@inst.Id" asp-route-run="true" class="btn btn-warning btn-sm">
-            <i class="bi bi-arrow-clockwise"></i> Run Full Check
+            <i class="bi bi-arrow-clockwise"></i> Quick Check
+        </a>
+        <a asp-page="Diagnostics" asp-route-id="@inst.Id" asp-route-deep="true" class="btn btn-danger btn-sm">
+            <i class="bi bi-shield-check"></i> Deep Health Check
         </a>
     </div>
 </div>
@@ -125,6 +128,70 @@ else
                                 <div class="small text-muted mt-1">
                                     <code class="text-body-secondary">@step.Detail</code>
                                 </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (Model.HealthReport is { } hr)
+{
+    var hrClass = hr.OverallHealthy ? "alert-success"
+        : hr.ApiReachable && !hr.DeviceOnline ? "alert-warning"
+        : "alert-danger";
+    <div class="alert @hrClass d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+            <h6 class="mb-1">
+                @if (hr.OverallHealthy)
+                { <i class="bi bi-check-circle-fill text-success"></i> <span>All Layers Passed</span> }
+                else if (hr.ApiReachable && !hr.DeviceOnline)
+                { <i class="bi bi-exclamation-triangle-fill text-warning"></i> <span>API OK, Device Offline</span> }
+                else
+                { <i class="bi bi-x-circle-fill text-danger"></i> <span>Connection Issues Detected</span> }
+            </h6>
+            <div class="small">@hr.Summary</div>
+        </div>
+        <div class="d-flex gap-3">
+            <div class="text-center"><div class="fs-5 fw-bold text-success">@hr.PassedCount</div><small>Passed</small></div>
+            <div class="text-center"><div class="fs-5 fw-bold text-danger">@hr.FailedCount</div><small>Failed</small></div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-layers"></i> 6-Layer Connection Health</h6></div>
+        <div class="list-group list-group-flush">
+            @foreach (var step in hr.Steps)
+            {
+                var icon = step.Passed ? "check-circle-fill text-success" : "x-circle-fill text-danger";
+                var issueTag = step.IssueType switch
+                {
+                    SolarApp.Services.InverterApi.Common.ConnectionIssueType.DeviceOffline => "badge bg-warning text-dark",
+                    SolarApp.Services.InverterApi.Common.ConnectionIssueType.None => "d-none",
+                    _ => "badge bg-danger"
+                };
+                <div class="list-group-item">
+                    <div class="d-flex align-items-start gap-3">
+                        <i class="bi bi-@icon fs-5 mt-1"></i>
+                        <div class="flex-grow-1 min-width-0">
+                            <div class="d-flex justify-content-between flex-wrap gap-2">
+                                <div>
+                                    <strong>@step.Layer — @step.Name</strong>
+                                    @if (step.IssueType != SolarApp.Services.InverterApi.Common.ConnectionIssueType.None)
+                                    {
+                                        <span class="@issueTag ms-2">@step.IssueType</span>
+                                    }
+                                </div>
+                                <small class="text-muted"><i class="bi bi-clock"></i> @step.DurationMs ms</small>
+                            </div>
+                            <div class="mt-1 small @(step.Passed ? "" : "text-danger")">
+                                @step.Message
+                            </div>
+                            @if (!string.IsNullOrEmpty(step.TechnicalDetail))
+                            {
+                                <div class="mt-1 small text-muted"><code>@step.TechnicalDetail</code></div>
                             }
                         </div>
                     </div>

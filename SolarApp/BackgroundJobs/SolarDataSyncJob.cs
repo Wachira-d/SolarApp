@@ -10,11 +10,6 @@ using SolarApp.Services.InverterApi.Models;
 
 namespace SolarApp.BackgroundJobs;
 
-/// <summary>
-/// Hangfire recurring job - syncs full data set from all inverter cloud APIs.
-/// [DisableConcurrentExecution] prevents overlapping runs if previous sync
-/// takes longer than the sync interval. Timeout = 30 min.
-/// </summary>
 public class SolarDataSyncJob
 {
     private readonly ApplicationDbContext _context;
@@ -43,9 +38,8 @@ public class SolarDataSyncJob
 
         _logger.LogInformation("Solar data sync: starting for {Count} installations", installations.Count);
 
-        var totalRealtime = 0;
-        var totalDaily = 0;
-        var totalAlarms = 0;
+        int totalRealtime = 0, totalDaily = 0, totalAlarms = 0;
+        int totalApiFailures = 0, totalDeviceOffline = 0;
 
         foreach (var installation in installations)
         {
@@ -63,12 +57,21 @@ public class SolarDataSyncJob
 
                 // ─── 1. Realtime snapshot ───
                 var realtime = await adapter.GetRealtimeDataAsync(credentials);
+
                 if (realtime == null)
                 {
-                    LogApiCall(installation, "GetRealtimeData", 500, false, "No data returned");
+                    // API failure — could NOT reach cloud or parse response
+                    totalApiFailures++;
+                    LogApiCall(installation, "GetRealtimeData", 500, false,
+                        $"[API FAILURE] Could not retrieve data from {installation.InverterBrand} cloud. " +
+                        "This does NOT mean the inverter is offline — it means SolarApp cannot reach the cloud API. " +
+                        "Possible causes: network issue, API credentials expired, cloud server down, rate limiting.");
                     await _context.SaveChangesAsync();
                     continue;
                 }
+
+                // ─── Got data — now distinguish: online vs device-offline ───
+                var isDeviceOnline = realtime.IsOnline;
 
                 _context.EnergyData.Add(new EnergyData
                 {
@@ -84,19 +87,29 @@ public class SolarDataSyncJob
                 });
                 totalRealtime++;
 
-                LogApiCall(installation, "GetRealtimeData", 200, true);
+                if (isDeviceOnline)
+                {
+                    LogApiCall(installation, "GetRealtimeData", 200, true,
+                        $"[ONLINE] Power={realtime.CurrentPowerKw:0.00}kW, Today={realtime.TodayEnergyKwh:0.0}kWh");
+                    installation.LastOnlineAt = DateTime.UtcNow;
+                    if (installation.Status == InstallationStatus.Offline)
+                        installation.Status = InstallationStatus.Active;
+                }
+                else
+                {
+                    totalDeviceOffline++;
+                    LogApiCall(installation, "GetRealtimeData", 200, true,
+                        $"[DEVICE OFFLINE] API connected OK, but inverter reports offline/sleeping. " +
+                        $"Power={realtime.CurrentPowerKw:0.00}kW. " +
+                        "This is normal at night. If daytime — check inverter's own internet connection, not SolarApp.");
+                }
 
-                installation.LastOnlineAt = realtime.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
-                if (realtime.IsOnline && installation.Status == InstallationStatus.Offline)
-                    installation.Status = InstallationStatus.Active;
-
-                // Push real-time update to dashboard viewers
+                // Push real-time update to dashboard
                 try
                 {
                     var payload = new
                     {
-                        installation.Id,
-                        installation.SiteName,
+                        installation.Id, installation.SiteName,
                         PowerKw = realtime.CurrentPowerKw,
                         TodayKwh = realtime.TodayEnergyKwh,
                         BatterySoc = realtime.BatterySocPercent,
@@ -108,10 +121,7 @@ public class SolarDataSyncJob
                         await _hub.Clients.Group($"partner-{installation.PartnerId}").SendAsync("RealtimeUpdate", payload);
                     await _hub.Clients.Group($"customer-{installation.CustomerId}").SendAsync("RealtimeUpdate", payload);
                 }
-                catch (Exception hubEx)
-                {
-                    _logger.LogDebug(hubEx, "Hub broadcast failed (non-critical)");
-                }
+                catch { /* hub failure is non-critical */ }
 
                 // ─── 2. Daily aggregate (upsert today) ───
                 var today = DateTime.UtcNow.Date;
@@ -234,19 +244,40 @@ public class SolarDataSyncJob
 
                 await _context.SaveChangesAsync();
             }
+            catch (TaskCanceledException)
+            {
+                totalApiFailures++;
+                _logger.LogWarning("Sync timeout for {Id} ({Brand})", installation.Id, installation.InverterBrand);
+                LogApiCall(installation, "Sync", 0, false,
+                    $"[TIMEOUT] Sync timed out for {installation.SiteName}. " +
+                    $"The {installation.InverterBrand} cloud server is too slow or unreachable. " +
+                    "This is an API CONNECTION issue, NOT an inverter offline issue.");
+                await _context.SaveChangesAsync();
+            }
+            catch (HttpRequestException hre)
+            {
+                totalApiFailures++;
+                _logger.LogWarning(hre, "Network error syncing {Id} ({Brand})", installation.Id, installation.InverterBrand);
+                LogApiCall(installation, "Sync", 0, false,
+                    $"[NETWORK ERROR] Cannot reach {installation.InverterBrand} cloud: {hre.Message}. " +
+                    "Check SolarApp server's internet connection and DNS. " +
+                    "This is an API CONNECTION issue, NOT an inverter offline issue.");
+                await _context.SaveChangesAsync();
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Sync failed for installation {Id} ({Brand})",
-                    installation.Id, installation.InverterBrand);
-
-                LogApiCall(installation, "GetRealtimeData", 500, false, ex.Message);
+                totalApiFailures++;
+                _logger.LogError(ex, "Sync failed for {Id} ({Brand})", installation.Id, installation.InverterBrand);
+                LogApiCall(installation, "Sync", 500, false,
+                    $"[UNEXPECTED ERROR] {ex.GetType().Name}: {ex.Message}");
                 await _context.SaveChangesAsync();
             }
         }
 
         _logger.LogInformation(
-            "Sync complete: {Installations} installations, {Realtime} realtime, {Daily} daily, {Alarms} alarms",
-            installations.Count, totalRealtime, totalDaily, totalAlarms);
+            "Sync complete: {Total} installations | {Realtime} realtime OK | {Daily} daily records | {Alarms} alarms | " +
+            "{ApiFailures} API failures | {DeviceOffline} device-offline",
+            installations.Count, totalRealtime, totalDaily, totalAlarms, totalApiFailures, totalDeviceOffline);
     }
 
     private void LogApiCall(Installation installation, string endpoint, int statusCode, bool success, string? error = null)

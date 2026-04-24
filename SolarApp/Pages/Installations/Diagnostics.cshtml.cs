@@ -15,19 +15,23 @@ public class DiagnosticsModel : PageModel
     private readonly ApplicationDbContext _context;
     private readonly IAdapterDiagnostics _diagnostics;
     private readonly IInstallationAccessHelper _access;
+    private readonly IConnectionHealthChecker _healthChecker;
 
-    public DiagnosticsModel(ApplicationDbContext context, IAdapterDiagnostics diagnostics, IInstallationAccessHelper access)
+    public DiagnosticsModel(ApplicationDbContext context, IAdapterDiagnostics diagnostics,
+        IInstallationAccessHelper access, IConnectionHealthChecker healthChecker)
     {
         _context = context;
         _diagnostics = diagnostics;
         _access = access;
+        _healthChecker = healthChecker;
     }
 
     public Installation Installation { get; set; } = null!;
     public DiagnosticReport? Report { get; set; }
+    public ConnectionHealthReport? HealthReport { get; set; }
     public List<InverterApiLog> RecentLogs { get; set; } = new();
 
-    public async Task<IActionResult> OnGetAsync(int id, bool run = false)
+    public async Task<IActionResult> OnGetAsync(int id, bool run = false, bool deep = false)
     {
         if (!await _access.CanAccessAsync(id, User)) return Forbid();
 
@@ -38,12 +42,15 @@ public class DiagnosticsModel : PageModel
 
         Installation = inst;
 
-        if (run)
+        if (deep)
+        {
+            HealthReport = await _healthChecker.RunFullCheckAsync(inst);
+        }
+        else if (run)
         {
             Report = await _diagnostics.RunAsync(inst);
         }
 
-        // Last 20 API call logs
         RecentLogs = await _context.InverterApiLogs
             .Where(l => l.InstallationId == id)
             .OrderByDescending(l => l.RequestTime)

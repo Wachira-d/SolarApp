@@ -62,6 +62,7 @@ public class Startup
         builder.Services.AddScoped<Services.InverterApi.Adapters.DeyeAdapter>();
         builder.Services.AddScoped<Services.InverterApi.IInverterApiAdapterFactory, Services.InverterApi.InverterApiAdapterFactory>();
         builder.Services.AddScoped<Services.InverterApi.Common.IAdapterDiagnostics, Services.InverterApi.Common.AdapterDiagnostics>();
+        builder.Services.AddScoped<Services.InverterApi.Common.IConnectionHealthChecker, Services.InverterApi.Common.ConnectionHealthChecker>();
         builder.Services.AddScoped<Services.Authorization.IInstallationAccessHelper, Services.Authorization.InstallationAccessHelper>();
         builder.Services.AddScoped<Services.Performance.IPerformanceMetricsService, Services.Performance.PerformanceMetricsService>();
         builder.Services.AddScoped<Services.AlertRules.IAlertRulesEngine, Services.AlertRules.AlertRulesEngine>();

@@ -84,13 +84,37 @@ public class SystemHealthMonitorJob
 
             if (!existingAlert)
             {
+                var offlineDuration = installation.LastOnlineAt.HasValue
+                    ? DateTime.UtcNow - installation.LastOnlineAt.Value
+                    : (TimeSpan?)null;
+                var durationStr = offlineDuration.HasValue
+                    ? offlineDuration.Value.TotalHours >= 1
+                        ? $"{offlineDuration.Value.TotalHours:0.0} hours"
+                        : $"{offlineDuration.Value.TotalMinutes:0} minutes"
+                    : "unknown duration";
+
+                var isApiIssue = rootCause.Contains("API CONNECTION") || rootCause.Contains("TIMEOUT")
+                    || rootCause.Contains("NETWORK") || rootCause.Contains("AUTHENTICATION")
+                    || rootCause.Contains("RATE LIMITED") || rootCause.Contains("CLOUD SERVER");
+
                 _context.SystemAlerts.Add(new SystemAlert
                 {
                     InstallationId = installation.Id,
                     AlertType = AlertType.Offline,
                     Severity = AlertSeverity.Critical,
-                    Title = $"System Offline: {installation.SiteName}",
-                    Message = $"Installation '{installation.SiteName}' has been offline since {installation.LastOnlineAt:dd/MM/yyyy HH:mm}",
+                    Title = isApiIssue
+                        ? $"API Connection Lost: {installation.SiteName}"
+                        : $"Device Offline: {installation.SiteName}",
+                    Message = isApiIssue
+                        ? $"[{installation.InverterBrand}] {installation.SiteName}: " +
+                          $"Cannot reach cloud API for {durationStr}. " +
+                          "The inverter may still be working — this is a data connection issue, not necessarily an inverter problem. " +
+                          $"Last successful contact: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}."
+                        : $"[{installation.InverterBrand}] {installation.SiteName}: " +
+                          $"Inverter reports offline for {durationStr}. " +
+                          "API connection is working — the inverter itself is not reporting data. " +
+                          $"Last online: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}. " +
+                          "If nighttime, this is normal. If daytime, check inverter hardware and WiFi.",
                     RootCauseAnalysis = rootCause,
                     IsNotified = false
                 });
@@ -301,28 +325,92 @@ public class SystemHealthMonitorJob
     private static string AnalyzeRootCause(List<InverterApiLog> recentLogs)
     {
         if (!recentLogs.Any())
-            return "No recent API logs available. Possible causes: internet connection issue, inverter powered off, or cloud service outage.";
+            return "No recent API call logs found.\n" +
+                   "POSSIBLE CAUSE: Sync job hasn't run yet, or installation was just added.\n" +
+                   "ACTION: Check Hangfire dashboard to confirm sync is scheduled, then wait for next sync cycle.";
 
-        var errorMessages = recentLogs
+        var errors = recentLogs
             .Where(l => !string.IsNullOrEmpty(l.ErrorMessage))
             .Select(l => l.ErrorMessage!)
-            .Distinct()
             .ToList();
 
-        if (errorMessages.Any(e => e.Contains("timeout", StringComparison.OrdinalIgnoreCase)))
-            return "API request timeouts detected. Possible causes: slow internet connection at site, or cloud service experiencing high load.";
+        var latestError = errors.FirstOrDefault() ?? "No error message";
+        var latestTime = recentLogs.First().RequestTime;
 
-        if (errorMessages.Any(e => e.Contains("401") || e.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)))
-            return "Authentication failure. API credentials may have expired or been revoked. Please update the cloud API credentials.";
+        // ─── Check for [DEVICE OFFLINE] tag (set by SolarDataSyncJob) ───
+        if (errors.Any(e => e.Contains("[DEVICE OFFLINE]")))
+            return "⚠ DEVICE OFFLINE (not an API issue)\n" +
+                   "The cloud API is working correctly, but the inverter itself reports offline.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • Nighttime / no sunlight (normal)\n" +
+                   "  • Inverter lost WiFi/LAN connection to its cloud\n" +
+                   "  • Inverter is powered off or in error state\n" +
+                   "  • Data logger (e.g. DTSU/WiFi stick) disconnected\n" +
+                   "ACTION: If daytime, physically check the inverter and its network connection.\n" +
+                   $"Last contact: {latestTime:dd/MM/yyyy HH:mm:ss}";
 
-        if (errorMessages.Any(e => e.Contains("500") || e.Contains("internal server", StringComparison.OrdinalIgnoreCase)))
-            return "Cloud service internal error. The inverter cloud platform may be experiencing issues. Please check the vendor's status page.";
+        // ─── Check for [API FAILURE] tag ───
+        if (errors.Any(e => e.Contains("[API FAILURE]")))
+            return "✕ API CONNECTION FAILED (not an inverter issue)\n" +
+                   "SolarApp cannot reach the cloud API. The inverter might be working fine.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • SolarApp server has no internet\n" +
+                   "  • Cloud vendor API is down (check vendor status page)\n" +
+                   "  • API credentials expired or revoked\n" +
+                   "  • Rate limiting (too many API calls)\n" +
+                   $"ACTION: Check SolarApp server internet, then run Diagnostics.\n" +
+                   $"Latest error: {latestError}\n" +
+                   $"Failed at: {latestTime:dd/MM/yyyy HH:mm:ss}";
 
-        if (errorMessages.Any(e => e.Contains("connection", StringComparison.OrdinalIgnoreCase)))
-            return "Connection errors detected. The inverter or its data logger may have lost internet connectivity. Check the site's network.";
+        // ─── Specific error pattern matching ───
+        if (errors.Any(e => e.Contains("[TIMEOUT]")))
+            return "✕ API TIMEOUT\n" +
+                   "Cloud server did not respond within the time limit.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • Cloud vendor experiencing high load\n" +
+                   "  • SolarApp server internet is slow\n" +
+                   "  • DNS resolution failure\n" +
+                   $"ACTION: Wait 15 min and retry. If persistent, check SolarApp server network.\n" +
+                   $"Latest: {latestError}";
 
-        return $"System has failed {recentLogs.Count} consecutive API calls. " +
-               $"Latest error: {errorMessages.FirstOrDefault() ?? "Unknown"}. " +
-               "Possible causes: hardware issue, network problem, or cloud API changes.";
+        if (errors.Any(e => e.Contains("[NETWORK ERROR]")))
+            return "✕ NETWORK ERROR\n" +
+                   "Cannot establish connection to cloud server.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • SolarApp server has no internet\n" +
+                   "  • DNS failure\n" +
+                   "  • Firewall blocking outbound HTTPS\n" +
+                   $"ACTION: Check SolarApp server connectivity. Try: ping the cloud domain.\n" +
+                   $"Latest: {latestError}";
+
+        if (errors.Any(e => e.Contains("401") || e.Contains("403") || e.Contains("credential", StringComparison.OrdinalIgnoreCase)
+                            || e.Contains("auth", StringComparison.OrdinalIgnoreCase)))
+            return "✕ AUTHENTICATION FAILED\n" +
+                   "Cloud API rejected the credentials.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • API key/token expired (some expire every 3–6 months)\n" +
+                   "  • Password changed on cloud portal\n" +
+                   "  • Account deactivated by vendor\n" +
+                   $"ACTION: Re-enter API credentials in Installation settings.\n" +
+                   $"Latest: {latestError}";
+
+        if (errors.Any(e => e.Contains("429") || e.Contains("rate limit", StringComparison.OrdinalIgnoreCase)))
+            return "✕ RATE LIMITED\n" +
+                   "Too many API calls — cloud vendor blocked requests.\n" +
+                   "ACTION: Increase sync interval in Admin > Sync Schedule (recommend 15+ minutes).\n" +
+                   $"Latest: {latestError}";
+
+        if (errors.Any(e => e.Contains("500") || e.Contains("server error", StringComparison.OrdinalIgnoreCase)))
+            return "✕ CLOUD SERVER ERROR\n" +
+                   "The cloud platform returned an internal error (5xx).\n" +
+                   "This is the vendor's issue, not SolarApp or the inverter.\n" +
+                   "ACTION: Wait and retry. Check vendor's status page for outage announcements.\n" +
+                   $"Latest: {latestError}";
+
+        return $"✕ UNKNOWN ISSUE\n" +
+               $"Failed {recentLogs.Count} recent API call(s).\n" +
+               $"Latest error: {latestError}\n" +
+               $"Failed at: {latestTime:dd/MM/yyyy HH:mm:ss}\n" +
+               "ACTION: Run Diagnostics from the installation detail page for a full connection check.";
     }
 }
