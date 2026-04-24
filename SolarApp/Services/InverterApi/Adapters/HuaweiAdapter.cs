@@ -46,8 +46,9 @@ public class HuaweiAdapter : IInverterApiAdapter
 
             // Verify token by listing stations
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
+            // Huawei API requires pageSize >= 50 on /getStationList (enforced server-side)
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationList",
-                new { pageNo = 1, pageSize = 1 });
+                new { pageNo = 1, pageSize = 50 });
             var body = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
@@ -80,7 +81,7 @@ public class HuaweiAdapter : IInverterApiAdapter
 
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationList",
-                new { pageNo = 1, pageSize = 1 });
+                new { pageNo = 1, pageSize = 50 });
             if (!response.IsSuccessStatusCode) return null;
 
             var json = await ReadJsonAsync(response);
