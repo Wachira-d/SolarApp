@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using SolarApp.Models.Enums;
+using SolarApp.Services.InverterApi.Common;
 using SolarApp.Services.InverterApi.Models;
 
 namespace SolarApp.Services.InverterApi.Adapters;
@@ -475,5 +476,92 @@ public class FoxEssAdapter : IInverterApiAdapter
             yield return (cur.Year, cur.Month);
             cur = cur.AddMonths(1);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  ApiResult<T> methods
+    // ═══════════════════════════════════════════════════════════
+
+    public async Task<ApiResult<bool>> TestConnectionResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var (ok, msg) = await TestConnectionAsync(credentials);
+            sw.Stop();
+            return ok ? ApiResult<bool>.Ok(true, msg, sw.Elapsed)
+                      : ApiResultClassifier.ClassifyErrorMessage<bool>(msg, "FoxESS", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<bool>(ex, "FoxESS", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<PlantInfo>> GetPlantInfoResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var info = await GetPlantInfoAsync(credentials);
+            sw.Stop();
+            return info != null
+                ? ApiResult<PlantInfo>.Ok(info, "Plant info retrieved", sw.Elapsed)
+                : ApiResult<PlantInfo>.Fail(ApiResultKind.PlantNotFound,
+                    $"Plant '{credentials.PlantId}' not found on FoxESS account.", duration: sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<PlantInfo>(ex, "FoxESS", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<RealtimeData>> GetRealtimeResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var data = await GetRealtimeDataAsync(credentials);
+            sw.Stop();
+            if (data == null)
+                return ApiResult<RealtimeData>.Fail(ApiResultKind.CloudServerError,
+                    "FoxESS API returned no data. Could be server issue or PlantId mismatch.", duration: sw.Elapsed);
+            return data.IsOnline
+                ? ApiResult<RealtimeData>.Ok(data, "Device online", sw.Elapsed)
+                : ApiResult<RealtimeData>.Offline(data,
+                    "FoxESS API connected OK, but device reports offline. Check inverter datalogger.",
+                    sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<RealtimeData>(ex, "FoxESS", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<EnergyRecord>>> GetHistoricalResultAsync(ApiCredentials credentials, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetHistoricalDataAsync(credentials, from, to);
+            sw.Stop();
+            return ApiResult<List<EnergyRecord>>.Ok(list, $"{list.Count} record(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<EnergyRecord>>(ex, "FoxESS", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<AlarmRecord>>> GetAlarmsResultAsync(ApiCredentials credentials, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetAlarmsAsync(credentials, from, to);
+            sw.Stop();
+            return ApiResult<List<AlarmRecord>>.Ok(list, $"{list.Count} alarm(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<AlarmRecord>>(ex, "FoxESS", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<DeviceInfo>>> GetDevicesResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetDevicesAsync(credentials);
+            sw.Stop();
+            return ApiResult<List<DeviceInfo>>.Ok(list, $"{list.Count} device(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<DeviceInfo>>(ex, "FoxESS", sw.Elapsed); }
     }
 }

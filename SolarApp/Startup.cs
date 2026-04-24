@@ -41,7 +41,22 @@ public class Startup
             options.AccessDeniedPath = "/Account/AccessDenied";
             options.ExpireTimeSpan = TimeSpan.FromHours(8);
             options.SlidingExpiration = true;
+            // Security hardening
+            options.Cookie.HttpOnly = true;                                   // JS cannot read
+            options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
+            options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax; // Lax allows top-level nav from email links
         });
+
+        builder.Services.AddAntiforgery(options =>
+        {
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
+            options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
+        });
+
+        // DataProtection — used for encrypting API credentials at rest
+        builder.Services.AddDataProtection();
+        builder.Services.AddSingleton<Services.Security.ICredentialProtector, Services.Security.CredentialProtector>();
 
         builder.Services.AddScoped<Services.Interfaces.IInstallationService, Services.Implementations.InstallationService>();
         builder.Services.AddScoped<Services.Interfaces.IDashboardService, Services.Implementations.DashboardService>();
@@ -564,7 +579,8 @@ public class Startup
         app.MapPost("/api/installations/{id:int}/sync", async (
             int id,
             Data.ApplicationDbContext db,
-            Services.InverterApi.IInverterApiAdapterFactory factory) =>
+            Services.InverterApi.IInverterApiAdapterFactory factory,
+            Services.Security.ICredentialProtector credProtector) =>
         {
             var installation = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
                 .FirstOrDefaultAsync(db.Installations, i => i.Id == id);
@@ -579,10 +595,10 @@ public class Startup
                 var adapter = factory.GetAdapter(installation.InverterBrand);
                 var credentials = new Services.InverterApi.Models.ApiCredentials
                 {
-                    ApiKey = installation.CloudApiKey,
-                    ApiSecret = installation.CloudApiSecret,
-                    Username = installation.CloudUsername,
-                    Password = installation.CloudPassword,
+                    ApiKey = credProtector.Unprotect(installation.CloudApiKey),
+                    ApiSecret = credProtector.Unprotect(installation.CloudApiSecret),
+                    Username = credProtector.Unprotect(installation.CloudUsername),
+                    Password = credProtector.Unprotect(installation.CloudPassword),
                     PlantId = installation.PlantId
                 };
 
@@ -749,19 +765,35 @@ public class Startup
                 };
 
                 var adapter = factory.GetAdapter(brand);
-                var (success, message) = await adapter.TestConnectionAsync(credentials);
+                var testResult = await adapter.TestConnectionResultAsync(credentials);
 
-                if (!success)
-                    return Results.Json(new { success, message, plantInfo = (object?)null, realtime = (object?)null });
+                if (!testResult.IsSuccess)
+                    return Results.Json(new {
+                        success = false,
+                        message = testResult.Message,
+                        kind = testResult.Kind.ToString(),
+                        detail = testResult.TechnicalDetail,
+                        durationMs = (int)testResult.Duration.TotalMilliseconds,
+                        plantInfo = (object?)null, realtime = (object?)null
+                    });
 
                 // Pull actual data to verify
-                var plant = await adapter.GetPlantInfoAsync(credentials);
-                var realtime = await adapter.GetRealtimeDataAsync(credentials);
-                var devices = await adapter.GetDevicesAsync(credentials);
+                var plantResult = await adapter.GetPlantInfoResultAsync(credentials);
+                var realtimeResult = await adapter.GetRealtimeResultAsync(credentials);
+                var devicesResult = await adapter.GetDevicesResultAsync(credentials);
+                var plant = plantResult.Data;
+                var realtime = realtimeResult.Data;
+                var devices = devicesResult.Data ?? new();
+                var message = testResult.Message
+                    + (realtimeResult.Kind == Services.InverterApi.Models.ApiResultKind.DeviceOffline
+                        ? " | Note: API works, but device is offline/sleeping."
+                        : "");
 
                 return Results.Json(new
                 {
-                    success = true,
+                    success = realtimeResult.IsSuccess,
+                    kind = realtimeResult.Kind.ToString(),
+                    durationMs = (int)(testResult.Duration + realtimeResult.Duration).TotalMilliseconds,
                     message,
                     plantInfo = plant == null ? null : new
                     {

@@ -224,99 +224,93 @@ public class ConnectionHealthChecker : IConnectionHealthChecker
         IInverterApiAdapter adapter, ApiCredentials cred)
     {
         var sw = Stopwatch.StartNew();
-        try
-        {
-            var (ok, msg) = await adapter.TestConnectionAsync(cred);
-            sw.Stop();
-            if (ok)
-                return new HealthCheckStep("Layer 2", "Authentication", true,
-                    "Login successful, API accessible", msg, sw.ElapsedMilliseconds,
-                    ConnectionIssueType.None);
+        var result = await adapter.TestConnectionResultAsync(cred);
+        sw.Stop();
 
-            var issueType = msg.Contains("401") || msg.Contains("403") || msg.Contains("credential", StringComparison.OrdinalIgnoreCase)
-                ? ConnectionIssueType.AuthenticationFailed
-                : msg.Contains("timeout", StringComparison.OrdinalIgnoreCase)
-                ? ConnectionIssueType.ApiTimeout
-                : msg.Contains("network", StringComparison.OrdinalIgnoreCase)
-                ? ConnectionIssueType.ApiConnectionFailed
-                : ConnectionIssueType.ApiConnectionFailed;
+        if (result.IsSuccess)
+            return new HealthCheckStep("Layer 2", "Authentication", true,
+                "Login successful, API accessible", result.Message, sw.ElapsedMilliseconds,
+                ConnectionIssueType.None);
 
-            return new HealthCheckStep("Layer 2", "Authentication", false,
-                $"Authentication failed: {msg}",
-                "Check API credentials in installation settings",
-                sw.ElapsedMilliseconds, issueType);
-        }
-        catch (Exception ex)
+        var issueType = result.Kind switch
         {
-            sw.Stop();
-            return new HealthCheckStep("Layer 2", "Authentication", false,
-                $"Connection error: {ex.Message}", ex.GetType().Name,
-                sw.ElapsedMilliseconds, ConnectionIssueType.ApiConnectionFailed);
-        }
+            ApiResultKind.AuthenticationFailed => ConnectionIssueType.AuthenticationFailed,
+            ApiResultKind.Timeout => ConnectionIssueType.ApiTimeout,
+            ApiResultKind.NetworkError => ConnectionIssueType.ApiConnectionFailed,
+            ApiResultKind.RateLimited => ConnectionIssueType.ApiRateLimited,
+            ApiResultKind.CloudServerError => ConnectionIssueType.ApiServerError,
+            ApiResultKind.InvalidCredentials => ConnectionIssueType.CredentialInvalid,
+            _ => ConnectionIssueType.ApiConnectionFailed
+        };
+
+        return new HealthCheckStep("Layer 2", "Authentication", false,
+            result.Message, result.TechnicalDetail ?? "Check API credentials in installation settings",
+            sw.ElapsedMilliseconds, issueType);
     }
 
     private async Task<HealthCheckStep> TestPlantInfoAsync(
         IInverterApiAdapter adapter, ApiCredentials cred)
     {
         var sw = Stopwatch.StartNew();
-        try
-        {
-            var info = await adapter.GetPlantInfoAsync(cred);
-            sw.Stop();
-            if (info != null)
-                return new HealthCheckStep("Layer 3", "Plant Discovery", true,
-                    $"Plant found: {info.PlantName} ({info.CapacityKw}kW)",
-                    $"PlantId={info.PlantId}", sw.ElapsedMilliseconds,
-                    ConnectionIssueType.None);
+        var result = await adapter.GetPlantInfoResultAsync(cred);
+        sw.Stop();
 
-            return new HealthCheckStep("Layer 3", "Plant Discovery", false,
-                $"Plant ID '{cred.PlantId}' not found on cloud account. Check Plant ID in installation settings.",
-                null, sw.ElapsedMilliseconds, ConnectionIssueType.PlantNotFound);
-        }
-        catch (Exception ex)
+        if (result.IsSuccess && result.Data is { } info)
+            return new HealthCheckStep("Layer 3", "Plant Discovery", true,
+                $"Plant found: {info.PlantName} ({info.CapacityKw}kW)",
+                $"PlantId={info.PlantId}", sw.ElapsedMilliseconds,
+                ConnectionIssueType.None);
+
+        var issueType = result.Kind switch
         {
-            sw.Stop();
-            return new HealthCheckStep("Layer 3", "Plant Discovery", false,
-                $"Plant query failed: {ex.Message}", ex.GetType().Name,
-                sw.ElapsedMilliseconds, ConnectionIssueType.ApiConnectionFailed);
-        }
+            ApiResultKind.PlantNotFound => ConnectionIssueType.PlantNotFound,
+            ApiResultKind.Timeout => ConnectionIssueType.ApiTimeout,
+            ApiResultKind.AuthenticationFailed => ConnectionIssueType.AuthenticationFailed,
+            _ => ConnectionIssueType.ApiConnectionFailed
+        };
+
+        return new HealthCheckStep("Layer 3", "Plant Discovery", false,
+            result.Message, result.TechnicalDetail, sw.ElapsedMilliseconds, issueType);
     }
 
     private async Task<(HealthCheckStep Step, bool IsOnline)> TestRealtimeAsync(
         IInverterApiAdapter adapter, ApiCredentials cred, Installation inst)
     {
         var sw = Stopwatch.StartNew();
-        try
+        var result = await adapter.GetRealtimeResultAsync(cred);
+        sw.Stop();
+
+        if (result.Kind == ApiResultKind.Success && result.Data is { } data)
         {
-            var data = await adapter.GetRealtimeDataAsync(cred);
-            sw.Stop();
-
-            if (data == null)
-                return (new HealthCheckStep("Layer 4", "Realtime Data", false,
-                    "API call succeeded but returned no data. The cloud may be temporarily unavailable.",
-                    null, sw.ElapsedMilliseconds, ConnectionIssueType.ApiConnectionFailed), false);
-
-            if (data.IsOnline)
-                return (new HealthCheckStep("Layer 4", "Realtime Data", true,
-                    $"Device ONLINE. Power={data.CurrentPowerKw:0.00}kW, Today={data.TodayEnergyKwh:0.0}kWh" +
-                    (data.BatterySocPercent.HasValue ? $", Battery={data.BatterySocPercent:0}%" : ""),
-                    null, sw.ElapsedMilliseconds, ConnectionIssueType.None), true);
-
             return (new HealthCheckStep("Layer 4", "Realtime Data", true,
-                $"API CONNECTED but device reports OFFLINE. Power={data.CurrentPowerKw:0.00}kW. " +
+                $"Device ONLINE. Power={data.CurrentPowerKw:0.00}kW, Today={data.TodayEnergyKwh:0.0}kWh" +
+                (data.BatterySocPercent.HasValue ? $", Battery={data.BatterySocPercent:0}%" : ""),
+                null, sw.ElapsedMilliseconds, ConnectionIssueType.None), true);
+        }
+
+        if (result.Kind == ApiResultKind.DeviceOffline && result.Data is { } offData)
+        {
+            return (new HealthCheckStep("Layer 4", "Realtime Data", true,
+                $"⚠ API CONNECTED but device reports OFFLINE. Power={offData.CurrentPowerKw:0.00}kW. " +
                 "This is different from an API failure — the cloud connection works, " +
                 "but the inverter itself is not reporting. " +
                 "Normal at night. If daytime, check the inverter's own internet/WiFi connection.",
-                $"IsOnline=false, TodayKwh={data.TodayEnergyKwh}", sw.ElapsedMilliseconds,
+                $"TodayKwh={offData.TodayEnergyKwh}, Timestamp={offData.Timestamp:HH:mm:ss}",
+                sw.ElapsedMilliseconds,
                 ConnectionIssueType.DeviceOffline), false);
         }
-        catch (Exception ex)
+
+        var issueType = result.Kind switch
         {
-            sw.Stop();
-            return (new HealthCheckStep("Layer 4", "Realtime Data", false,
-                $"Realtime query exception: {ex.Message}", ex.GetType().Name,
-                sw.ElapsedMilliseconds, ConnectionIssueType.ApiConnectionFailed), false);
-        }
+            ApiResultKind.Timeout => ConnectionIssueType.ApiTimeout,
+            ApiResultKind.NetworkError => ConnectionIssueType.ApiConnectionFailed,
+            ApiResultKind.AuthenticationFailed => ConnectionIssueType.AuthenticationFailed,
+            ApiResultKind.RateLimited => ConnectionIssueType.ApiRateLimited,
+            ApiResultKind.CloudServerError => ConnectionIssueType.ApiServerError,
+            _ => ConnectionIssueType.ApiConnectionFailed
+        };
+        return (new HealthCheckStep("Layer 4", "Realtime Data", false,
+            result.Message, result.TechnicalDetail, sw.ElapsedMilliseconds, issueType), false);
     }
 
     private async Task<HealthCheckStep> TestHistoricalContinuityAsync(

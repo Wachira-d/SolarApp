@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using SolarApp.Models.Enums;
+using SolarApp.Services.InverterApi.Common;
 using SolarApp.Services.InverterApi.Models;
 
 namespace SolarApp.Services.InverterApi.Adapters;
@@ -392,4 +393,91 @@ public class DeyeAdapter : IInverterApiAdapter
     // Legacy aliases kept for compatibility
     private static decimal GetDecimal(JsonElement el, string prop) => SafeGetDecimal(el, prop);
     private static decimal? GetNullableDecimal(JsonElement el, string prop) => SafeGetNullableDecimal(el, prop);
+
+    // ═══════════════════════════════════════════════════════════
+    //  ApiResult<T> methods
+    // ═══════════════════════════════════════════════════════════
+
+    public async Task<ApiResult<bool>> TestConnectionResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var (ok, msg) = await TestConnectionAsync(credentials);
+            sw.Stop();
+            return ok ? ApiResult<bool>.Ok(true, msg, sw.Elapsed)
+                      : ApiResultClassifier.ClassifyErrorMessage<bool>(msg, "Deye", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<bool>(ex, "Deye", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<PlantInfo>> GetPlantInfoResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var info = await GetPlantInfoAsync(credentials);
+            sw.Stop();
+            return info != null
+                ? ApiResult<PlantInfo>.Ok(info, "Plant info retrieved", sw.Elapsed)
+                : ApiResult<PlantInfo>.Fail(ApiResultKind.PlantNotFound,
+                    $"Plant '{credentials.PlantId}' not found on Deye account.", duration: sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<PlantInfo>(ex, "Deye", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<RealtimeData>> GetRealtimeResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var data = await GetRealtimeDataAsync(credentials);
+            sw.Stop();
+            if (data == null)
+                return ApiResult<RealtimeData>.Fail(ApiResultKind.CloudServerError,
+                    "Deye API returned no data. Could be server issue or PlantId mismatch.", duration: sw.Elapsed);
+            return data.IsOnline
+                ? ApiResult<RealtimeData>.Ok(data, "Device online", sw.Elapsed)
+                : ApiResult<RealtimeData>.Offline(data,
+                    "Deye API connected OK, but device reports offline. Check inverter datalogger.",
+                    sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<RealtimeData>(ex, "Deye", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<EnergyRecord>>> GetHistoricalResultAsync(ApiCredentials credentials, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetHistoricalDataAsync(credentials, from, to);
+            sw.Stop();
+            return ApiResult<List<EnergyRecord>>.Ok(list, $"{list.Count} record(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<EnergyRecord>>(ex, "Deye", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<AlarmRecord>>> GetAlarmsResultAsync(ApiCredentials credentials, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetAlarmsAsync(credentials, from, to);
+            sw.Stop();
+            return ApiResult<List<AlarmRecord>>.Ok(list, $"{list.Count} alarm(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<AlarmRecord>>(ex, "Deye", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<DeviceInfo>>> GetDevicesResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetDevicesAsync(credentials);
+            sw.Stop();
+            return ApiResult<List<DeviceInfo>>.Ok(list, $"{list.Count} device(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<DeviceInfo>>(ex, "Deye", sw.Elapsed); }
+    }
 }

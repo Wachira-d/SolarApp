@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Localization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,15 +10,29 @@ public class LanguageController : Controller
     [HttpGet]
     public IActionResult Set(string culture, string returnUrl = "/")
     {
-        if (string.IsNullOrEmpty(culture)) culture = "en";
-        if (culture != "en" && culture != "th") culture = "en";
+        // Strict whitelist for culture — never accept arbitrary values
+        culture = (culture ?? "").ToLowerInvariant() switch
+        {
+            "th" => "th",
+            "en" => "en",
+            _ => "en"
+        };
 
         Response.Cookies.Append(
             CookieRequestCultureProvider.DefaultCookieName,
             CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(culture)),
-            new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true });
+            new CookieOptions
+            {
+                Expires = DateTimeOffset.UtcNow.AddYears(1),
+                IsEssential = true,
+                HttpOnly = true,
+                SameSite = SameSiteMode.Lax,
+                SecurePolicy = CookieSecurePolicy.SameAsRequest
+            });
 
-        if (!Url.IsLocalUrl(returnUrl)) returnUrl = "/";
+        // Strict local URL check to prevent open-redirect attacks
+        if (string.IsNullOrEmpty(returnUrl) || !Url.IsLocalUrl(returnUrl) || returnUrl.StartsWith("//") || returnUrl.Contains(':'))
+            returnUrl = "/";
         return LocalRedirect(returnUrl);
     }
 }

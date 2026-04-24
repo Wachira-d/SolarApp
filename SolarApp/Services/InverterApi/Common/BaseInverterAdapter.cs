@@ -210,16 +210,19 @@ public abstract class BaseInverterAdapter
     //  Credential pre-flight validation
     // ═══════════════════════════════════════════════════════════
 
-    protected ApiResult<T> ValidateRequired<T>(ApiCredentials cred, params (string Value, string FieldName)[] checks)
+    /// <summary>
+    /// Validates that all required credential fields are non-empty.
+    /// Returns null if all valid, or a failure ApiResult if any are missing.
+    /// </summary>
+    protected ApiResult<T>? ValidateRequired<T>(params (string? Value, string FieldName)[] checks)
     {
-        foreach (var (value, name) in checks)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                return ApiResult<T>.Fail(ApiResultKind.InvalidCredentials,
-                    $"{name} is required but was empty. Check installation settings.",
-                    detail: $"Field: {name}");
-        }
-        return null!; // null means "all valid" — callers check for non-null
+        var missing = checks.Where(c => string.IsNullOrWhiteSpace(c.Value))
+                             .Select(c => c.FieldName).ToList();
+        if (!missing.Any()) return null;
+        return ApiResult<T>.Fail(
+            ApiResultKind.InvalidCredentials,
+            $"Missing required credential(s): {string.Join(", ", missing)}. Check installation settings.",
+            detail: $"Missing: {string.Join(", ", missing)}");
     }
 
     // ═══════════════════════════════════════════════════════════

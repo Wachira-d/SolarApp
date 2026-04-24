@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using SolarApp.Models.Enums;
+using SolarApp.Services.InverterApi.Common;
 using SolarApp.Services.InverterApi.Models;
 
 namespace SolarApp.Services.InverterApi.Adapters;
@@ -135,10 +136,25 @@ public class HuaweiAdapter : IInverterApiAdapter
 
             var health = SafeGetDecimal(kpi, "real_health_state");
 
+            // Huawei NBI station-level KPI semantics:
+            //   day_power   = today's accumulated energy (kWh) — NOT instantaneous power
+            //   total_power = lifetime accumulated energy (kWh)
+            //   real_health_state: 0=offline, 1=faulty, 2=healthy
+            // Instantaneous power must come from /getDevRealKpi (device-level).
+            decimal currentPowerKw = 0;
+            try
+            {
+                currentPowerKw = await FetchStationActivePowerKwAsync(client, credentials.PlantId!);
+            }
+            catch (Exception powerEx)
+            {
+                _logger.LogDebug(powerEx, "Huawei: could not fetch device-level active_power (non-fatal)");
+            }
+
             return new RealtimeData
             {
                 Timestamp = DateTime.UtcNow,
-                CurrentPowerKw = SafeGetDecimal(kpi, "day_power"),
+                CurrentPowerKw = currentPowerKw,
                 TodayEnergyKwh = SafeGetDecimal(kpi, "day_power"),
                 TotalEnergyKwh = SafeGetDecimal(kpi, "total_power"),
                 IsOnline = health >= 1
@@ -464,4 +480,153 @@ public class HuaweiAdapter : IInverterApiAdapter
         s.Length <= max ? s : s[..max] + "...";
 
     private static decimal GetDecimal(JsonElement el, string prop) => SafeGetDecimal(el, prop);
+
+    /// <summary>
+    /// Fetches total instantaneous active power (kW) by summing all inverter
+    /// devices in the plant. Returns 0 if devices not fetchable (non-fatal).
+    /// </summary>
+    private async Task<decimal> FetchStationActivePowerKwAsync(HttpClient client, string stationCode)
+    {
+        // Step 1: list devices (one call, rate-limited)
+        var devResponse = await client.PostAsJsonAsync($"{BaseUrl}/getDevList",
+            new { stationCodes = stationCode });
+        if (!devResponse.IsSuccessStatusCode) return 0;
+        var devJson = await ReadJsonAsync(devResponse);
+        if (devJson == null || !devJson.Value.TryGetProperty("data", out var devArr)
+            || devArr.ValueKind != JsonValueKind.Array) return 0;
+
+        // Only inverters (devTypeId = 1) can report active_power
+        var devIds = devArr.EnumerateArray()
+            .Where(d => d.ValueKind == JsonValueKind.Object && SafeGetInt(d, "devTypeId") == 1)
+            .Select(d => SafeGetLong(d, "id"))
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToList();
+
+        if (!devIds.Any()) return 0;
+
+        // Step 2: fetch device KPI in a single batch
+        var kpiResponse = await client.PostAsJsonAsync($"{BaseUrl}/getDevRealKpi",
+            new { devIds = string.Join(",", devIds), devTypeId = 1 });
+        if (!kpiResponse.IsSuccessStatusCode) return 0;
+        var kpiJson = await ReadJsonAsync(kpiResponse);
+        if (kpiJson == null || !kpiJson.Value.TryGetProperty("data", out var kpiArr)
+            || kpiArr.ValueKind != JsonValueKind.Array) return 0;
+
+        decimal totalKw = 0;
+        foreach (var item in kpiArr.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            if (!item.TryGetProperty("dataItemMap", out var dim) || dim.ValueKind != JsonValueKind.Object) continue;
+            totalKw += SafeGetDecimal(dim, "active_power");
+        }
+        return totalKw;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  New ApiResult<T> methods — typed, classified responses
+    // ═══════════════════════════════════════════════════════════
+
+    public async Task<ApiResult<bool>> TestConnectionResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        if (string.IsNullOrEmpty(credentials.Username))
+            return ApiResult<bool>.Fail(ApiResultKind.InvalidCredentials,
+                "Username (Northbound API user) is required.", duration: sw.Elapsed);
+        if (string.IsNullOrEmpty(credentials.Password))
+            return ApiResult<bool>.Fail(ApiResultKind.InvalidCredentials,
+                "Password (systemCode) is required.", duration: sw.Elapsed);
+
+        try
+        {
+            var (ok, msg) = await TestConnectionAsync(credentials);
+            sw.Stop();
+            if (ok) return ApiResult<bool>.Ok(true, msg, sw.Elapsed);
+            return ApiResultClassifier.ClassifyErrorMessage<bool>(msg, "Huawei", sw.Elapsed);
+        }
+        catch (TaskCanceledException)
+        {
+            sw.Stop();
+            return ApiResult<bool>.Fail(ApiResultKind.Timeout,
+                "Huawei API timeout during connection test.", duration: sw.Elapsed);
+        }
+        catch (HttpRequestException hre)
+        {
+            sw.Stop();
+            return ApiResult<bool>.Fail(ApiResultKind.NetworkError,
+                $"Network error: {hre.Message}", detail: hre.InnerException?.Message,
+                duration: sw.Elapsed);
+        }
+    }
+
+    public async Task<ApiResult<PlantInfo>> GetPlantInfoResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var info = await GetPlantInfoAsync(credentials);
+            sw.Stop();
+            return info != null
+                ? ApiResult<PlantInfo>.Ok(info, "Plant info retrieved", sw.Elapsed)
+                : ApiResult<PlantInfo>.Fail(ApiResultKind.PlantNotFound,
+                    $"Plant '{credentials.PlantId}' not found on Huawei account.", duration: sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<PlantInfo>(ex, "Huawei", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<RealtimeData>> GetRealtimeResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var data = await GetRealtimeDataAsync(credentials);
+            sw.Stop();
+            if (data == null)
+                return ApiResult<RealtimeData>.Fail(ApiResultKind.CloudServerError,
+                    "Huawei API returned no data. Could be server issue or incorrect PlantId.", duration: sw.Elapsed);
+            return data.IsOnline
+                ? ApiResult<RealtimeData>.Ok(data, "Device online", sw.Elapsed)
+                : ApiResult<RealtimeData>.Offline(data,
+                    "Huawei API connected OK, but station reports offline/sleeping. Check inverter WiFi at site.",
+                    sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<RealtimeData>(ex, "Huawei", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<EnergyRecord>>> GetHistoricalResultAsync(ApiCredentials credentials, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetHistoricalDataAsync(credentials, from, to);
+            sw.Stop();
+            return ApiResult<List<EnergyRecord>>.Ok(list, $"{list.Count} record(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<EnergyRecord>>(ex, "Huawei", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<AlarmRecord>>> GetAlarmsResultAsync(ApiCredentials credentials, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetAlarmsAsync(credentials, from, to);
+            sw.Stop();
+            return ApiResult<List<AlarmRecord>>.Ok(list, $"{list.Count} alarm(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<AlarmRecord>>(ex, "Huawei", sw.Elapsed); }
+    }
+
+    public async Task<ApiResult<List<DeviceInfo>>> GetDevicesResultAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var list = await GetDevicesAsync(credentials);
+            sw.Stop();
+            return ApiResult<List<DeviceInfo>>.Ok(list, $"{list.Count} device(s) fetched", sw.Elapsed);
+        }
+        catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<DeviceInfo>>(ex, "Huawei", sw.Elapsed); }
+    }
+
 }

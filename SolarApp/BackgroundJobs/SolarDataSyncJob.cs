@@ -7,6 +7,7 @@ using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.InverterApi;
 using SolarApp.Services.InverterApi.Models;
+using SolarApp.Services.Security;
 
 namespace SolarApp.BackgroundJobs;
 
@@ -16,17 +17,20 @@ public class SolarDataSyncJob
     private readonly IInverterApiAdapterFactory _adapterFactory;
     private readonly ILogger<SolarDataSyncJob> _logger;
     private readonly IHubContext<DashboardHub> _hub;
+    private readonly ICredentialProtector _credProtector;
 
     public SolarDataSyncJob(
         ApplicationDbContext context,
         IInverterApiAdapterFactory adapterFactory,
         ILogger<SolarDataSyncJob> logger,
-        IHubContext<DashboardHub> hub)
+        IHubContext<DashboardHub> hub,
+        ICredentialProtector credProtector)
     {
         _context = context;
         _adapterFactory = adapterFactory;
         _logger = logger;
         _hub = hub;
+        _credProtector = credProtector;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
@@ -48,30 +52,41 @@ public class SolarDataSyncJob
                 var adapter = _adapterFactory.GetAdapter(installation.InverterBrand);
                 var credentials = new ApiCredentials
                 {
-                    ApiKey = installation.CloudApiKey,
-                    ApiSecret = installation.CloudApiSecret,
-                    Username = installation.CloudUsername,
-                    Password = installation.CloudPassword,
+                    ApiKey = _credProtector.Unprotect(installation.CloudApiKey),
+                    ApiSecret = _credProtector.Unprotect(installation.CloudApiSecret),
+                    Username = _credProtector.Unprotect(installation.CloudUsername),
+                    Password = _credProtector.Unprotect(installation.CloudPassword),
                     PlantId = installation.PlantId
                 };
 
-                // ─── 1. Realtime snapshot ───
-                var realtime = await adapter.GetRealtimeDataAsync(credentials);
+                // ─── 1. Realtime snapshot (typed API with classified errors) ───
+                var realtimeResult = await adapter.GetRealtimeResultAsync(credentials);
 
-                if (realtime == null)
+                if (realtimeResult.IsApiFailure)
                 {
-                    // API failure — could NOT reach cloud or parse response
                     totalApiFailures++;
-                    LogApiCall(installation, "GetRealtimeData", 500, false,
-                        $"[API FAILURE] Could not retrieve data from {installation.InverterBrand} cloud. " +
-                        "This does NOT mean the inverter is offline — it means SolarApp cannot reach the cloud API. " +
-                        "Possible causes: network issue, API credentials expired, cloud server down, rate limiting.");
+                    var kindTag = realtimeResult.Kind switch
+                    {
+                        Services.InverterApi.Models.ApiResultKind.Timeout => "[TIMEOUT]",
+                        Services.InverterApi.Models.ApiResultKind.NetworkError => "[NETWORK ERROR]",
+                        Services.InverterApi.Models.ApiResultKind.AuthenticationFailed => "[AUTH FAILED]",
+                        Services.InverterApi.Models.ApiResultKind.RateLimited => "[RATE LIMITED]",
+                        Services.InverterApi.Models.ApiResultKind.CloudServerError => "[CLOUD 5xx]",
+                        Services.InverterApi.Models.ApiResultKind.ParseError => "[PARSE ERROR]",
+                        Services.InverterApi.Models.ApiResultKind.PlantNotFound => "[PLANT NOT FOUND]",
+                        _ => "[API FAILURE]"
+                    };
+                    LogApiCall(installation, "GetRealtimeData",
+                        realtimeResult.HttpStatusCode ?? 0, false,
+                        $"{kindTag} {realtimeResult.Message}" +
+                        (realtimeResult.TechnicalDetail != null ? $" | {realtimeResult.TechnicalDetail}" : "") +
+                        $" | Duration: {realtimeResult.Duration.TotalMilliseconds:0}ms");
                     await _context.SaveChangesAsync();
                     continue;
                 }
 
-                // ─── Got data — now distinguish: online vs device-offline ───
-                var isDeviceOnline = realtime.IsOnline;
+                var realtime = realtimeResult.Data!;
+                var isDeviceOnline = realtimeResult.Kind == Services.InverterApi.Models.ApiResultKind.Success;
 
                 _context.EnergyData.Add(new EnergyData
                 {
@@ -121,7 +136,10 @@ public class SolarDataSyncJob
                         await _hub.Clients.Group($"partner-{installation.PartnerId}").SendAsync("RealtimeUpdate", payload);
                     await _hub.Clients.Group($"customer-{installation.CustomerId}").SendAsync("RealtimeUpdate", payload);
                 }
-                catch { /* hub failure is non-critical */ }
+                catch (Exception hubEx)
+                {
+                    _logger.LogDebug(hubEx, "SignalR broadcast failed (non-critical, sync continues)");
+                }
 
                 // ─── 2. Daily aggregate (upsert today) ───
                 var today = DateTime.UtcNow.Date;

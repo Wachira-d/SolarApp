@@ -9,6 +9,7 @@ using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.Interfaces;
+using SolarApp.Services.Security;
 
 namespace SolarApp.Pages.Installations;
 
@@ -18,15 +19,18 @@ public class CreateModel : PageModel
     private readonly IInstallationService _installationService;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ApplicationDbContext _context;
+    private readonly ICredentialProtector _credProtector;
 
     public CreateModel(
         IInstallationService installationService,
         UserManager<ApplicationUser> userManager,
-        ApplicationDbContext context)
+        ApplicationDbContext context,
+        ICredentialProtector credProtector)
     {
         _installationService = installationService;
         _userManager = userManager;
         _context = context;
+        _credProtector = credProtector;
     }
 
     [BindProperty]
@@ -114,10 +118,10 @@ public class CreateModel : PageModel
             InverterCount = Input.InverterCount,
             InverterSizeKw = Input.InverterSizeKw,
             SystemType = Input.SystemType,
-            CloudApiKey = Input.CloudApiKey,
-            CloudApiSecret = Input.CloudApiSecret,
-            CloudUsername = Input.CloudUsername,
-            CloudPassword = Input.CloudPassword,
+            CloudApiKey = _credProtector.Protect(Input.CloudApiKey),
+            CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret),
+            CloudUsername = _credProtector.Protect(Input.CloudUsername),
+            CloudPassword = _credProtector.Protect(Input.CloudPassword),
             PlantId = Input.PlantId,
             SystemCapacityKw = Input.SystemCapacityKw,
             NumberOfPanels = Input.NumberOfPanels,

@@ -9,6 +9,7 @@ using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.Interfaces;
+using SolarApp.Services.Security;
 
 namespace SolarApp.Pages.Installations;
 
@@ -18,15 +19,18 @@ public class EditModel : PageModel
     private readonly IInstallationService _installationService;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ApplicationDbContext _context;
+    private readonly ICredentialProtector _credProtector;
 
     public EditModel(
         IInstallationService installationService,
         UserManager<ApplicationUser> userManager,
-        ApplicationDbContext context)
+        ApplicationDbContext context,
+        ICredentialProtector credProtector)
     {
         _installationService = installationService;
         _userManager = userManager;
         _context = context;
+        _credProtector = credProtector;
     }
 
     [BindProperty]
@@ -134,10 +138,11 @@ public class EditModel : PageModel
         installation.InverterCount = Input.InverterCount;
         installation.InverterSizeKw = Input.InverterSizeKw;
         installation.SystemType = Input.SystemType;
-        installation.CloudApiKey = Input.CloudApiKey;
-        installation.CloudApiSecret = Input.CloudApiSecret;
-        installation.CloudUsername = Input.CloudUsername;
-        installation.CloudPassword = Input.CloudPassword;
+        // Form always shows decrypted values; always re-encrypt on save.
+        installation.CloudApiKey = _credProtector.Protect(Input.CloudApiKey);
+        installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret);
+        installation.CloudUsername = _credProtector.Protect(Input.CloudUsername);
+        installation.CloudPassword = _credProtector.Protect(Input.CloudPassword);
         installation.PlantId = Input.PlantId;
         installation.SystemCapacityKw = Input.SystemCapacityKw;
         installation.NumberOfPanels = Input.NumberOfPanels;
@@ -198,10 +203,11 @@ public class EditModel : PageModel
             InverterCount = installation.InverterCount,
             InverterSizeKw = installation.InverterSizeKw,
             SystemType = installation.SystemType,
-            CloudApiKey = installation.CloudApiKey,
-            CloudApiSecret = installation.CloudApiSecret,
-            CloudUsername = installation.CloudUsername,
-            CloudPassword = installation.CloudPassword,
+            // Decrypt for display in the form; user may edit or leave unchanged
+            CloudApiKey = _credProtector.Unprotect(installation.CloudApiKey),
+            CloudApiSecret = _credProtector.Unprotect(installation.CloudApiSecret),
+            CloudUsername = _credProtector.Unprotect(installation.CloudUsername),
+            CloudPassword = _credProtector.Unprotect(installation.CloudPassword),
             PlantId = installation.PlantId,
             SystemCapacityKw = installation.SystemCapacityKw,
             NumberOfPanels = installation.NumberOfPanels,

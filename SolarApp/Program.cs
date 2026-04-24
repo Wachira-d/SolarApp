@@ -72,6 +72,14 @@ try
 
     // ── Middleware ──
     app.UseDeveloperExceptionPage();
+
+    // HTTPS redirect — only when an HTTPS URL is actually bound (opt-in via config)
+    if (app.Configuration.GetValue("EnforceHttps", false))
+    {
+        app.UseHttpsRedirection();
+        app.UseHsts();
+    }
+
     app.UseStaticFiles();
 
     // Localization: must come BEFORE UseRouting
