@@ -167,10 +167,33 @@ public class HuaweiAdapter : IInverterApiAdapter
                 return null;
             }
 
-            if (!json.TryGetProperty("data", out var dataArr)
-                || dataArr.ValueKind != JsonValueKind.Array)
+            if (!json.TryGetProperty("data", out var dataArr))
             {
-                _lastRealtimeError = $"Unexpected response shape (no 'data' array). Body: {Truncate(body, 300)}";
+                _lastRealtimeError = $"Unexpected response shape (no 'data' key). Body: {Truncate(body, 300)}";
+                return null;
+            }
+
+            // data:null with success:true means: API OK, but no realtime data available
+            // for this station (device offline, night, or freshly commissioned).
+            // This is NOT an API error — report device as offline with zero values.
+            if (dataArr.ValueKind == JsonValueKind.Null)
+            {
+                _logger.LogInformation(
+                    "Huawei station {StationCode}: API success but data=null — treating as device offline",
+                    credentials.PlantId);
+                return new RealtimeData
+                {
+                    Timestamp = DateTime.UtcNow,
+                    CurrentPowerKw = 0,
+                    TodayEnergyKwh = 0,
+                    TotalEnergyKwh = 0,
+                    IsOnline = false
+                };
+            }
+
+            if (dataArr.ValueKind != JsonValueKind.Array)
+            {
+                _lastRealtimeError = $"Unexpected 'data' type ({dataArr.ValueKind}). Body: {Truncate(body, 300)}";
                 return null;
             }
 
