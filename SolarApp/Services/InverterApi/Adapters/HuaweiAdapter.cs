@@ -22,6 +22,15 @@ public class HuaweiAdapter : IInverterApiAdapter
     private readonly ILogger<HuaweiAdapter> _logger;
     private const string BaseUrl = "https://sg5.fusionsolar.huawei.com/thirdData";
 
+    // Static station-list cache across instances (keyed by credentials fingerprint).
+    // Huawei NBI has a hard 1-req/minute rate limit, so repeatedly calling
+    // /getStationList (from TestConnection → PlantInfo → ...) quickly trips it.
+    // This cache is intentionally short (90s) — longer than typical UI test flow,
+    // shorter than the scheduled sync interval.
+    private static readonly Dictionary<string, (DateTime Expiry, string RawBody)> _stationListCache = new();
+    private static readonly object _cacheLock = new();
+    private static readonly TimeSpan StationListTtl = TimeSpan.FromSeconds(90);
+
     public InverterBrand Brand => InverterBrand.Huawei;
 
     public HuaweiAdapter(IHttpClientFactory httpClientFactory, ILogger<HuaweiAdapter> logger)
@@ -73,19 +82,81 @@ public class HuaweiAdapter : IInverterApiAdapter
 
     public async Task<PlantInfo?> GetPlantInfoAsync(ApiCredentials credentials)
     {
+        _lastPlantLookupError = null;
         try
         {
-            var client = _httpClientFactory.CreateClient();
-            var token = await LoginAsync(client, credentials);
-            if (token == null) return null;
+            var cacheKey = $"{credentials.Username}|{credentials.Password}";
+            string? body = null;
 
-            client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationList",
-                new { pageNo = 1, pageSize = 50 });
-            if (!response.IsSuccessStatusCode) return null;
+            // Try cache first (avoids Huawei 1-req/min rate limit on rapid re-calls)
+            lock (_cacheLock)
+            {
+                if (_stationListCache.TryGetValue(cacheKey, out var cached)
+                    && cached.Expiry > DateTime.UtcNow)
+                    body = cached.RawBody;
+            }
 
-            var json = await ReadJsonAsync(response);
-            if (json == null) return null;
+            if (body == null)
+            {
+                var client = _httpClientFactory.CreateClient();
+                var (token, loginErr) = await LoginWithDetailAsync(client, credentials);
+                if (token == null)
+                {
+                    _lastPlantLookupError = $"Login failed: {loginErr}. " +
+                        "(Huawei NBI has 1-req/min rate limit — if you just ran Test Connection, wait 60 seconds.)";
+                    return null;
+                }
+
+                client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
+                var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationList",
+                    new { pageNo = 1, pageSize = 50 });
+                body = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    _lastPlantLookupError = $"getStationList HTTP {(int)response.StatusCode}: {Truncate(body, 300)}";
+                    return null;
+                }
+
+                // Don't cache rate-limited or error responses
+                try
+                {
+                    var fc = SafeGetInt(JsonDocument.Parse(body).RootElement, "failCode");
+                    if (!fc.HasValue || fc.Value == 0)
+                    {
+                        lock (_cacheLock)
+                        {
+                            _stationListCache[cacheKey] = (DateTime.UtcNow.Add(StationListTtl), body);
+                        }
+                    }
+                }
+                catch { /* ignore parse issues here, handled below */ }
+            }
+
+            // Check failCode even on 200 — Huawei returns rate-limit 407 with HTTP 200
+            try
+            {
+                var fcCheck = JsonDocument.Parse(body).RootElement;
+                var fc = SafeGetInt(fcCheck, "failCode");
+                if (fc.HasValue && fc.Value != 0)
+                {
+                    var apiMsg = SafeGetString(fcCheck, "message") ?? SafeGetString(fcCheck, "data") ?? "Unknown";
+                    _lastPlantLookupError = $"Huawei error failCode={fc.Value}: {apiMsg}. " +
+                        (fc.Value == 407 ? "(Rate limit — Huawei allows 1 request/minute. Wait 60s and retry.)"
+                         : fc.Value == 305 ? "(Token expired — retry)"
+                         : fc.Value == 401 ? "(Unauthorized — check Northbound credentials)"
+                         : "");
+                    return null;
+                }
+            }
+            catch { /* fall through to main parse below */ }
+
+            JsonElement? json;
+            try { json = JsonDocument.Parse(body).RootElement; }
+            catch (Exception jsonEx)
+            {
+                _lastPlantLookupError = $"Failed to parse Huawei response: {jsonEx.Message}. Body: {Truncate(body, 200)}";
+                return null;
+            }
 
             // Huawei NBI returns TWO known shapes:
             //   Shape A (older):  {data: [...]}
