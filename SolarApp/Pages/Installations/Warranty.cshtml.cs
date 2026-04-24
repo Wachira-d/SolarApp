@@ -64,9 +64,27 @@ public class WarrantyModel : PageModel
     {
         if (!await _access.CanAccessAsync(Input.InstallationId, User)) return Forbid();
 
+        if (string.IsNullOrWhiteSpace(Input.ProviderName))
+        {
+            ModelState.AddModelError("Input.ProviderName", "Provider name is required");
+        }
+        if (Input.WarrantyYears < 1 || Input.WarrantyYears > 50)
+        {
+            ModelState.AddModelError("Input.WarrantyYears", "Warranty years must be 1-50");
+        }
+
         var inst = await _context.Installations.Include(i => i.Equipment)
             .FirstOrDefaultAsync(i => i.Id == Input.InstallationId);
         if (inst == null) return NotFound();
+
+        if (!ModelState.IsValid)
+        {
+            Installation = inst;
+            Records = await _context.WarrantyRecords.Where(w => w.InstallationId == inst.Id)
+                .OrderByDescending(w => w.WarrantyEndDate).ToListAsync();
+            LoadEquipmentOptions(inst);
+            return Page();
+        }
 
         _context.WarrantyRecords.Add(new WarrantyRecord
         {

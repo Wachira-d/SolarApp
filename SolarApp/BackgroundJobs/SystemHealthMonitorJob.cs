@@ -3,13 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.AlertRules;
 using SolarApp.Services.LineApi;
 
 namespace SolarApp.BackgroundJobs;
 
 /// <summary>
 /// Hangfire recurring job: monitors system health, detects offline systems,
-/// checks cleaning/warranty due, sends LINE notifications.
+/// checks cleaning/warranty due, evaluates custom alert rules, sends LINE notifications.
 /// Scheduled: every 2 minutes.
 /// </summary>
 public class SystemHealthMonitorJob
@@ -18,17 +19,20 @@ public class SystemHealthMonitorJob
     private readonly ILineMessagingService _lineService;
     private readonly ILogger<SystemHealthMonitorJob> _logger;
     private readonly IConfiguration _configuration;
+    private readonly IAlertRulesEngine _rulesEngine;
 
     public SystemHealthMonitorJob(
         ApplicationDbContext context,
         ILineMessagingService lineService,
         ILogger<SystemHealthMonitorJob> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IAlertRulesEngine rulesEngine)
     {
         _context = context;
         _lineService = lineService;
         _logger = logger;
         _configuration = configuration;
+        _rulesEngine = rulesEngine;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
@@ -37,6 +41,16 @@ public class SystemHealthMonitorJob
         await CheckSystemHealthAsync();
         await CheckMaintenanceDueAsync();
         await CheckWarrantyExpiryAsync();
+
+        try
+        {
+            await _rulesEngine.EvaluateAllAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Alert rules engine evaluation failed");
+        }
+
         await SendPendingNotificationsAsync();
     }
 

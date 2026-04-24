@@ -127,15 +127,23 @@ public class SolarDataSyncJob
                     var historical = await adapter.GetHistoricalDataAsync(credentials,
                         today.AddDays(-7), today.AddDays(-1));
 
-                    foreach (var h in historical)
+                    if (historical.Any())
                     {
-                        var exists = await _context.EnergyData.AnyAsync(e =>
-                            e.InstallationId == installation.Id
-                            && e.Granularity == DataGranularity.Daily
-                            && e.Timestamp.Date == h.Timestamp.Date);
+                        // Batch-load existing dates in one query (eliminates N+1)
+                        var fromDate = historical.Min(h => h.Timestamp.Date);
+                        var toDate = historical.Max(h => h.Timestamp.Date);
+                        var existingDates = await _context.EnergyData
+                            .Where(e => e.InstallationId == installation.Id
+                                        && e.Granularity == DataGranularity.Daily
+                                        && e.Timestamp >= fromDate
+                                        && e.Timestamp <= toDate)
+                            .Select(e => e.Timestamp.Date)
+                            .ToListAsync();
+                        var existingSet = new HashSet<DateTime>(existingDates);
 
-                        if (!exists)
+                        foreach (var h in historical)
                         {
+                            if (existingSet.Contains(h.Timestamp.Date)) continue;
                             _context.EnergyData.Add(new EnergyData
                             {
                                 InstallationId = installation.Id,
@@ -148,6 +156,7 @@ public class SolarDataSyncJob
                                 BatteryChargeKwh = h.BatteryChargeKwh,
                                 BatteryDischargeKwh = h.BatteryDischargeKwh
                             });
+                            existingSet.Add(h.Timestamp.Date);
                             totalDaily++;
                         }
                     }

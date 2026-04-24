@@ -326,7 +326,7 @@ public class DeyeAdapter : IInverterApiAdapter
     //  Safe JSON helpers
     // ══════════════════════════════════════════════════════════════
 
-    private static async Task<JsonElement?> ReadJsonAsync(HttpResponseMessage response)
+    private async Task<JsonElement?> ReadJsonAsync(HttpResponseMessage response)
     {
         try
         {
@@ -334,7 +334,11 @@ public class DeyeAdapter : IInverterApiAdapter
             if (string.IsNullOrWhiteSpace(body)) return null;
             return JsonDocument.Parse(body).RootElement;
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Deye: failed to parse response JSON");
+            return null;
+        }
     }
 
     private static string? SafeGetString(JsonElement el, string prop)

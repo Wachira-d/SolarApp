@@ -277,11 +277,23 @@ public class UsersModel : PageModel
 
     public async Task<IActionResult> OnPostCreateCustomerAsync()
     {
+        if (string.IsNullOrWhiteSpace(NewCustomer.FirstName) || string.IsNullOrWhiteSpace(NewCustomer.LastName))
+        {
+            ErrorMessage = "First name and last name are required";
+            return RedirectToPage();
+        }
+        if (!string.IsNullOrWhiteSpace(NewCustomer.Email) &&
+            !System.Text.RegularExpressions.Regex.IsMatch(NewCustomer.Email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+        {
+            ErrorMessage = "Invalid email format";
+            return RedirectToPage();
+        }
+
         _context.Customers.Add(new Customer
         {
-            FirstName = NewCustomer.FirstName,
-            LastName = NewCustomer.LastName,
-            Email = NewCustomer.Email,
+            FirstName = NewCustomer.FirstName.Trim(),
+            LastName = NewCustomer.LastName.Trim(),
+            Email = NewCustomer.Email?.Trim() ?? string.Empty,
             Phone = NewCustomer.Phone,
             LineUserId = NewCustomer.LineUserId,
             Address = NewCustomer.Address,
@@ -354,9 +366,26 @@ public class UsersModel : PageModel
 
     public async Task<IActionResult> OnPostCreatePartnerAsync()
     {
+        if (string.IsNullOrWhiteSpace(NewPartner.CompanyName))
+        {
+            ErrorMessage = "Company name is required";
+            return RedirectToPage();
+        }
+        if (NewPartner.CommissionRate < 0 || NewPartner.CommissionRate > 100)
+        {
+            ErrorMessage = "Commission rate must be between 0 and 100";
+            return RedirectToPage();
+        }
+        if (NewPartner.ContractEndDate.HasValue && NewPartner.ContractStartDate.HasValue
+            && NewPartner.ContractEndDate < NewPartner.ContractStartDate)
+        {
+            ErrorMessage = "Contract end date cannot be before start date";
+            return RedirectToPage();
+        }
+
         _context.Partners.Add(new Partner
         {
-            CompanyName = NewPartner.CompanyName,
+            CompanyName = NewPartner.CompanyName.Trim(),
             ContactEmail = NewPartner.ContactEmail,
             ContactPhone = NewPartner.ContactPhone,
             Address = NewPartner.Address,

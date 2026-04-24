@@ -1,0 +1,154 @@
+@page
+@model SolarApp.Pages.Performance.IndexModel
+@{
+    ViewData["Title"] = "Performance";
+    var f = Model.Fleet;
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-speedometer2"></i> Fleet Performance</h4>
+        <small class="text-muted">@Model.From.ToString("dd MMM yyyy") → @Model.To.ToString("dd MMM yyyy") · @f.InstallationCount site(s)</small>
+    </div>
+    <form method="get" class="d-flex flex-wrap gap-2 align-items-end">
+        <div>
+            <label class="form-label small mb-0">From</label>
+            <input name="From" type="date" value="@Model.From.ToString("yyyy-MM-dd")" class="form-control form-control-sm" />
+        </div>
+        <div>
+            <label class="form-label small mb-0">To</label>
+            <input name="To" type="date" value="@Model.To.ToString("yyyy-MM-dd")" class="form-control form-control-sm" />
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-filter"></i> Apply</button>
+    </form>
+</div>
+
+<!-- KPI row -->
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Fleet PR</div>
+                <div class="fs-3 fw-bold text-@(f.FleetPerformanceRatio >= 0.85m ? "success" : f.FleetPerformanceRatio >= 0.7m ? "warning" : "danger")">
+                    @((f.FleetPerformanceRatio * 100).ToString("0.0"))%
+                </div>
+                <small class="text-muted">Actual / Expected</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Fleet Uptime</div>
+                <div class="fs-3 fw-bold text-@(f.FleetUptimePercent >= 98 ? "success" : f.FleetUptimePercent >= 90 ? "warning" : "danger")">
+                    @f.FleetUptimePercent%
+                </div>
+                <small class="text-muted">Average across sites</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Production</div>
+                <div class="fs-3 fw-bold">@f.TotalActualKwh.ToString("N0") <small class="fs-6 text-muted">kWh</small></div>
+                <small class="text-muted">Expected @f.TotalExpectedKwh.ToString("N0")</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Total Capacity</div>
+                <div class="fs-3 fw-bold">@f.TotalCapacityKw.ToString("N1") <small class="fs-6 text-muted">kW</small></div>
+                <small class="text-muted">@f.ActiveCount active · @f.OfflineCount offline</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Health summary -->
+<div class="row g-2 mb-3">
+    <div class="col-12 col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-trophy"></i> Top Performers</h6>
+            </div>
+            <div class="list-group list-group-flush">
+                @if (!f.TopPerformers.Any())
+                {
+                    <div class="list-group-item text-muted">No data</div>
+                }
+                @foreach (var p in f.TopPerformers)
+                {
+                    <a asp-page="Detail" asp-route-id="@p.Installation.Id"
+                       asp-route-From="@Model.From.ToString("yyyy-MM-dd")"
+                       asp-route-To="@Model.To.ToString("yyyy-MM-dd")"
+                       class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between align-items-center gap-2">
+                            <div class="min-width-0">
+                                <div class="text-truncate">
+                                    <span class="badge bg-@p.HealthColor">@p.HealthGrade</span>
+                                    <strong>@p.Installation.SiteName</strong>
+                                </div>
+                                <small class="text-muted">@p.Installation.SystemCapacityKw kW · @p.Installation.InverterBrand</small>
+                            </div>
+                            <div class="text-end">
+                                <div class="fw-bold">@((p.PerformanceRatio * 100).ToString("0.0"))%</div>
+                                <small class="text-muted">@p.TotalActualKwh.ToString("N0") kWh</small>
+                            </div>
+                        </div>
+                    </a>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Needs Attention</h6>
+            </div>
+            <div class="list-group list-group-flush">
+                @if (!f.BottomPerformers.Any())
+                {
+                    <div class="list-group-item text-muted">All sites performing well</div>
+                }
+                @foreach (var p in f.BottomPerformers)
+                {
+                    <a asp-page="Detail" asp-route-id="@p.Installation.Id"
+                       asp-route-From="@Model.From.ToString("yyyy-MM-dd")"
+                       asp-route-To="@Model.To.ToString("yyyy-MM-dd")"
+                       class="list-group-item list-group-item-action">
+                        <div class="d-flex justify-content-between align-items-center gap-2">
+                            <div class="min-width-0">
+                                <div class="text-truncate">
+                                    <span class="badge bg-@p.HealthColor">@p.HealthGrade</span>
+                                    <strong>@p.Installation.SiteName</strong>
+                                </div>
+                                <small class="text-muted">
+                                    @(p.UnresolvedAlerts > 0 ? $"{p.UnresolvedAlerts} alert(s) · " : "")
+                                    @p.OfflineDays offline day(s)
+                                </small>
+                            </div>
+                            <div class="text-end">
+                                <div class="fw-bold text-danger">@((p.PerformanceRatio * 100).ToString("0.0"))%</div>
+                                <small class="text-muted">Uptime @p.UptimePercent%</small>
+                            </div>
+                        </div>
+                    </a>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (f.UnderperformingCount > 0)
+{
+    <div class="alert alert-warning d-flex align-items-center gap-2">
+        <i class="bi bi-exclamation-circle fs-4"></i>
+        <div>
+            <strong>@f.UnderperformingCount installation(s)</strong> are underperforming (PR &lt; 75%).
+            Review the "Needs Attention" list above for action items.
+        </div>
+    </div>
+}

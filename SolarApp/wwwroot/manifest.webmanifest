@@ -1,0 +1,17 @@
+{
+    "name": "SolarApp - Solar Operation Monitor",
+    "short_name": "SolarApp",
+    "description": "Operation-focused monitoring for solar installations",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0f172a",
+    "theme_color": "#ffc107",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "/favicon.ico",
+            "sizes": "48x48",
+            "type": "image/x-icon"
+        }
+    ]
+}

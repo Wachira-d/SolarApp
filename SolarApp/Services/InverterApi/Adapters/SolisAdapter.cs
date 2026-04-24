@@ -394,10 +394,18 @@ public class SolisAdapter : IInverterApiAdapter
     // ══════════════════════════════════════════════════════════════
 
     private string? _webToken;
+    private DateTime _webTokenExpiry = DateTime.MinValue;
+    private string? _webTokenUser;
+    private static readonly TimeSpan WebTokenTtl = TimeSpan.FromMinutes(25);
 
-    private async Task<string?> WebLoginAsync(ApiCredentials credentials)
+    private async Task<string?> WebLoginAsync(ApiCredentials credentials, bool forceRefresh = false)
     {
-        if (!string.IsNullOrEmpty(_webToken)) return _webToken;
+        // Use cached token only if: not expired, same user, not forced refresh
+        if (!forceRefresh
+            && !string.IsNullOrEmpty(_webToken)
+            && _webTokenUser == credentials.Username
+            && DateTime.UtcNow < _webTokenExpiry)
+            return _webToken;
 
         try
         {
@@ -424,14 +432,21 @@ public class SolisAdapter : IInverterApiAdapter
                 _webToken = SafeGetString(data, "token") ?? SafeGetString(data, "csrfToken");
                 if (!string.IsNullOrEmpty(_webToken))
                 {
-                    _logger.LogInformation("Solis web login OK, token obtained");
+                    _webTokenExpiry = DateTime.UtcNow.Add(WebTokenTtl);
+                    _webTokenUser = credentials.Username;
+                    _logger.LogInformation("Solis web login OK, token cached until {Exp}", _webTokenExpiry);
                     return _webToken;
                 }
             }
 
             // Some versions return token at root
             _webToken = SafeGetString(json, "token") ?? SafeGetString(json, "csrfToken");
-            if (!string.IsNullOrEmpty(_webToken)) return _webToken;
+            if (!string.IsNullOrEmpty(_webToken))
+            {
+                _webTokenExpiry = DateTime.UtcNow.Add(WebTokenTtl);
+                _webTokenUser = credentials.Username;
+                return _webToken;
+            }
 
             _logger.LogWarning("Solis web login: no token found. Response: {Body}", Truncate(body, 300));
             return null;
@@ -447,31 +462,46 @@ public class SolisAdapter : IInverterApiAdapter
     {
         try
         {
-            var token = await WebLoginAsync(credentials);
-            if (string.IsNullOrEmpty(token))
+            for (var attempt = 1; attempt <= 2; attempt++)
             {
-                _logger.LogWarning("Solis web: no token, cannot make request");
-                return null;
+                var forceRefresh = attempt == 2;
+                var token = await WebLoginAsync(credentials, forceRefresh);
+                if (string.IsNullOrEmpty(token))
+                {
+                    _logger.LogWarning("Solis web: no token, cannot make request");
+                    return null;
+                }
+
+                var client = _httpClientFactory.CreateClient();
+                client.DefaultRequestHeaders.Add("token", token);
+                client.DefaultRequestHeaders.Add("Accept", "application/json");
+                client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 SolarApp/1.0");
+
+                var response = await client.PostAsync($"{WebBaseUrl}/v2/api{path}",
+                    new StringContent(body, Encoding.UTF8, "application/json"));
+
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogDebug("Solis web {Path}: HTTP {Code} (attempt {Attempt})", path, (int)response.StatusCode, attempt);
+
+                // On 401/403 — invalidate cache and retry once
+                if ((response.StatusCode == System.Net.HttpStatusCode.Unauthorized ||
+                     response.StatusCode == System.Net.HttpStatusCode.Forbidden) && attempt == 1)
+                {
+                    _logger.LogWarning("Solis web {Path}: auth rejected, invalidating cached token and retrying", path);
+                    _webToken = null;
+                    _webTokenExpiry = DateTime.MinValue;
+                    continue;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Solis web {Path}: HTTP {Code}: {Body}", path, (int)response.StatusCode, Truncate(content, 200));
+                    return null;
+                }
+
+                return JsonDocument.Parse(content).RootElement;
             }
-
-            var client = _httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("token", token);
-            client.DefaultRequestHeaders.Add("Accept", "application/json");
-            client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 SolarApp/1.0");
-
-            var response = await client.PostAsync($"{WebBaseUrl}/v2/api{path}",
-                new StringContent(body, Encoding.UTF8, "application/json"));
-
-            var content = await response.Content.ReadAsStringAsync();
-            _logger.LogDebug("Solis web {Path}: HTTP {Code}", path, (int)response.StatusCode);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Solis web {Path}: HTTP {Code}: {Body}", path, (int)response.StatusCode, Truncate(content, 200));
-                return null;
-            }
-
-            return JsonDocument.Parse(content).RootElement;
+            return null;
         }
         catch (Exception ex)
         {

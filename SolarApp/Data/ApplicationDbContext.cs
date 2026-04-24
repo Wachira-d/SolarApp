@@ -24,6 +24,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<ElectricityTariff> ElectricityTariffs => Set<ElectricityTariff>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+    public DbSet<AlertRule> AlertRules => Set<AlertRule>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -143,6 +144,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(a => new { a.InstallationId, a.OccurredAt });
             entity.HasIndex(a => a.AlertType);
             entity.HasIndex(a => a.IsNotified);
+            entity.HasIndex(a => a.AcknowledgedByUserId);
+            entity.HasIndex(a => a.Severity);
         });
 
         // ── ServiceTicket ──
@@ -165,6 +168,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
             entity.HasIndex(t => t.TicketNumber).IsUnique();
             entity.HasIndex(t => t.Status);
+            entity.HasIndex(t => t.ReportedByUserId);
+            entity.HasIndex(t => t.AssignedToUserId);
             entity.Property(t => t.TicketNumber).HasMaxLength(50);
         });
 
@@ -182,6 +187,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.Property(m => m.Cost).HasPrecision(12, 2);
+            entity.HasIndex(m => new { m.InstallationId, m.ScheduledDate });
+            entity.HasIndex(m => m.PerformedByUserId);
+            entity.HasIndex(m => m.Status);
         });
 
         // ── InverterApiLog ──
@@ -210,6 +218,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(w => new { w.InstallationId, w.WarrantyEndDate });
+            entity.HasIndex(w => w.EquipmentId);
+            entity.HasIndex(w => w.WarrantyType);
         });
 
         // ── CleaningRecord ──
@@ -226,6 +236,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(c => new { c.InstallationId, c.ScheduledDate });
+            entity.HasIndex(c => c.PerformedByUserId);
+            entity.HasIndex(c => c.Status);
         });
 
         // ── InstallationDocument ──
@@ -283,6 +295,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         {
             entity.HasIndex(s => s.Key).IsUnique();
             entity.Property(s => s.Key).HasMaxLength(200);
+        });
+
+        // ── AlertRule ──
+        builder.Entity<AlertRule>(entity =>
+        {
+            entity.HasOne(r => r.Installation)
+                .WithMany()
+                .HasForeignKey(r => r.InstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(r => r.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(r => r.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.Property(r => r.Threshold).HasPrecision(14, 4);
+            entity.HasIndex(r => r.IsEnabled);
+            entity.HasIndex(r => r.InstallationId);
+            entity.HasIndex(r => r.Metric);
         });
     }
 }

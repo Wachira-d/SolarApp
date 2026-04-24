@@ -226,3 +226,133 @@ body {
 .btn:focus, .form-control:focus, .form-select:focus {
     box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25);
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Dark Mode (toggle via <html data-theme="dark">)
+   ═══════════════════════════════════════════════════════════ */
+:root {
+    --app-bg: #f5f6fa;
+    --app-surface: #ffffff;
+    --app-text: #212529;
+    --app-text-muted: #6c757d;
+    --app-border: #dee2e6;
+    --app-sidebar-bg: #1e293b;
+    --app-sidebar-text: #e2e8f0;
+    --app-accent: #ffc107;
+}
+
+html[data-theme="dark"] {
+    --app-bg: #0f172a;
+    --app-surface: #1e293b;
+    --app-text: #e2e8f0;
+    --app-text-muted: #94a3b8;
+    --app-border: #334155;
+    --app-sidebar-bg: #020617;
+    --app-sidebar-text: #e2e8f0;
+    --app-accent: #fbbf24;
+
+    color-scheme: dark;
+}
+
+html[data-theme="dark"] body {
+    background-color: var(--app-bg);
+    color: var(--app-text);
+}
+
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .list-group-item,
+html[data-theme="dark"] .modal-content,
+html[data-theme="dark"] .offcanvas {
+    background-color: var(--app-surface);
+    color: var(--app-text);
+    border-color: var(--app-border);
+}
+
+html[data-theme="dark"] .card-header,
+html[data-theme="dark"] .table-light,
+html[data-theme="dark"] thead.table-light th,
+html[data-theme="dark"] .bg-white {
+    background-color: var(--app-surface) !important;
+    color: var(--app-text);
+    border-color: var(--app-border);
+}
+
+html[data-theme="dark"] .text-muted,
+html[data-theme="dark"] .text-body-secondary {
+    color: var(--app-text-muted) !important;
+}
+
+html[data-theme="dark"] .form-control,
+html[data-theme="dark"] .form-select,
+html[data-theme="dark"] .form-check-input {
+    background-color: #0f172a;
+    color: var(--app-text);
+    border-color: var(--app-border);
+}
+
+html[data-theme="dark"] .form-control::placeholder { color: #64748b; }
+
+html[data-theme="dark"] .table {
+    color: var(--app-text);
+    --bs-table-bg: var(--app-surface);
+    --bs-table-hover-bg: #253349;
+}
+
+html[data-theme="dark"] .table-hover > tbody > tr:hover > * {
+    color: var(--app-text);
+}
+
+html[data-theme="dark"] .btn-outline-secondary {
+    color: var(--app-text);
+    border-color: var(--app-border);
+}
+
+html[data-theme="dark"] .btn-outline-secondary:hover {
+    background-color: #334155;
+    color: var(--app-text);
+}
+
+html[data-theme="dark"] .dropdown-menu {
+    background-color: var(--app-surface);
+    border-color: var(--app-border);
+}
+
+html[data-theme="dark"] .dropdown-item {
+    color: var(--app-text);
+}
+
+html[data-theme="dark"] .dropdown-item:hover {
+    background-color: #334155;
+    color: var(--app-text);
+}
+
+html[data-theme="dark"] a {
+    color: #93c5fd;
+}
+
+html[data-theme="dark"] .shadow-sm {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Theme toggle button */
+.theme-toggle {
+    cursor: pointer;
+    background: none;
+    border: 1px solid var(--app-border);
+    color: inherit;
+    border-radius: 50%;
+    width: 38px;
+    height: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.theme-toggle:hover {
+    background-color: rgba(255, 193, 7, 0.15);
+}
+
+html[data-theme="dark"] .theme-toggle .bi-sun-fill { display: inline-block; }
+html[data-theme="dark"] .theme-toggle .bi-moon-fill { display: none; }
+html:not([data-theme="dark"]) .theme-toggle .bi-sun-fill { display: none; }
+html:not([data-theme="dark"]) .theme-toggle .bi-moon-fill { display: inline-block; }

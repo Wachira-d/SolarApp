@@ -74,6 +74,7 @@ public class InstallationStatusItem
         "Active" => "bg-success",
         "Offline" => "bg-danger",
         "Maintenance" => "bg-warning text-dark",
+        "Inactive" => "bg-dark",
         _ => "bg-secondary"
     };
 

@@ -31,6 +31,11 @@
             </a>
         </li>
         <li class="nav-item">
+            <a class="nav-link text-white @ActiveClass("/performance")" asp-page="/Performance/Index">
+                <i class="bi bi-speedometer me-2"></i>Performance
+            </a>
+        </li>
+        <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/reports")" asp-page="/Reports/Index">
                 <i class="bi bi-bar-chart me-2"></i>Reports
             </a>
@@ -48,6 +53,11 @@
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/alerts")" asp-page="/Admin/Alerts">
                     <i class="bi bi-bell me-2"></i>All Alerts
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link text-white @ActiveClass("/admin/alertrules")" asp-page="/Admin/AlertRules">
+                    <i class="bi bi-shield-exclamation me-2"></i>Alert Rules
                 </a>
             </li>
             <li class="nav-item">
