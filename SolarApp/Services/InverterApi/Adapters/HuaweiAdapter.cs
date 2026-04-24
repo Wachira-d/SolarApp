@@ -667,23 +667,30 @@ public class HuaweiAdapter : IInverterApiAdapter
             sw.Stop();
             if (data == null)
             {
-                // Classify based on captured error detail
+                // Classify based on captured error detail.
+                // Note: login errors use "code=NNN", getStationRealKpi uses "failCode=NNN".
+                // Also check for ACCESS_FREQUENCY which is Huawei's rate-limit label.
                 var err = _lastRealtimeError ?? "Huawei API returned no data.";
                 var kind = ApiResultKind.CloudServerError;
-                if (err.Contains("failCode=407") || err.Contains("Rate limit"))
+                if (err.Contains("407") || err.Contains("Rate limit")
+                    || err.Contains("ACCESS_FREQUENCY", StringComparison.OrdinalIgnoreCase)
+                    || err.Contains("frequency is too high", StringComparison.OrdinalIgnoreCase))
                     kind = ApiResultKind.RateLimited;
-                else if (err.Contains("failCode=305") || err.Contains("failCode=401")
-                         || err.Contains("Unauthorized") || err.Contains("Login failed"))
+                else if (err.Contains("305") || err.Contains("401")
+                         || err.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase)
+                         || err.Contains("USER_MUST_RELOGIN", StringComparison.OrdinalIgnoreCase))
                     kind = ApiResultKind.AuthenticationFailed;
-                else if (err.Contains("failCode=20002") || err.Contains("not found"))
+                else if (err.Contains("20002") || err.Contains("not found", StringComparison.OrdinalIgnoreCase)
+                         || err.Contains("STATION_NOT_EXISTED", StringComparison.OrdinalIgnoreCase))
                     kind = ApiResultKind.PlantNotFound;
-                else if (err.Contains("timed out"))
+                else if (err.Contains("timed out", StringComparison.OrdinalIgnoreCase))
                     kind = ApiResultKind.Timeout;
-                else if (err.Contains("Network error"))
+                else if (err.Contains("Network error", StringComparison.OrdinalIgnoreCase))
                     kind = ApiResultKind.NetworkError;
-                else if (err.Contains("Invalid JSON"))
+                else if (err.Contains("Invalid JSON", StringComparison.OrdinalIgnoreCase))
                     kind = ApiResultKind.ParseError;
-                else if (err.Contains("PlantId"))
+                else if (err.Contains("PlantId", StringComparison.OrdinalIgnoreCase)
+                         && err.Contains("empty", StringComparison.OrdinalIgnoreCase))
                     kind = ApiResultKind.InvalidCredentials;
 
                 return ApiResult<RealtimeData>.Fail(kind, err,

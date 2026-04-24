@@ -754,8 +754,11 @@ public class Startup
                     }
                 }
 
-                installation.LastOnlineAt = realtime.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
-                if (realtime.IsOnline && installation.Status == Models.Enums.InstallationStatus.Offline)
+                // LastOnlineAt reflects cloud reachability, not device producing state.
+                // We got here via a successful API call, so update regardless of
+                // device-level online/offline reporting.
+                installation.LastOnlineAt = DateTime.UtcNow;
+                if (installation.Status == Models.Enums.InstallationStatus.Offline)
                     installation.Status = Models.Enums.InstallationStatus.Active;
 
                 await db.SaveChangesAsync();

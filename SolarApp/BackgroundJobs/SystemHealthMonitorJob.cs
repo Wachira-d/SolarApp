@@ -60,11 +60,17 @@ public class SystemHealthMonitorJob
         var threshold = DateTime.UtcNow.AddMinutes(-offlineThreshold);
         var minFailedCalls = _configuration.GetValue("InverterApis:MinFailedCallsForAlert", 2);
 
+        // ─── Part A: API connection lost (LastOnlineAt is our "last successful
+        // cloud contact" marker; if stale, the cloud is unreachable) ───
         var offlineInstallations = await _context.Installations
             .Where(i => i.Status == InstallationStatus.Active
                 && i.LastOnlineAt != null
                 && i.LastOnlineAt < threshold)
             .ToListAsync();
+
+        // ─── Part B: Device offline during daytime (API still works, but
+        // device hasn't produced anything for 3+ hours of daytime) ───
+        await CheckDeviceOfflineDuringDaytimeAsync();
 
         foreach (var installation in offlineInstallations)
         {
@@ -190,6 +196,87 @@ public class SystemHealthMonitorJob
         foreach (var alert in resolvedAlerts)
         {
             alert.ResolvedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Detects installations whose cloud API is reachable but whose inverter
+    /// has not reported online for 3+ hours during daytime. This catches the
+    /// case where the inverter itself is disconnected (WiFi lost, powered off,
+    /// DC isolator tripped) even while the cloud portal is up.
+    ///
+    /// Runs every 2 minutes; uses InverterApiLogs with [DEVICE OFFLINE] tag
+    /// to count consecutive offline readings.
+    /// </summary>
+    private async Task CheckDeviceOfflineDuringDaytimeAsync()
+    {
+        const int OfflineHoursThreshold = 3;
+        var windowStart = DateTime.UtcNow.AddHours(-OfflineHoursThreshold);
+
+        var candidates = await _context.Installations
+            .Where(i => i.Status == InstallationStatus.Active)
+            .ToListAsync();
+
+        foreach (var inst in candidates)
+        {
+            // Skip at night — inverters correctly offline when no sun
+            if (IsLikelyNighttime(inst)) continue;
+
+            // Count recent [DEVICE OFFLINE]-tagged successful API calls
+            var offlineCount = await _context.InverterApiLogs
+                .Where(l => l.InstallationId == inst.Id
+                            && l.RequestTime >= windowStart
+                            && l.IsSuccess
+                            && l.ErrorMessage != null
+                            && l.ErrorMessage.Contains("[DEVICE OFFLINE]"))
+                .CountAsync();
+
+            // Count total successful API calls in the window
+            var totalCount = await _context.InverterApiLogs
+                .Where(l => l.InstallationId == inst.Id
+                            && l.RequestTime >= windowStart
+                            && l.IsSuccess)
+                .CountAsync();
+
+            // Need enough data and ALL calls should be device-offline
+            if (totalCount < 3) continue; // not enough syncs to be sure
+            if (offlineCount < totalCount) continue; // inverter reported at least once — skip
+
+            // De-dup: only one daytime-offline alert per installation per day
+            var sinceToday = DateTime.UtcNow.Date;
+            var existingAlert = await _context.SystemAlerts
+                .AnyAsync(a => a.InstallationId == inst.Id
+                    && a.Title.StartsWith("Inverter Silent (Daytime)")
+                    && a.OccurredAt >= sinceToday);
+            if (existingAlert) continue;
+
+            _context.SystemAlerts.Add(new SystemAlert
+            {
+                InstallationId = inst.Id,
+                AlertType = AlertType.Offline,
+                Severity = AlertSeverity.High,
+                Title = $"Inverter Silent (Daytime): {inst.SiteName}",
+                Message = $"[{inst.InverterBrand}] {inst.SiteName}: " +
+                          $"Cloud API is reachable, but the inverter has not reported production for {OfflineHoursThreshold}+ hours " +
+                          "during daytime. " +
+                          "THIS IS A REAL PROBLEM — check on-site:\n" +
+                          "  • Inverter power (AC breaker tripped?)\n" +
+                          "  • DC isolator position\n" +
+                          "  • Data-logger (WiFi stick, DTSU) is plugged in and its LEDs are normal\n" +
+                          "  • Inverter display for error codes",
+                RootCauseAnalysis = $"⚠ DEVICE OFFLINE DURING DAYTIME\n" +
+                    $"Observed {offlineCount} consecutive [DEVICE OFFLINE] API responses in the last {OfflineHoursThreshold} hours. " +
+                    $"The cloud API is healthy, but the inverter stopped reporting data. " +
+                    $"This pattern strongly suggests a physical problem at the site.",
+                OccurredAt = DateTime.UtcNow,
+                IsNotified = false
+            });
+
+            _logger.LogWarning(
+                "Installation {Id} ({Site}) daytime-silent: {Count}/{Total} offline API responses over {Hours}h",
+                inst.Id, inst.SiteName, offlineCount, totalCount, OfflineHoursThreshold);
         }
 
         await _context.SaveChangesAsync();

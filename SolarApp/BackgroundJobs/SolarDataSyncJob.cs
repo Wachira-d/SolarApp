@@ -103,13 +103,19 @@ public class SolarDataSyncJob
                 });
                 totalRealtime++;
 
+                // IMPORTANT: LastOnlineAt = "last time we successfully contacted the cloud",
+                // NOT "last time device was producing". The API call succeeded here (kind
+                // is either Success or DeviceOffline), so update the timestamp either way.
+                // Otherwise nighttime/standby inverters would falsely get Status=Offline
+                // just because their cloud reports status=0 briefly.
+                installation.LastOnlineAt = DateTime.UtcNow;
+                if (installation.Status == InstallationStatus.Offline)
+                    installation.Status = InstallationStatus.Active;
+
                 if (isDeviceOnline)
                 {
                     LogApiCall(installation, "GetRealtimeData", 200, true,
                         $"[ONLINE] Power={realtime.CurrentPowerKw:0.00}kW, Today={realtime.TodayEnergyKwh:0.0}kWh");
-                    installation.LastOnlineAt = DateTime.UtcNow;
-                    if (installation.Status == InstallationStatus.Offline)
-                        installation.Status = InstallationStatus.Active;
                 }
                 else
                 {
@@ -117,7 +123,7 @@ public class SolarDataSyncJob
                     LogApiCall(installation, "GetRealtimeData", 200, true,
                         $"[DEVICE OFFLINE] API connected OK, but inverter reports offline/sleeping. " +
                         $"Power={realtime.CurrentPowerKw:0.00}kW. " +
-                        "This is normal at night. If daytime — check inverter's own internet connection, not SolarApp.");
+                        "This is normal at night / early morning. LastOnlineAt still updated because cloud is reachable.");
                 }
 
                 // Push real-time update to dashboard
