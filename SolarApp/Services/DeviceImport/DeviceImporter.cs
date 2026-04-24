@@ -183,7 +183,7 @@ public class DeviceImporter : IDeviceImporter
                 }
                 if (equipment.IsActive != dev.IsOnline)
                 { equipment.IsActive = dev.IsOnline; eqChanged = true; }
-                if (eqChanged) { equipment.UpdatedAt = DateTime.UtcNow; updated++; }
+                if (eqChanged) updated++;
             }
         }
 
