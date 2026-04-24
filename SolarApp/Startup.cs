@@ -130,11 +130,11 @@ public class Startup
         // DataProtection — used for encrypting API credentials at rest
         // Pin DataProtection keys to a fixed directory so startup-time decryption
         // (raw ADO.NET path) and runtime (DI path) use the same key ring.
-        // Default path on Windows is %LOCALAPPDATA% which varies by user.
-        var keysDir = new DirectoryInfo(
-            Environment.GetEnvironmentVariable("SOLARAPP_KEYS_PATH")
-            ?? Path.Combine(AppContext.BaseDirectory, "dp-keys"));
-        try { keysDir.Create(); } catch { /* best-effort */ }
+        // Priority: SOLARAPP_KEYS_PATH env > %ProgramData%\SolarApp\dp-keys >
+        //           %TEMP%\SolarApp-keys (last resort).
+        // Default %ProgramData% is writable by IIS AppPool identities by default.
+        // Avoid BaseDirectory — wwwroot is usually read-only under IIS.
+        var keysDir = ResolveKeysDirectory();
         builder.Services.AddDataProtection()
             .PersistKeysToFileSystem(keysDir)
             .SetApplicationName("SolarApp");
@@ -239,6 +239,49 @@ public class Startup
     /// Must run before the app is built, so it opens a short-lived DB scope.
     /// Fails gracefully if the DB isn't ready (returns config-only values).
     /// </summary>
+    /// <summary>
+    /// Finds a directory we can actually write DataProtection keys to.
+    /// Tries, in order: SOLARAPP_KEYS_PATH env var, %ProgramData%\SolarApp\dp-keys,
+    /// %TEMP%\SolarApp-keys. Returns the first one that works.
+    /// Under IIS, wwwroot is typically read-only so we must NOT pick AppContext.BaseDirectory.
+    /// </summary>
+    public static DirectoryInfo ResolveKeysDirectory()
+    {
+        var candidates = new List<string>();
+        var envPath = Environment.GetEnvironmentVariable("SOLARAPP_KEYS_PATH");
+        if (!string.IsNullOrWhiteSpace(envPath)) candidates.Add(envPath);
+
+        candidates.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "SolarApp", "dp-keys"));
+        candidates.Add(Path.Combine(Path.GetTempPath(), "SolarApp-keys"));
+
+        foreach (var path in candidates)
+        {
+            try
+            {
+                var dir = new DirectoryInfo(path);
+                dir.Create();
+                // Prove writability
+                var testFile = Path.Combine(path, ".write-test");
+                File.WriteAllText(testFile, "ok");
+                File.Delete(testFile);
+                return dir;
+            }
+            catch
+            {
+                // Try next candidate
+            }
+        }
+
+        // All failed — throw a helpful error so the admin knows what to fix
+        throw new InvalidOperationException(
+            "Could not find a writable directory for DataProtection keys. Tried: " +
+            string.Join(", ", candidates) +
+            ". Grant the IIS app-pool identity modify permission on one of these paths, " +
+            "or set environment variable SOLARAPP_KEYS_PATH to a writable folder.");
+    }
+
     private static (string? MsId, string? MsSecret, string? LineId, string? LineSecret)
         ReadExternalAuthConfig(WebApplicationBuilder builder)
     {
@@ -287,10 +330,8 @@ public class Startup
                 if (!raw.StartsWith("enc:")) return raw; // legacy plaintext
                 try
                 {
-                    var keysPath = Environment.GetEnvironmentVariable("SOLARAPP_KEYS_PATH")
-                        ?? Path.Combine(AppContext.BaseDirectory, "dp-keys");
                     var dpProvider = Microsoft.AspNetCore.DataProtection.DataProtectionProvider
-                        .Create(new DirectoryInfo(keysPath),
+                        .Create(ResolveKeysDirectory(),
                             configuration => configuration.SetApplicationName("SolarApp"));
                     var protector = dpProvider.CreateProtector("SolarApp.Credentials.v1");
                     return protector.Unprotect(raw["enc:".Length..]);
