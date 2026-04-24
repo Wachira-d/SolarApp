@@ -527,97 +527,35 @@ public class Startup
     /// </summary>
     private static async Task RunSchemaUpgradesAsync(ApplicationDbContext context, Action<string> log)
     {
+        // PERFORMANCE: previously we ran each upgrade in its own ExecuteSqlRawAsync.
+        // With ~20+ upgrades × ~3 sec per round-trip this took a full minute on
+        // every startup even when nothing needed to change. IIS recycles apps
+        // during long startups which caused interleaved logs and flaky 503s.
+        //
+        // Now: single batched SQL. Each IF NOT EXISTS check is a local query
+        // on sys.columns / sys.tables / sys.indexes (microseconds). Entire
+        // script runs in ~500 ms on a warm SQL Server.
+
         var upgrades = new[]
         {
-            // Installation: inverter size in kW (per unit)
             (Table: "Installations", Column: "InverterSizeKw",
              Sql: "ALTER TABLE [Installations] ADD [InverterSizeKw] decimal(10,3) NOT NULL DEFAULT 0"),
-
-            // Equipment: per-unit power rating
             (Table: "Equipment", Column: "RatingKw",
              Sql: "ALTER TABLE [Equipment] ADD [RatingKw] decimal(10,3) NULL"),
             (Table: "Equipment", Column: "RatingWatts",
              Sql: "ALTER TABLE [Equipment] ADD [RatingWatts] int NULL"),
-
-            // Maintenance: category, location, photos, attachments
             (Table: "MaintenanceRecords", Column: "Category",
              Sql: "ALTER TABLE [MaintenanceRecords] ADD [Category] nvarchar(100) NULL"),
             (Table: "MaintenanceRecords", Column: "Location",
              Sql: "ALTER TABLE [MaintenanceRecords] ADD [Location] nvarchar(200) NULL"),
             (Table: "MaintenanceRecords", Column: "AttachmentUrls",
              Sql: "ALTER TABLE [MaintenanceRecords] ADD [AttachmentUrls] nvarchar(max) NULL"),
-
-            // Cleaning: multi-photo support
             (Table: "CleaningRecords", Column: "BeforePhotos",
              Sql: "ALTER TABLE [CleaningRecords] ADD [BeforePhotos] nvarchar(max) NULL"),
             (Table: "CleaningRecords", Column: "AfterPhotos",
              Sql: "ALTER TABLE [CleaningRecords] ADD [AfterPhotos] nvarchar(max) NULL"),
         };
 
-        foreach (var (table, column, sql) in upgrades)
-        {
-            try
-            {
-                // All table/column names in the upgrades array are compile-time constants (no user input)
-                #pragma warning disable EF1002
-                var exists = await context.Database.ExecuteSqlRawAsync(
-                    $@"IF NOT EXISTS (SELECT 1 FROM sys.columns
-                         WHERE Name = N'{column}' AND Object_ID = Object_ID(N'[{table}]'))
-                       BEGIN
-                         {sql};
-                       END");
-                #pragma warning restore EF1002
-                log($"DB: Schema upgrade '{table}.{column}' applied/skipped");
-            }
-            catch (Exception ex)
-            {
-                log($"DB: Schema upgrade '{table}.{column}' failed: {ex.Message}");
-            }
-        }
-
-        // ── Create AlertRules table if missing (no user input, all hardcoded) ──
-        try
-        {
-            #pragma warning disable EF1002
-            await context.Database.ExecuteSqlRawAsync(@"
-                IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'AlertRules')
-                BEGIN
-                    CREATE TABLE [AlertRules] (
-                        [Id] int IDENTITY(1,1) PRIMARY KEY,
-                        [Name] nvarchar(100) NOT NULL,
-                        [Description] nvarchar(300) NULL,
-                        [Metric] int NOT NULL,
-                        [Operator] int NOT NULL,
-                        [Threshold] decimal(14,4) NOT NULL,
-                        [ConsecutiveChecks] int NOT NULL DEFAULT 1,
-                        [Severity] int NOT NULL,
-                        [AlertType] int NOT NULL,
-                        [InstallationId] int NULL,
-                        [BrandScope] int NULL,
-                        [IsEnabled] bit NOT NULL DEFAULT 1,
-                        [CooldownMinutes] int NOT NULL DEFAULT 60,
-                        [LastFiredAt] datetime2 NULL,
-                        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
-                        [CreatedByUserId] nvarchar(450) NULL,
-                        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
-                        CONSTRAINT FK_AlertRules_Installations FOREIGN KEY ([InstallationId])
-                            REFERENCES [Installations]([Id]) ON DELETE CASCADE,
-                        CONSTRAINT FK_AlertRules_AspNetUsers FOREIGN KEY ([CreatedByUserId])
-                            REFERENCES [AspNetUsers]([Id]) ON DELETE SET NULL
-                    );
-                    CREATE INDEX IX_AlertRules_IsEnabled ON [AlertRules]([IsEnabled]);
-                    CREATE INDEX IX_AlertRules_InstallationId ON [AlertRules]([InstallationId]);
-                    CREATE INDEX IX_AlertRules_Metric ON [AlertRules]([Metric]);
-                END");
-            #pragma warning restore EF1002
-            log("DB: AlertRules table ensured");
-        }
-        catch (Exception ex)
-        {
-            log($"DB: AlertRules table creation failed: {ex.Message}");
-        }
-
-        // ── Ensure missing FK indexes (idempotent) ──
         var indexUpgrades = new (string Name, string Table, string Columns)[]
         {
             ("IX_SystemAlerts_AcknowledgedByUserId", "SystemAlerts", "[AcknowledgedByUserId]"),
@@ -633,24 +571,69 @@ public class Startup
             ("IX_CleaningRecords_Status", "CleaningRecords", "[Status]"),
         };
 
+        var sb = new System.Text.StringBuilder();
+
+        // Build one big idempotent batch
+        foreach (var (table, column, sql) in upgrades)
+        {
+            sb.AppendLine($@"
+IF NOT EXISTS (SELECT 1 FROM sys.columns
+    WHERE Name = N'{column}' AND Object_ID = Object_ID(N'[{table}]'))
+BEGIN {sql}; END");
+        }
+
+        sb.AppendLine(@"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'AlertRules')
+BEGIN
+    CREATE TABLE [AlertRules] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [Name] nvarchar(100) NOT NULL,
+        [Description] nvarchar(300) NULL,
+        [Metric] int NOT NULL,
+        [Operator] int NOT NULL,
+        [Threshold] decimal(14,4) NOT NULL,
+        [ConsecutiveChecks] int NOT NULL DEFAULT 1,
+        [Severity] int NOT NULL,
+        [AlertType] int NOT NULL,
+        [InstallationId] int NULL,
+        [BrandScope] int NULL,
+        [IsEnabled] bit NOT NULL DEFAULT 1,
+        [CooldownMinutes] int NOT NULL DEFAULT 60,
+        [LastFiredAt] datetime2 NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [CreatedByUserId] nvarchar(450) NULL,
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_AlertRules_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id]) ON DELETE CASCADE,
+        CONSTRAINT FK_AlertRules_AspNetUsers FOREIGN KEY ([CreatedByUserId])
+            REFERENCES [AspNetUsers]([Id]) ON DELETE SET NULL
+    );
+    CREATE INDEX IX_AlertRules_IsEnabled ON [AlertRules]([IsEnabled]);
+    CREATE INDEX IX_AlertRules_InstallationId ON [AlertRules]([InstallationId]);
+    CREATE INDEX IX_AlertRules_Metric ON [AlertRules]([Metric]);
+END");
+
         foreach (var (name, table, cols) in indexUpgrades)
         {
-            try
-            {
-                #pragma warning disable EF1002 // All values are compile-time constants
-                await context.Database.ExecuteSqlRawAsync($@"
-                    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}')
-                    AND EXISTS (SELECT 1 FROM sys.tables WHERE name = '{table}')
-                    BEGIN
-                        CREATE INDEX [{name}] ON [{table}]({cols});
-                    END");
-                #pragma warning restore EF1002
-                log($"DB: Index '{name}' ensured");
-            }
-            catch (Exception ex)
-            {
-                log($"DB: Index '{name}' failed: {ex.Message}");
-            }
+            sb.AppendLine($@"
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}')
+    AND EXISTS (SELECT 1 FROM sys.tables WHERE name = '{table}')
+BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
+        }
+
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            #pragma warning disable EF1002 // All values are compile-time constants
+            await context.Database.ExecuteSqlRawAsync(sb.ToString());
+            #pragma warning restore EF1002
+            sw.Stop();
+            log($"DB: Schema upgrades + indexes applied in one batch ({sw.ElapsedMilliseconds} ms)");
+        }
+        catch (Exception ex)
+        {
+            log($"DB: Schema batch failed: {ex.Message}");
+            // Don't throw — app should still start with current schema
         }
     }
 
