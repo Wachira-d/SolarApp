@@ -87,28 +87,60 @@ public class HuaweiAdapter : IInverterApiAdapter
             var json = await ReadJsonAsync(response);
             if (json == null) return null;
 
-            if (!json.Value.TryGetProperty("data", out var list)
-                || list.ValueKind != JsonValueKind.Array)
+            // Huawei NBI returns TWO known shapes:
+            //   Shape A (older):  {data: [...]}
+            //   Shape B (current, v6): {data: {list: [...], total: ..., pageSize: ...}}
+            JsonElement stationsElement = default;
+            if (json.Value.TryGetProperty("data", out var data))
+            {
+                if (data.ValueKind == JsonValueKind.Array)
+                    stationsElement = data;
+                else if (data.ValueKind == JsonValueKind.Object
+                         && data.TryGetProperty("list", out var inner)
+                         && inner.ValueKind == JsonValueKind.Array)
+                    stationsElement = inner;
+            }
+            if (stationsElement.ValueKind != JsonValueKind.Array)
+            {
+                _lastPlantLookupError = "Huawei returned no station list. " +
+                    "Either your Northbound account has no stations assigned, or the response shape changed.";
                 return null;
+            }
 
-            // Enumerate all stations to find the one matching credentials.PlantId.
-            // If user's PlantId is not in the list, return null with a helpful
-            // error listing available stations so they can fix the config.
-            var stations = list.EnumerateArray()
+            var stations = stationsElement.EnumerateArray()
                 .Where(s => s.ValueKind == JsonValueKind.Object)
                 .ToList();
-            if (stations.Count == 0) return null;
+            if (stations.Count == 0)
+            {
+                _lastPlantLookupError = "Your Huawei Northbound account has zero stations assigned. " +
+                    "Ask your Huawei Northbound admin to grant access to at least one station.";
+                return null;
+            }
 
+            // Match PlantId against stationCode (primary) and plantCode (fallback).
+            // Try both exact match AND with 'NE=' prefix auto-added, since Huawei
+            // station codes have format 'NE=123456' but users often copy just the
+            // number from the browser URL.
             JsonElement? match = null;
+            string? actualStationCode = null;
             if (!string.IsNullOrEmpty(credentials.PlantId))
             {
+                var configured = credentials.PlantId.Trim();
+                var configuredWithPrefix = configured.StartsWith("NE=", StringComparison.OrdinalIgnoreCase)
+                    ? configured
+                    : "NE=" + configured;
+
                 foreach (var s in stations)
                 {
                     var code = SafeGetString(s, "stationCode")
                             ?? SafeGetString(s, "plantCode");
-                    if (string.Equals(code, credentials.PlantId, StringComparison.OrdinalIgnoreCase))
+                    if (code == null) continue;
+
+                    if (string.Equals(code, configured, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(code, configuredWithPrefix, StringComparison.OrdinalIgnoreCase))
                     {
                         match = s;
+                        actualStationCode = code;
                         break;
                     }
                 }
@@ -116,8 +148,6 @@ public class HuaweiAdapter : IInverterApiAdapter
 
             if (match == null)
             {
-                // User's configured PlantId is not in their account. Surface a list
-                // of valid station codes so they can correct the installation.
                 var available = string.Join(", ", stations.Take(10).Select(s =>
                     $"{SafeGetString(s, "stationCode") ?? "?"} ({SafeGetString(s, "stationName") ?? "?"})"));
                 _logger.LogWarning(
@@ -126,15 +156,22 @@ public class HuaweiAdapter : IInverterApiAdapter
                 _lastPlantLookupError = string.IsNullOrEmpty(credentials.PlantId)
                     ? $"PlantId/Station Code is empty. Available stations on this account: {available}"
                     : $"Configured PlantId '{credentials.PlantId}' is NOT in this Huawei account. " +
-                      $"Use one of: {available}";
+                      $"Huawei station codes start with 'NE=' — if you copied the number from the browser URL, " +
+                      $"use the full code. Available: {available}";
                 return null;
             }
 
             _lastPlantLookupError = null;
+            // If user had bare number, remember the full form for the realtime call
+            if (!string.Equals(actualStationCode, credentials.PlantId, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "Huawei: auto-expanded PlantId '{From}' → '{To}' (match on stationCode)",
+                    credentials.PlantId, actualStationCode);
+            }
             return new PlantInfo
             {
-                PlantId = SafeGetString(match.Value, "stationCode")
-                         ?? SafeGetString(match.Value, "plantCode") ?? "",
+                PlantId = actualStationCode ?? "",
                 PlantName = SafeGetString(match.Value, "stationName")
                            ?? SafeGetString(match.Value, "plantName") ?? "",
                 CapacityKw = SafeGetDecimal(match.Value, "capacity"),
@@ -175,9 +212,15 @@ public class HuaweiAdapter : IInverterApiAdapter
                 return null;
             }
 
+            // Huawei station codes have the 'NE=' prefix. Auto-add if user stored
+            // just the number (matching the PlantInfo lookup behaviour).
+            var stationCode = credentials.PlantId!.Trim();
+            if (!stationCode.StartsWith("NE=", StringComparison.OrdinalIgnoreCase))
+                stationCode = "NE=" + stationCode;
+
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationRealKpi",
-                new { stationCodes = credentials.PlantId });
+                new { stationCodes = stationCode });
             _lastRealtimeHttpCode = (int)response.StatusCode;
 
             var body = await response.Content.ReadAsStringAsync();
