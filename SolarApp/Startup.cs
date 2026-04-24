@@ -60,10 +60,12 @@ public class Startup
         });
 
         // ─── External login (Microsoft/Office 365 + LINE) ───
+        // Config precedence: DB SystemSettings > appsettings.json > empty
+        // Admins configure these via /Admin/ExternalAuth; secrets stored encrypted.
         var authBuilder = builder.Services.AddAuthentication();
+        var (msClientId, msClientSecret, lineClientId, lineClientSecret) =
+            ReadExternalAuthConfig(builder);
 
-        var msClientId = builder.Configuration["Authentication:Microsoft:ClientId"];
-        var msClientSecret = builder.Configuration["Authentication:Microsoft:ClientSecret"];
         if (!string.IsNullOrWhiteSpace(msClientId) && !string.IsNullOrWhiteSpace(msClientSecret))
         {
             authBuilder.AddMicrosoftAccount("Microsoft", options =>
@@ -77,8 +79,6 @@ public class Startup
             });
         }
 
-        var lineClientId = builder.Configuration["Authentication:LINE:ClientId"];
-        var lineClientSecret = builder.Configuration["Authentication:LINE:ClientSecret"];
         if (!string.IsNullOrWhiteSpace(lineClientId) && !string.IsNullOrWhiteSpace(lineClientSecret))
         {
             authBuilder.AddOAuth("LINE", "LINE", options =>
@@ -219,6 +219,77 @@ public class Startup
             "sync-production-data", job => job.ExecuteAsync(), syncCron);
         RecurringJob.AddOrUpdate<BackgroundJobs.SystemHealthMonitorJob>(
             "check-system-health", job => job.ExecuteAsync(), healthCron);
+    }
+
+    /// <summary>
+    /// Reads external-auth credentials (Microsoft + LINE) with precedence:
+    ///   1. Database SystemSettings (configured via /Admin/ExternalAuth)
+    ///   2. appsettings.json Authentication:{Provider}:ClientId/ClientSecret
+    /// Secrets in the DB are DataProtection-encrypted.
+    /// Must run before the app is built, so it opens a short-lived DB scope.
+    /// Fails gracefully if the DB isn't ready (returns config-only values).
+    /// </summary>
+    private static (string? MsId, string? MsSecret, string? LineId, string? LineSecret)
+        ReadExternalAuthConfig(WebApplicationBuilder builder)
+    {
+        // appsettings fallback first
+        var msId = builder.Configuration["Authentication:Microsoft:ClientId"];
+        var msSecret = builder.Configuration["Authentication:Microsoft:ClientSecret"];
+        var lineId = builder.Configuration["Authentication:LINE:ClientId"];
+        var lineSecret = builder.Configuration["Authentication:LINE:ClientSecret"];
+
+        try
+        {
+            var cs = builder.Configuration.GetConnectionString("DefaultConnection");
+            if (string.IsNullOrWhiteSpace(cs)) return (msId, msSecret, lineId, lineSecret);
+
+            // Build a temporary DataProtection provider matching the runtime config
+            var tempProvider = new ServiceCollection()
+                .AddLogging()
+                .AddDataProtection().Services
+                .AddDbContext<ApplicationDbContext>(o => o.UseSqlServer(cs))
+                .BuildServiceProvider();
+
+            using var scope = tempProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var dp = scope.ServiceProvider
+                .GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()
+                .CreateProtector("SolarApp.Credentials.v1");
+
+            string? ReadDb(string key, bool encrypted)
+            {
+                try
+                {
+                    var value = db.SystemSettings
+                        .Where(s => s.Key == key)
+                        .Select(s => s.Value)
+                        .FirstOrDefault();
+                    if (string.IsNullOrEmpty(value)) return null;
+                    if (!encrypted) return value;
+                    if (!value.StartsWith("enc:")) return value; // legacy plaintext
+                    return dp.Unprotect(value["enc:".Length..]);
+                }
+                catch { return null; }
+            }
+
+            var dbMsId = ReadDb("Auth.Microsoft.ClientId", false);
+            var dbMsSecret = ReadDb("Auth.Microsoft.ClientSecret", true);
+            var dbLineId = ReadDb("Auth.LINE.ClientId", false);
+            var dbLineSecret = ReadDb("Auth.LINE.ClientSecret", true);
+
+            // DB wins when set
+            return (
+                dbMsId ?? msId,
+                dbMsSecret ?? msSecret,
+                dbLineId ?? lineId,
+                dbLineSecret ?? lineSecret
+            );
+        }
+        catch
+        {
+            // DB not reachable at startup — fall back to config file only
+            return (msId, msSecret, lineId, lineSecret);
+        }
     }
 
     private static string GetSetting(ApplicationDbContext ctx, string key, string defaultValue)

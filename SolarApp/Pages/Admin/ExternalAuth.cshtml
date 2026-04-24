@@ -1,0 +1,170 @@
+@page
+@model SolarApp.Pages.Admin.ExternalAuthModel
+@{
+    ViewData["Title"] = "External Auth Settings";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-shield-lock"></i> External Auth (Microsoft / LINE Login)</h4>
+        <small class="text-muted">Configure Single Sign-On via web. Credentials are stored encrypted in the database.</small>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success">@Model.StatusMessage</div>
+}
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger alert-permanent">@Model.ErrorMessage</div>
+}
+
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i>
+    <strong>Important:</strong> After saving, you must <strong>restart the IIS application pool</strong>
+    (or redeploy) for authentication providers to be re-registered. Settings here are read at startup.
+</div>
+
+<!-- ═══ MICROSOFT ═══ -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <div class="d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="bi bi-microsoft text-primary"></i> Microsoft / Office 365</h6>
+            @if (Model.MsConfiguredNow)
+            { <span class="badge bg-success">Configured</span> }
+            else
+            { <span class="badge bg-secondary">Not configured</span> }
+        </div>
+    </div>
+    <div class="card-body">
+        <form method="post" asp-page-handler="SaveMicrosoft">
+            <div class="row g-3">
+                <div class="col-12">
+                    <label class="form-label">Your Callback URL (register this in Azure)</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace" readonly
+                               value="@Model.MicrosoftCallbackUrl" id="msCallback" />
+                        <button type="button" class="btn btn-outline-secondary"
+                                onclick="navigator.clipboard.writeText(document.getElementById('msCallback').value); this.innerHTML='<i class=bi-check2></i> Copied'">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Client ID (Application ID)</label>
+                    <input asp-for="MsClientId" class="form-control font-monospace"
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">
+                        Client Secret
+                        @if (Model.MsConfiguredNow)
+                        { <small class="text-muted">(leave blank to keep current)</small> }
+                    </label>
+                    <input asp-for="MsClientSecret" type="password" class="form-control"
+                           placeholder="@(Model.MsConfiguredNow ? "•••••••••••• (keep current)" : "Paste new secret")" />
+                </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                Source: <strong>@Model.MsConfigSource</strong>
+            </div>
+            <div class="mt-3 d-flex justify-content-between">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save"></i> Save Microsoft Settings
+                </button>
+                <a class="btn btn-link small" href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank">
+                    Open Azure App registrations <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+            </div>
+        </form>
+
+        <details class="mt-3 small">
+            <summary class="text-primary" style="cursor: pointer;">How to get these values</summary>
+            <ol class="small mt-2">
+                <li>Go to <a href="https://portal.azure.com" target="_blank">portal.azure.com</a> → <strong>Microsoft Entra ID</strong> → <strong>App registrations</strong> → <strong>+ New registration</strong></li>
+                <li>Name: <code>SolarApp</code>, supported account type: <em>Accounts in any organizational directory and personal Microsoft accounts</em></li>
+                <li>Redirect URI: select <strong>Web</strong>, paste the Callback URL above</li>
+                <li>After registration: copy <strong>Application (client) ID</strong> → paste in Client ID field</li>
+                <li>Go to <strong>Certificates &amp; secrets</strong> → <strong>+ New client secret</strong> → name it, set expiry 24 months → <strong>copy the Value</strong> (shown once only!) → paste in Client Secret field</li>
+                <li>API permissions: default <code>User.Read</code> is enough</li>
+            </ol>
+        </details>
+    </div>
+</div>
+
+<!-- ═══ LINE LOGIN ═══ -->
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <div class="d-flex justify-content-between align-items-center">
+            <h6 class="mb-0"><i class="bi bi-chat-dots-fill text-success"></i> LINE Login</h6>
+            @if (Model.LineConfiguredNow)
+            { <span class="badge bg-success">Configured</span> }
+            else
+            { <span class="badge bg-secondary">Not configured</span> }
+        </div>
+    </div>
+    <div class="card-body">
+        <form method="post" asp-page-handler="SaveLine">
+            <div class="row g-3">
+                <div class="col-12">
+                    <label class="form-label">Your Callback URL (register this in LINE Developers)</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace" readonly
+                               value="@Model.LineCallbackUrl" id="lineCallback" />
+                        <button type="button" class="btn btn-outline-secondary"
+                                onclick="navigator.clipboard.writeText(document.getElementById('lineCallback').value); this.innerHTML='<i class=bi-check2></i> Copied'">
+                            <i class="bi bi-clipboard"></i> Copy
+                        </button>
+                    </div>
+                    <small class="text-muted">Sharing a LINE channel across multiple sites? Add each site's callback URL
+                        (one per line) to the channel's "Callback URL" field.</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Channel ID</label>
+                    <input asp-for="LineClientId" class="form-control font-monospace"
+                           placeholder="1234567890" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">
+                        Channel Secret
+                        @if (Model.LineConfiguredNow)
+                        { <small class="text-muted">(leave blank to keep current)</small> }
+                    </label>
+                    <input asp-for="LineClientSecret" type="password" class="form-control"
+                           placeholder="@(Model.LineConfiguredNow ? "•••••••••••• (keep current)" : "Paste new secret")" />
+                </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                Source: <strong>@Model.LineConfigSource</strong>
+            </div>
+            <div class="mt-3 d-flex justify-content-between">
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-save"></i> Save LINE Login Settings
+                </button>
+                <a class="btn btn-link small" href="https://developers.line.biz/console/" target="_blank">
+                    Open LINE Developers Console <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+            </div>
+        </form>
+
+        <details class="mt-3 small">
+            <summary class="text-success" style="cursor: pointer;">How to get these values</summary>
+            <ol class="small mt-2">
+                <li>Go to <a href="https://developers.line.biz/console" target="_blank">developers.line.biz/console</a></li>
+                <li>Select your provider → <strong>Create a new channel</strong> → <strong>LINE Login</strong></li>
+                <li>Fill Channel name (e.g. <code>SolarApp Login</code>), description. App type: ✓ Web app</li>
+                <li>Go to the <strong>LINE Login</strong> tab → <strong>Callback URL</strong>: paste the Callback URL above (multiple URLs allowed, one per line)</li>
+                <li>Go to the <strong>Basic settings</strong> tab → copy <strong>Channel ID</strong> → paste here</li>
+                <li>Scroll down → copy <strong>Channel secret</strong> → paste here</li>
+                <li>Scopes: enable <code>profile</code> and <code>openid</code> (required for login)</li>
+            </ol>
+        </details>
+    </div>
+</div>
+
+<div class="small text-muted">
+    <i class="bi bi-shield-fill-check"></i>
+    Secrets are encrypted using ASP.NET Core DataProtection before being written to the database.
+    They are never sent back to this form — to change, just paste a new value.
+</div>
