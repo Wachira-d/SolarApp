@@ -160,7 +160,7 @@ public class UsersModel : PageModel
         var result = await _userManager.CreateAsync(user, NewUser.Password);
         if (result.Succeeded)
         {
-            await _userManager.AddToRoleAsync(user, NewUser.Role);
+            await _userManager.AddToRoleAsync(user, NewUser.Role!);
             StatusMessage = $"User '{user.Email}' created successfully";
         }
         else
@@ -225,10 +225,10 @@ public class UsersModel : PageModel
 
         // Update role if changed
         var currentRoles = await _userManager.GetRolesAsync(user);
-        if (!currentRoles.Contains(EditUser.Role))
+        if (!currentRoles.Contains(EditUser.Role!))
         {
             await _userManager.RemoveFromRolesAsync(user, currentRoles);
-            await _userManager.AddToRoleAsync(user, EditUser.Role);
+            await _userManager.AddToRoleAsync(user, EditUser.Role!);
         }
 
         StatusMessage = $"User '{user.Email}' updated";

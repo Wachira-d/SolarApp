@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SolarApp.Models;
+using SolarApp.Models.Enums;
 using SolarApp.Services.InverterApi.Models;
 
 namespace SolarApp.Services.InverterApi.Common;
@@ -191,25 +192,25 @@ public class AdapterDiagnostics : IAdapterDiagnostics
 
         switch (inst.InverterBrand)
         {
-            case Models.Enums.InverterBrand.Huawei:
+            case InverterBrand.Huawei:
                 if (string.IsNullOrEmpty(inst.CloudUsername)) missing.Add("Username (Northbound API user)");
                 if (string.IsNullOrEmpty(inst.CloudPassword)) missing.Add("Password (systemCode)");
                 break;
-            case Models.Enums.InverterBrand.FoxESS:
+            case InverterBrand.FoxESS:
                 if (string.IsNullOrEmpty(inst.CloudApiKey)) missing.Add("API Key (Private Token)");
                 break;
-            case Models.Enums.InverterBrand.Solis:
+            case InverterBrand.Solis:
                 var isWeb = string.Equals(inst.CloudApiKey, "SOLISWEB", StringComparison.OrdinalIgnoreCase);
                 if (!isWeb && string.IsNullOrEmpty(inst.CloudApiKey)) missing.Add("API Key ID");
                 if (!isWeb && string.IsNullOrEmpty(inst.CloudApiSecret)) missing.Add("API Secret");
                 if (isWeb && string.IsNullOrEmpty(inst.CloudUsername)) missing.Add("Username (SolisCloud email)");
                 if (isWeb && string.IsNullOrEmpty(inst.CloudPassword)) missing.Add("Password");
                 break;
-            case Models.Enums.InverterBrand.GoodWe:
+            case InverterBrand.GoodWe:
                 if (string.IsNullOrEmpty(inst.CloudUsername)) missing.Add("Username (SEMS email)");
                 if (string.IsNullOrEmpty(inst.CloudPassword)) missing.Add("Password");
                 break;
-            case Models.Enums.InverterBrand.Deye:
+            case InverterBrand.Deye:
                 if (string.IsNullOrEmpty(inst.CloudApiKey)) missing.Add("App ID");
                 if (string.IsNullOrEmpty(inst.CloudApiSecret)) missing.Add("App Secret");
                 if (string.IsNullOrEmpty(inst.CloudUsername)) missing.Add("Email");

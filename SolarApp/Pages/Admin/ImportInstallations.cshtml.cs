@@ -17,7 +17,7 @@ public class ImportInstallationsModel : PageModel
 
     public ImportInstallationsModel(ApplicationDbContext context) { _context = context; }
 
-    [BindProperty] public IFormFile? File { get; set; }
+    [BindProperty] public new IFormFile? File { get; set; }
     [BindProperty] public bool DryRun { get; set; } = true;
 
     public List<string> Errors { get; set; } = new();
@@ -177,8 +177,7 @@ public class ImportInstallationsModel : PageModel
                 Longitude = lng,
                 InstallationDate = DateTime.TryParse(Get("installationdate"), out var instDate) ? instDate : DateTime.UtcNow,
                 Status = InstallationStatus.Active,
-                CleaningFrequencyMonths = 6,
-                IsActive = true
+                CleaningFrequencyMonths = 6
             });
             siteCodeSet.Add(siteCode);
             Results.Add(new ImportResult(row, siteName, DryRun ? "VALID" : "OK", null));

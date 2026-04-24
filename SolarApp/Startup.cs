@@ -320,12 +320,15 @@ public class Startup
         {
             try
             {
+                // All table/column names in the upgrades array are compile-time constants (no user input)
+                #pragma warning disable EF1002
                 var exists = await context.Database.ExecuteSqlRawAsync(
                     $@"IF NOT EXISTS (SELECT 1 FROM sys.columns
                          WHERE Name = N'{column}' AND Object_ID = Object_ID(N'[{table}]'))
                        BEGIN
                          {sql};
                        END");
+                #pragma warning restore EF1002
                 log($"DB: Schema upgrade '{table}.{column}' applied/skipped");
             }
             catch (Exception ex)
@@ -334,9 +337,10 @@ public class Startup
             }
         }
 
-        // ── Create AlertRules table if missing ──
+        // ── Create AlertRules table if missing (no user input, all hardcoded) ──
         try
         {
+            #pragma warning disable EF1002
             await context.Database.ExecuteSqlRawAsync(@"
                 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'AlertRules')
                 BEGIN
@@ -367,6 +371,7 @@ public class Startup
                     CREATE INDEX IX_AlertRules_InstallationId ON [AlertRules]([InstallationId]);
                     CREATE INDEX IX_AlertRules_Metric ON [AlertRules]([Metric]);
                 END");
+            #pragma warning restore EF1002
             log("DB: AlertRules table ensured");
         }
         catch (Exception ex)
@@ -394,12 +399,14 @@ public class Startup
         {
             try
             {
+                #pragma warning disable EF1002 // All values are compile-time constants
                 await context.Database.ExecuteSqlRawAsync($@"
                     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}')
                     AND EXISTS (SELECT 1 FROM sys.tables WHERE name = '{table}')
                     BEGIN
                         CREATE INDEX [{name}] ON [{table}]({cols});
                     END");
+                #pragma warning restore EF1002
                 log($"DB: Index '{name}' ensured");
             }
             catch (Exception ex)
@@ -505,7 +512,9 @@ public class Startup
         {
             try
             {
+                #pragma warning disable EF1002
                 await context.Database.ExecuteSqlRawAsync($"SELECT TOP 0 * FROM [{table}]");
+                #pragma warning restore EF1002
             }
             catch
             {

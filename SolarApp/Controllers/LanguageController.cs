@@ -27,7 +27,7 @@ public class LanguageController : Controller
                 IsEssential = true,
                 HttpOnly = true,
                 SameSite = SameSiteMode.Lax,
-                SecurePolicy = CookieSecurePolicy.SameAsRequest
+                Secure = true
             });
 
         // Strict local URL check to prevent open-redirect attacks
