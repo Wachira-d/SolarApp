@@ -108,61 +108,121 @@ public class HuaweiAdapter : IInverterApiAdapter
         }
     }
 
+    // Cache error detail from last call for ApiResult translation
+    private string? _lastRealtimeError;
+    private int _lastRealtimeHttpCode;
+
     public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
     {
-        if (string.IsNullOrEmpty(credentials.PlantId)) return null;
+        _lastRealtimeError = null;
+        _lastRealtimeHttpCode = 0;
+
+        if (string.IsNullOrEmpty(credentials.PlantId))
+        {
+            _lastRealtimeError = "PlantId (Station Code) is empty in installation settings.";
+            return null;
+        }
 
         try
         {
             var client = _httpClientFactory.CreateClient();
-            var token = await LoginAsync(client, credentials);
-            if (token == null) return null;
+            var (token, loginError) = await LoginWithDetailAsync(client, credentials);
+            if (token == null)
+            {
+                _lastRealtimeError = $"Login failed: {loginError}";
+                return null;
+            }
 
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationRealKpi",
                 new { stationCodes = credentials.PlantId });
-            if (!response.IsSuccessStatusCode) return null;
+            _lastRealtimeHttpCode = (int)response.StatusCode;
 
-            var json = await ReadJsonAsync(response);
-            if (json == null) return null;
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _lastRealtimeError = $"getStationRealKpi HTTP {_lastRealtimeHttpCode}: {Truncate(body, 400)}";
+                return null;
+            }
 
-            if (!json.Value.TryGetProperty("data", out var dataArr)
-                || dataArr.ValueKind != JsonValueKind.Array) return null;
+            JsonElement json;
+            try { json = JsonDocument.Parse(body).RootElement; }
+            catch (Exception je)
+            {
+                _lastRealtimeError = $"Invalid JSON from Huawei: {je.Message}. Body: {Truncate(body, 200)}";
+                return null;
+            }
+
+            // Huawei may return success=false with a failCode
+            var failCode = SafeGetInt(json, "failCode");
+            if (failCode.HasValue && failCode.Value != 0)
+            {
+                var msg = SafeGetString(json, "message") ?? SafeGetString(json, "data") ?? "Unknown";
+                _lastRealtimeError = $"Huawei error failCode={failCode.Value}: {msg}. " +
+                    (failCode.Value == 407 ? "(Rate limit — Huawei NBI allows 1 request/minute. Wait and retry.)"
+                     : failCode.Value == 305 ? "(Token expired — will auto-retry)"
+                     : failCode.Value == 401 ? "(Unauthorized — check Northbound API credentials)"
+                     : failCode.Value == 20002 ? "(PlantId/StationCode not found in this account)"
+                     : "");
+                return null;
+            }
+
+            if (!json.TryGetProperty("data", out var dataArr)
+                || dataArr.ValueKind != JsonValueKind.Array)
+            {
+                _lastRealtimeError = $"Unexpected response shape (no 'data' array). Body: {Truncate(body, 300)}";
+                return null;
+            }
 
             var first = dataArr.EnumerateArray().FirstOrDefault();
-            if (first.ValueKind != JsonValueKind.Object) return null;
+            if (first.ValueKind != JsonValueKind.Object)
+            {
+                _lastRealtimeError = $"No data returned for PlantId '{credentials.PlantId}'. " +
+                    "Check that this Station Code is valid and accessible by this account.";
+                return null;
+            }
 
             if (!first.TryGetProperty("dataItemMap", out var kpi)
-                || kpi.ValueKind != JsonValueKind.Object) return null;
+                || kpi.ValueKind != JsonValueKind.Object)
+            {
+                _lastRealtimeError = "Response missing 'dataItemMap'. Body: " + Truncate(body, 300);
+                return null;
+            }
 
             var health = SafeGetDecimal(kpi, "real_health_state");
 
             // Huawei NBI station-level KPI semantics:
             //   day_power   = today's accumulated energy (kWh) — NOT instantaneous power
             //   total_power = lifetime accumulated energy (kWh)
-            //   real_health_state: 0=offline, 1=faulty, 2=healthy
-            // Instantaneous power must come from /getDevRealKpi (device-level).
-            decimal currentPowerKw = 0;
-            try
-            {
-                currentPowerKw = await FetchStationActivePowerKwAsync(client, credentials.PlantId!);
-            }
-            catch (Exception powerEx)
-            {
-                _logger.LogDebug(powerEx, "Huawei: could not fetch device-level active_power (non-fatal)");
-            }
-
+            //   real_health_state: 0=disconnect, 1=faulty, 2=healthy, 3=offline
+            //
+            // IMPORTANT: We deliberately SKIP device-level active_power fetch here
+            // because Huawei NBI enforces 1-request-per-minute rate limit. Extra
+            // calls /getDevList + /getDevRealKpi would exhaust the quota.
+            // CurrentPowerKw is left at 0 — Dashboard can derive approximate power
+            // from day_power delta between sync cycles.
             return new RealtimeData
             {
                 Timestamp = DateTime.UtcNow,
-                CurrentPowerKw = currentPowerKw,
+                CurrentPowerKw = 0,
                 TodayEnergyKwh = SafeGetDecimal(kpi, "day_power"),
                 TotalEnergyKwh = SafeGetDecimal(kpi, "total_power"),
                 IsOnline = health >= 1
             };
         }
+        catch (TaskCanceledException)
+        {
+            _lastRealtimeError = "Request timed out — Huawei cloud did not respond in 30s.";
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            _lastRealtimeError = $"Network error: {ex.Message}";
+            return null;
+        }
         catch (Exception ex)
         {
+            _lastRealtimeError = $"{ex.GetType().Name}: {ex.Message}";
             _logger.LogError(ex, "Huawei GetRealtimeData failed");
             return null;
         }
@@ -583,8 +643,30 @@ public class HuaweiAdapter : IInverterApiAdapter
             var data = await GetRealtimeDataAsync(credentials);
             sw.Stop();
             if (data == null)
-                return ApiResult<RealtimeData>.Fail(ApiResultKind.CloudServerError,
-                    "Huawei API returned no data. Could be server issue or incorrect PlantId.", duration: sw.Elapsed);
+            {
+                // Classify based on captured error detail
+                var err = _lastRealtimeError ?? "Huawei API returned no data.";
+                var kind = ApiResultKind.CloudServerError;
+                if (err.Contains("failCode=407") || err.Contains("Rate limit"))
+                    kind = ApiResultKind.RateLimited;
+                else if (err.Contains("failCode=305") || err.Contains("failCode=401")
+                         || err.Contains("Unauthorized") || err.Contains("Login failed"))
+                    kind = ApiResultKind.AuthenticationFailed;
+                else if (err.Contains("failCode=20002") || err.Contains("not found"))
+                    kind = ApiResultKind.PlantNotFound;
+                else if (err.Contains("timed out"))
+                    kind = ApiResultKind.Timeout;
+                else if (err.Contains("Network error"))
+                    kind = ApiResultKind.NetworkError;
+                else if (err.Contains("Invalid JSON"))
+                    kind = ApiResultKind.ParseError;
+                else if (err.Contains("PlantId"))
+                    kind = ApiResultKind.InvalidCredentials;
+
+                return ApiResult<RealtimeData>.Fail(kind, err,
+                    httpStatus: _lastRealtimeHttpCode == 0 ? null : _lastRealtimeHttpCode,
+                    duration: sw.Elapsed);
+            }
             return data.IsOnline
                 ? ApiResult<RealtimeData>.Ok(data, "Device online", sw.Elapsed)
                 : ApiResult<RealtimeData>.Offline(data,

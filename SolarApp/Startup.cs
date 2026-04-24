@@ -633,9 +633,20 @@ public class Startup
                     PlantId = installation.PlantId
                 };
 
-                var realtime = await adapter.GetRealtimeDataAsync(credentials);
-                if (realtime == null)
-                    return Results.Json(new { success = false, message = "Could not fetch data from cloud" });
+                var realtimeResult = await adapter.GetRealtimeResultAsync(credentials);
+                if (realtimeResult.IsApiFailure)
+                {
+                    return Results.Json(new
+                    {
+                        success = false,
+                        kind = realtimeResult.Kind.ToString(),
+                        message = $"[{realtimeResult.Kind}] {realtimeResult.Message}",
+                        detail = realtimeResult.TechnicalDetail,
+                        durationMs = (int)realtimeResult.Duration.TotalMilliseconds,
+                        httpStatus = realtimeResult.HttpStatusCode
+                    });
+                }
+                var realtime = realtimeResult.Data!;
 
                 // 1. Save realtime snapshot
                 db.EnergyData.Add(new Models.EnergyData
