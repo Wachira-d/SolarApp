@@ -316,9 +316,36 @@ public class GoodWeAdapter : IInverterApiAdapter
         public string TokenJson { get; set; } = "";  // JSON to put in Token header
     }
 
+    // Process-wide session cache: 6 API calls per installation × N installations
+    // shouldn't re-login each time. GoodWe SEMS portal is rate-sensitive for
+    // back-to-back logins (empty-data responses when hammered).
+    // Keyed by account+password length to avoid leaking secrets; expires 20 min.
+    private static readonly Dictionary<string, (Session Session, DateTime ExpiresAt)> _sessionCache = new();
+    private static readonly object _sessionCacheLock = new();
+    private static readonly TimeSpan SessionTtl = TimeSpan.FromMinutes(20);
+
+    private static void InvalidateSession(string cacheKey)
+    {
+        lock (_sessionCacheLock) { _sessionCache.Remove(cacheKey); }
+    }
+
     private async Task<Session?> LoginAsync(ApiCredentials credentials)
     {
+        var cacheKey = $"{credentials.Username}|{credentials.Password?.Length ?? 0}";
+        lock (_sessionCacheLock)
+        {
+            if (_sessionCache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow < cached.ExpiresAt)
+                return cached.Session;
+        }
+
         var (session, _) = await LoginWithDetailAsync(credentials);
+        if (session != null)
+        {
+            lock (_sessionCacheLock)
+            {
+                _sessionCache[cacheKey] = (session, DateTime.UtcNow.Add(SessionTtl));
+            }
+        }
         return session;
     }
 
@@ -508,11 +535,36 @@ public class GoodWeAdapter : IInverterApiAdapter
             {
                 _logger.LogWarning("GoodWe {Path} HTTP {Code}: {Body}",
                     relativePath, (int)response.StatusCode, Truncate(content, 300));
+                // On auth failures invalidate the cached session so the next
+                // call re-logins instead of reusing a dead session.
+                if ((int)response.StatusCode == 401 || (int)response.StatusCode == 403)
+                {
+                    // We don't have credentials here, so invalidate ALL sessions —
+                    // only costs one re-login per affected account.
+                    lock (_sessionCacheLock) { _sessionCache.Clear(); }
+                }
                 return null;
             }
 
             var doc = JsonDocument.Parse(content);
-            return doc.RootElement.Clone();
+            var root = doc.RootElement;
+
+            // SEMS returns {code, msg, hasError, data} — 100/100001/100002 = expired/invalid session
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("code", out var codeEl))
+            {
+                var code = codeEl.ValueKind == JsonValueKind.Number ? codeEl.GetInt32()
+                    : codeEl.ValueKind == JsonValueKind.String && int.TryParse(codeEl.GetString(), out var c) ? c
+                    : 0;
+                if (code == 100 || code == 100001 || code == 100002)
+                {
+                    _logger.LogWarning("GoodWe {Path} session invalid (code={Code}) — clearing cache",
+                        relativePath, code);
+                    lock (_sessionCacheLock) { _sessionCache.Clear(); }
+                    return null;
+                }
+            }
+
+            return root.Clone();
         }
         catch (Exception ex)
         {

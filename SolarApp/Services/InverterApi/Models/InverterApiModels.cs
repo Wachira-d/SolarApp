@@ -16,6 +16,9 @@ public class PlantInfo
     public decimal CapacityKw { get; set; }
     public string? Address { get; set; }
     public DateTime? CreateDate { get; set; }
+    public DateTime? InstallDate { get; set; }
+    public double? Latitude { get; set; }
+    public double? Longitude { get; set; }
 }
 
 public class RealtimeData
@@ -62,4 +65,7 @@ public class DeviceInfo
     public string? Model { get; set; }
     public string? SerialNumber { get; set; }
     public bool IsOnline { get; set; }
+    public string? FirmwareVersion { get; set; }
+    public DateTime? InstallDate { get; set; }
+    public decimal? RatedPowerKw { get; set; }
 }

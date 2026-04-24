@@ -173,6 +173,8 @@ public class Startup
             .PersistKeysToFileSystem(keysDir)
             .SetApplicationName("SolarApp");
         builder.Services.AddSingleton<Services.Security.ICredentialProtector, Services.Security.CredentialProtector>();
+        builder.Services.AddScoped<Services.DeviceImport.IDeviceImporter, Services.DeviceImport.DeviceImporter>();
+        builder.Services.AddSingleton<Services.Geocoding.IGeocodingService, Services.Geocoding.NominatimGeocodingService>();
 
         builder.Services.AddScoped<Services.Interfaces.IInstallationService, Services.Implementations.InstallationService>();
         builder.Services.AddScoped<Services.Interfaces.IDashboardService, Services.Implementations.DashboardService>();
@@ -831,6 +833,51 @@ public class Startup
 
         // Minimal liveness probe — no DB, no auth. For load balancers.
         app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
+
+        // Reverse-geocode lat/lng → address (Nominatim/OSM)
+        app.MapGet("/api/geocode/reverse", async (double lat, double lng, string? lang,
+            Services.Geocoding.IGeocodingService geocoder) =>
+        {
+            if (Math.Abs(lat) < 0.0001 && Math.Abs(lng) < 0.0001)
+                return Results.BadRequest(new { error = "Coordinates (0,0) look empty — please provide valid lat/lng" });
+            var address = await geocoder.ReverseAsync(lat, lng, lang);
+            return address == null
+                ? Results.Json(new { success = false, address = (string?)null,
+                    message = "Reverse geocoding failed (Nominatim unreachable or no result)" })
+                : Results.Json(new { success = true, address });
+        }).RequireAuthorization();
+
+        // Forward geocode (search) for the admin search box
+        app.MapGet("/api/geocode/search", async (string q,
+            Services.Geocoding.IGeocodingService geocoder) =>
+        {
+            if (string.IsNullOrWhiteSpace(q) || q.Length < 3)
+                return Results.BadRequest(new { error = "Query must be at least 3 characters" });
+            var result = await geocoder.SearchAsync(q);
+            return result == null
+                ? Results.Json(new { success = false, message = "No results" })
+                : Results.Json(new { success = true, lat = result.Value.Lat, lng = result.Value.Lng, displayName = result.Value.DisplayName });
+        }).RequireAuthorization();
+
+        // Refresh device info / inverter metadata from cloud for an installation
+        app.MapPost("/api/installations/{id:int}/refresh-devices", async (
+            int id,
+            System.Security.Claims.ClaimsPrincipal user,
+            Services.Authorization.IInstallationAccessHelper access,
+            Services.DeviceImport.IDeviceImporter importer) =>
+        {
+            if (!await access.CanAccessAsync(id, user)) return Results.Forbid();
+            var result = await importer.ImportAsync(id);
+            return Results.Json(new
+            {
+                success = result.Success,
+                message = result.Message,
+                devicesFetched = result.DevicesFetched,
+                equipmentCreated = result.EquipmentCreated,
+                equipmentUpdated = result.EquipmentUpdated,
+                installationNote = result.InstallationUpdate
+            });
+        }).RequireAuthorization();
 
         app.MapGet("/api/reports/excel/{installationId:int}", async (
             int installationId, DateTime? from, DateTime? to,

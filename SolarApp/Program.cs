@@ -104,38 +104,57 @@ try
     Log("Database init complete");
 
     // ── Middleware ──
+    Log("Configuring middleware...");
     app.UseDeveloperExceptionPage();
+    Log("  • UseDeveloperExceptionPage");
 
     if (app.Configuration.GetValue("EnforceHttps", false))
     {
         app.UseHttpsRedirection();
         app.UseHsts();
+        Log("  • UseHttpsRedirection + UseHsts");
     }
 
     app.UseStaticFiles();
+    Log("  • UseStaticFiles");
 
     var locOpt = app.Services.GetService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>>();
-    if (locOpt != null) app.UseRequestLocalization(locOpt.Value);
+    if (locOpt != null)
+    {
+        app.UseRequestLocalization(locOpt.Value);
+        Log("  • UseRequestLocalization");
+    }
 
     app.UseRouting();
+    Log("  • UseRouting");
+
     app.UseAuthentication();
+    Log("  • UseAuthentication");
+
     app.UseAuthorization();
+    Log("  • UseAuthorization");
 
     if (hangfireOk)
     {
-        try { SolarApp.Startup.ConfigureHangfireDashboard(app); Log("Hangfire dashboard OK"); }
-        catch (Exception ex) { Log($"Hangfire dashboard skipped: {ex.Message}"); }
+        try { SolarApp.Startup.ConfigureHangfireDashboard(app); Log("  • Hangfire dashboard OK"); }
+        catch (Exception ex) { Log($"  ⚠ Hangfire dashboard skipped: {ex.Message}"); }
     }
 
+    Log("Mapping endpoints...");
     app.MapRazorPages();
+    Log("  • MapRazorPages");
     app.MapControllers();
+    Log("  • MapControllers");
     app.MapHub<SolarApp.Hubs.DashboardHub>("/hubs/dashboard");
+    Log("  • MapHub<DashboardHub>");
     SolarApp.Startup.MapApiEndpoints(app);
+    Log("  • MapApiEndpoints");
     SolarApp.Startup.MapDiagnosticEndpoint(app, logFiles.FirstOrDefault());
+    Log("  • MapDiagnosticEndpoint");
 
     // Flush accumulated startup log to DB — best effort
-    try { await FlushStartupLogToDbAsync(dbConnectionString!, logBuffer); }
-    catch (Exception ex) { Log($"(StartupLogs DB write skipped: {ex.Message})"); }
+    try { await FlushStartupLogToDbAsync(dbConnectionString!, logBuffer); Log("  • StartupLogs DB write OK"); }
+    catch (Exception ex) { Log($"  ⚠ StartupLogs DB write skipped: {ex.Message}"); }
 
     Log("=== SolarApp Ready ===");
     app.Run();

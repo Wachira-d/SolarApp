@@ -23,6 +23,9 @@
             <button type="button" id="syncNowBtn" data-id="@inst.Id" class="btn btn-success btn-sm">
                 <i class="bi bi-cloud-download"></i> Sync Now
             </button>
+            <button type="button" id="refreshDevicesBtn" data-id="@inst.Id" class="btn btn-outline-success btn-sm">
+                <i class="bi bi-cpu"></i> Refresh Devices
+            </button>
         }
         @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
         {
@@ -282,6 +285,33 @@
 
 @section Scripts {
     <script>
+        // ─── Refresh device info from cloud (inverter model / serial / firmware) ───
+        document.getElementById('refreshDevicesBtn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('refreshDevicesBtn');
+            const id = btn.dataset.id;
+            const orig = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Fetching...';
+            try {
+                const r = await fetch(`/api/installations/${id}/refresh-devices`, { method: 'POST' });
+                const data = await r.json();
+                const tone = data.success ? 'success' : 'danger';
+                const lines = [
+                    data.message,
+                    `Devices fetched: ${data.devicesFetched}`,
+                    `Equipment created: ${data.equipmentCreated}, updated: ${data.equipmentUpdated}`,
+                    data.installationNote || ''
+                ].filter(x => x).join('\n');
+                alert(`[${tone.toUpperCase()}]\n${lines}`);
+                if (data.success) setTimeout(() => location.reload(), 500);
+            } catch (e) {
+                alert('Refresh failed: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = orig;
+            }
+        });
+
         document.getElementById('syncNowBtn')?.addEventListener('click', async () => {
             const btn = document.getElementById('syncNowBtn');
             const result = document.getElementById('syncResult');

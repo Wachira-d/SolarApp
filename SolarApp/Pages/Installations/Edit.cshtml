@@ -27,18 +27,24 @@
                         </div>
                         <div class="col-md-6">
                             <label asp-for="Input.Address" class="form-label">Address *</label>
-                            <input asp-for="Input.Address" class="form-control" />
+                            <input asp-for="Input.Address" id="edtAddress" class="form-control" />
                             <span asp-validation-for="Input.Address" class="text-danger"></span>
                         </div>
                     </div>
                     <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-5">
                             <label asp-for="Input.Latitude" class="form-label">Latitude</label>
-                            <input asp-for="Input.Latitude" class="form-control" />
+                            <input asp-for="Input.Latitude" id="edtLat" class="form-control" step="any" />
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-5">
                             <label asp-for="Input.Longitude" class="form-label">Longitude</label>
-                            <input asp-for="Input.Longitude" class="form-control" />
+                            <input asp-for="Input.Longitude" id="edtLng" class="form-control" step="any" />
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end gap-1">
+                            <button type="button" id="btnReverseGeocode" class="btn btn-outline-info btn-sm w-100"
+                                    title="Look up address from lat/lng">
+                                <i class="bi bi-search"></i> Find
+                            </button>
                         </div>
                     </div>
 
@@ -172,6 +178,35 @@
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
     <script>
+        // ─── Reverse geocode: lat/lng → Address ───
+        document.getElementById('btnReverseGeocode')?.addEventListener('click', async () => {
+            const btn = document.getElementById('btnReverseGeocode');
+            const lat = parseFloat(document.getElementById('edtLat').value);
+            const lng = parseFloat(document.getElementById('edtLng').value);
+            if (isNaN(lat) || isNaN(lng)) { alert('Please fill both Latitude and Longitude first'); return; }
+
+            const orig = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            try {
+                const r = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}&lang=th,en`);
+                const data = await r.json();
+                if (data.success && data.address) {
+                    if (!document.getElementById('edtAddress').value
+                        || confirm(`Replace current address with:\n${data.address}`)) {
+                        document.getElementById('edtAddress').value = data.address;
+                    }
+                } else {
+                    alert('Could not resolve address: ' + (data.message || 'unknown'));
+                }
+            } catch (e) {
+                alert('Geocoding failed: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = orig;
+            }
+        });
+
         document.getElementById('testConnectionBtn')?.addEventListener('click', async () => {
             const btn = document.getElementById('testConnectionBtn');
             const result = document.getElementById('testResult');

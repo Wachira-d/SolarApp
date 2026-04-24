@@ -313,6 +313,13 @@ public class HuaweiAdapter : IInverterApiAdapter
             var failCode = SafeGetInt(json, "failCode");
             if (failCode.HasValue && failCode.Value != 0)
             {
+                // Invalidate cached token on auth-expired codes so next call re-logins
+                if (failCode.Value == 305 || failCode.Value == 401)
+                {
+                    var cacheKey = $"{credentials.Username}|{credentials.Password?.Length ?? 0}";
+                    InvalidateToken(cacheKey);
+                }
+
                 var msg = SafeGetString(json, "message") ?? SafeGetString(json, "data") ?? "Unknown";
                 _lastRealtimeError = $"Huawei error failCode={failCode.Value}: {msg}. " +
                     (failCode.Value == 407 ? "(Rate limit — Huawei NBI allows 1 request/minute. Wait and retry.)"
@@ -587,7 +594,30 @@ public class HuaweiAdapter : IInverterApiAdapter
 
     // ══════════════════════════════════════════════════════════════
     //  Authentication
+    //
+    //  Huawei NBI enforces approximately 1 login/minute (failCode=407
+    //  ACCESS_FREQUENCY) AND also throttles back-to-back data calls from
+    //  the same account. We cache the XSRF-TOKEN in a static process-wide
+    //  dictionary keyed by username, with a 15-min TTL. This means:
+    //
+    //    - Scheduled sync (6 API calls × N installations) uses 1 login per
+    //      account per cycle instead of 6×N logins
+    //    - Manual syncs piggyback on the cached token from the last schedule
+    //    - Expired or rejected tokens (failCode=305 USER_MUST_RELOGIN) are
+    //      evicted automatically so next call re-authenticates
+    //
+    //  The cache is static so it survives adapter instance recreation
+    //  (adapters are Scoped but requests are short-lived).
     // ══════════════════════════════════════════════════════════════
+
+    private static readonly Dictionary<string, (string Token, DateTime ExpiresAt)> _tokenCache = new();
+    private static readonly object _tokenCacheLock = new();
+    private static readonly TimeSpan TokenTtl = TimeSpan.FromMinutes(15);
+
+    private static void InvalidateToken(string cacheKey)
+    {
+        lock (_tokenCacheLock) { _tokenCache.Remove(cacheKey); }
+    }
 
     private async Task<string?> LoginAsync(HttpClient client, ApiCredentials credentials)
     {
@@ -597,6 +627,15 @@ public class HuaweiAdapter : IInverterApiAdapter
 
     private async Task<(string? Token, string Error)> LoginWithDetailAsync(HttpClient client, ApiCredentials credentials)
     {
+        var cacheKey = $"{credentials.Username}|{credentials.Password?.Length ?? 0}";
+
+        // ── Check cache first ──
+        lock (_tokenCacheLock)
+        {
+            if (_tokenCache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow < cached.ExpiresAt)
+                return (cached.Token, "OK (cached)");
+        }
+
         try
         {
             var response = await client.PostAsJsonAsync($"{BaseUrl}/login",
@@ -606,7 +645,14 @@ public class HuaweiAdapter : IInverterApiAdapter
             if (response.Headers.TryGetValues("XSRF-TOKEN", out var tokens))
             {
                 var token = tokens.FirstOrDefault();
-                if (!string.IsNullOrEmpty(token)) return (token, "OK");
+                if (!string.IsNullOrEmpty(token))
+                {
+                    lock (_tokenCacheLock)
+                    {
+                        _tokenCache[cacheKey] = (token, DateTime.UtcNow.Add(TokenTtl));
+                    }
+                    return (token, "OK");
+                }
             }
 
             // Fallback: check response body
@@ -621,6 +667,19 @@ public class HuaweiAdapter : IInverterApiAdapter
                 if (failCode.HasValue && failCode.Value != 0)
                 {
                     var msg = SafeGetString(json, "message") ?? SafeGetString(json, "data") ?? "Unknown";
+
+                    // 407 = rate limit. If we have a cached token from recent sync,
+                    // use it — don't throw away a working session just because we
+                    // couldn't re-login this minute.
+                    if (failCode.Value == 407)
+                    {
+                        lock (_tokenCacheLock)
+                        {
+                            if (_tokenCache.TryGetValue(cacheKey, out var cached))
+                                return (cached.Token, "OK (cached, login rate-limited)");
+                        }
+                    }
+
                     return (null, $"Login failed code={failCode}: {msg}");
                 }
             }
