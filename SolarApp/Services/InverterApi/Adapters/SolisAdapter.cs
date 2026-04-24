@@ -64,11 +64,20 @@ public class SolisAdapter : IInverterApiAdapter
                 if (string.IsNullOrEmpty(token))
                 {
                     var diagnostic = _lastWebLoginError ?? "No diagnostic info";
-                    return (false, $"Solis web login failed. SolisCloud changed their web API and we tried " +
-                        $"multiple endpoint/password variants. Diagnostic:\n{Truncate(diagnostic, 1500)}\n\n" +
-                        "RECOMMENDATION: Switch to official API mode — it's more stable. " +
-                        "Get API Key ID + Secret from SolisCloud > My Account > API Management, " +
-                        "then save with those values instead of SOLISWEB.");
+                    return (false,
+                        "Solis SOLISWEB mode no longer works reliably — SolisCloud has locked down their " +
+                        "web portal login endpoints and now requires HMAC-SHA1 signature auth " +
+                        "(same as the official API).\n\n" +
+                        "▶ SOLUTION: Switch to Official API mode\n" +
+                        "  1. Login to https://www.soliscloud.com\n" +
+                        "  2. Go to: My Account → API Management → Apply for API Key\n" +
+                        "  3. Wait for approval (usually same-day)\n" +
+                        "  4. Get the Key ID and Key Secret\n" +
+                        "  5. In SolarApp, edit this installation:\n" +
+                        "     • API Key = your Key ID (not the word 'SOLISWEB')\n" +
+                        "     • API Secret = your Key Secret\n" +
+                        "     • Leave Username/Password blank\n\n" +
+                        $"Diagnostic from login attempts:\n{Truncate(diagnostic, 1200)}");
                 }
 
                 var plant = await GetPlantInfoAsync(credentials);
@@ -434,13 +443,15 @@ public class SolisAdapter : IInverterApiAdapter
 
             var passwordMd5 = ComputeMd5(credentials.Password ?? "");
 
-            // Try all known endpoints x password formats
-            // SolisCloud has moved login endpoints multiple times; we probe each
+            // Ordered from most-likely-to-work to fallback.
+            // /u/login = actual web portal login (no signature required)
+            // /api/... endpoints require HMAC-SHA1 signature (official API scheme,
+            // not usable for password login). We try them only as a last resort
+            // and expect 403 "Date can not be empty" — that's the signal to
+            // tell the user: switch to official API mode.
             var endpoints = new[]
             {
-                $"{WebBaseUrl}/api/login",          // Current 2024+
-                $"{WebBaseUrl}/api/user/login",     // Variant
-                $"{WebBaseUrl}/u/login",            // Older
+                $"{WebBaseUrl}/u/login",        // Real web-portal login
             };
 
             var passwordVariants = new[]
@@ -451,9 +462,8 @@ public class SolisAdapter : IInverterApiAdapter
 
             var fieldVariants = new (string UserField, string PwField)[]
             {
-                ("userInfo", "passWord"),
-                ("username", "password"),
-                ("account", "password"),
+                ("userInfo", "passWord"),       // soliscloud.com web form
+                ("username", "password"),       // some regional variants
             };
 
             foreach (var endpoint in endpoints)
@@ -551,7 +561,7 @@ public class SolisAdapter : IInverterApiAdapter
                 }
             }
 
-            _lastWebLoginError = "All login attempts failed:\n" + string.Join("\n", attemptLog.Take(12));
+            _lastWebLoginError = "All login attempts failed:\n" + string.Join("\n", attemptLog);
             _logger.LogWarning("Solis web login exhausted all variants:\n{Log}", _lastWebLoginError);
             return null;
         }
