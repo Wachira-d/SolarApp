@@ -128,7 +128,16 @@ public class Startup
         });
 
         // DataProtection — used for encrypting API credentials at rest
-        builder.Services.AddDataProtection();
+        // Pin DataProtection keys to a fixed directory so startup-time decryption
+        // (raw ADO.NET path) and runtime (DI path) use the same key ring.
+        // Default path on Windows is %LOCALAPPDATA% which varies by user.
+        var keysDir = new DirectoryInfo(
+            Environment.GetEnvironmentVariable("SOLARAPP_KEYS_PATH")
+            ?? Path.Combine(AppContext.BaseDirectory, "dp-keys"));
+        try { keysDir.Create(); } catch { /* best-effort */ }
+        builder.Services.AddDataProtection()
+            .PersistKeysToFileSystem(keysDir)
+            .SetApplicationName("SolarApp");
         builder.Services.AddSingleton<Services.Security.ICredentialProtector, Services.Security.CredentialProtector>();
 
         builder.Services.AddScoped<Services.Interfaces.IInstallationService, Services.Implementations.InstallationService>();
@@ -244,51 +253,66 @@ public class Startup
             var cs = builder.Configuration.GetConnectionString("DefaultConnection");
             if (string.IsNullOrWhiteSpace(cs)) return (msId, msSecret, lineId, lineSecret);
 
-            // Build a temporary DataProtection provider matching the runtime config
-            var tempProvider = new ServiceCollection()
-                .AddLogging()
-                .AddDataProtection().Services
-                .AddDbContext<ApplicationDbContext>(o => o.UseSqlServer(cs))
-                .BuildServiceProvider();
+            // Use raw ADO.NET — no DI container needed, no EF mapping risk.
+            // Fail silently if table doesn't exist yet (fresh install).
+            using var conn = new SqlConnection(cs);
+            conn.Open();
 
-            using var scope = tempProvider.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var dp = scope.ServiceProvider
-                .GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()
-                .CreateProtector("SolarApp.Credentials.v1");
-
-            string? ReadDb(string key, bool encrypted)
+            // Verify SystemSettings table exists; if not, skip DB lookup
+            using (var check = conn.CreateCommand())
             {
-                try
-                {
-                    var value = db.SystemSettings
-                        .Where(s => s.Key == key)
-                        .Select(s => s.Value)
-                        .FirstOrDefault();
-                    if (string.IsNullOrEmpty(value)) return null;
-                    if (!encrypted) return value;
-                    if (!value.StartsWith("enc:")) return value; // legacy plaintext
-                    return dp.Unprotect(value["enc:".Length..]);
-                }
-                catch { return null; }
+                check.CommandText = "SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.tables WHERE name='SystemSettings') THEN 1 ELSE 0 END";
+                if ((int)(check.ExecuteScalar() ?? 0) == 0)
+                    return (msId, msSecret, lineId, lineSecret);
             }
 
-            var dbMsId = ReadDb("Auth.Microsoft.ClientId", false);
-            var dbMsSecret = ReadDb("Auth.Microsoft.ClientSecret", true);
-            var dbLineId = ReadDb("Auth.LINE.ClientId", false);
-            var dbLineSecret = ReadDb("Auth.LINE.ClientSecret", true);
+            string? ReadRaw(string key)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT [Value] FROM [SystemSettings] WHERE [Key] = @k";
+                cmd.Parameters.AddWithValue("@k", key);
+                return cmd.ExecuteScalar() as string;
+            }
 
-            // DB wins when set
+            var dbMsId = ReadRaw("Auth.Microsoft.ClientId");
+            var dbMsSecret = ReadRaw("Auth.Microsoft.ClientSecret");
+            var dbLineId = ReadRaw("Auth.LINE.ClientId");
+            var dbLineSecret = ReadRaw("Auth.LINE.ClientSecret");
+
+            // Decrypt secrets if encrypted (prefix "enc:"). DataProtection is done
+            // lazily via a local provider so we don't need the app's DI.
+            string? TryDecrypt(string? raw)
+            {
+                if (string.IsNullOrEmpty(raw)) return raw;
+                if (!raw.StartsWith("enc:")) return raw; // legacy plaintext
+                try
+                {
+                    var keysPath = Environment.GetEnvironmentVariable("SOLARAPP_KEYS_PATH")
+                        ?? Path.Combine(AppContext.BaseDirectory, "dp-keys");
+                    var dpProvider = Microsoft.AspNetCore.DataProtection.DataProtectionProvider
+                        .Create(new DirectoryInfo(keysPath),
+                            configuration => configuration.SetApplicationName("SolarApp"));
+                    var protector = dpProvider.CreateProtector("SolarApp.Credentials.v1");
+                    return protector.Unprotect(raw["enc:".Length..]);
+                }
+                catch
+                {
+                    // Keys don't exist on this machine — cannot decrypt. Skip silently.
+                    return null;
+                }
+            }
+
             return (
                 dbMsId ?? msId,
-                dbMsSecret ?? msSecret,
+                TryDecrypt(dbMsSecret) ?? msSecret,
                 dbLineId ?? lineId,
-                dbLineSecret ?? lineSecret
+                TryDecrypt(dbLineSecret) ?? lineSecret
             );
         }
         catch
         {
-            // DB not reachable at startup — fall back to config file only
+            // DB not reachable at startup — fall back to config file only.
+            // Never throw; app MUST be able to start without external auth.
             return (msId, msSecret, lineId, lineSecret);
         }
     }

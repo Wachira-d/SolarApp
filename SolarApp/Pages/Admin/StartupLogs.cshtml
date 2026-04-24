@@ -1,0 +1,46 @@
+@page
+@model SolarApp.Pages.Admin.StartupLogsModel
+@{
+    ViewData["Title"] = "Startup Logs";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-journal-text"></i> Startup Logs</h4>
+        <small class="text-muted">Last 50 app-start sessions (errors surfaced here when file logs aren't available)</small>
+    </div>
+    <a href="?" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+    </a>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.QueryError))
+{
+    <div class="alert alert-warning">@Model.QueryError</div>
+}
+
+@if (!Model.Entries.Any() && string.IsNullOrEmpty(Model.QueryError))
+{
+    <div class="alert alert-success">
+        <i class="bi bi-check-circle"></i> No startup errors logged. The app has been starting cleanly.
+    </div>
+}
+
+@foreach (var e in Model.Entries)
+{
+    <div class="card border-0 shadow-sm mb-2 @(e.IsError ? "border-start border-4 border-danger" : "border-start border-4 border-success")">
+        <div class="card-body py-2">
+            <div class="d-flex justify-content-between align-items-start mb-1">
+                <div>
+                    @if (e.IsError)
+                    { <span class="badge bg-danger me-2">FAILURE</span> }
+                    else
+                    { <span class="badge bg-success me-2">OK</span> }
+                    <strong>@e.Timestamp.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss")</strong>
+                    <small class="text-muted ms-2">@e.MachineName · #@e.Id</small>
+                </div>
+            </div>
+            <pre class="small mb-0 p-2 bg-body-secondary rounded" style="max-height: 400px; overflow: auto; white-space: pre-wrap;">@e.LogText</pre>
+        </div>
+    </div>
+}
