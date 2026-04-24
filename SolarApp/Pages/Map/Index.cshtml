@@ -1,0 +1,99 @@
+@page
+@model SolarApp.Pages.Map.IndexModel
+@{
+    ViewData["Title"] = "Site Map";
+    var markersJson = System.Text.Json.JsonSerializer.Serialize(Model.Markers);
+}
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+    #siteMap { height: calc(100vh - 200px); min-height: 450px; border-radius: 0.5rem; }
+    html[data-theme="dark"] .leaflet-tile-pane { filter: brightness(0.85) invert(0.95) hue-rotate(180deg); }
+    .legend-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 5px; }
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-geo-alt"></i> Site Map</h4>
+        <small class="text-muted">@Model.MappedSites mapped / @Model.TotalSites total sites</small>
+    </div>
+    <div class="d-flex gap-3 align-items-center small flex-wrap">
+        <span><span class="legend-dot" style="background:#198754"></span> Active</span>
+        <span><span class="legend-dot" style="background:#dc3545"></span> Offline</span>
+        <span><span class="legend-dot" style="background:#ffc107"></span> Maintenance</span>
+        <span><span class="legend-dot" style="background:#6c757d"></span> Inactive</span>
+    </div>
+</div>
+
+@if (Model.MappedSites == 0)
+{
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i>
+        No installations have GPS coordinates set yet. Edit an installation and fill in Latitude / Longitude to see it here.
+    </div>
+}
+else
+{
+    <div id="siteMap"></div>
+}
+
+@section Scripts {
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(function(){
+    const markers = @Html.Raw(markersJson);
+    if (!markers.length) return;
+
+    const map = L.map('siteMap').setView([markers[0].Lat, markers[0].Lng], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    function colorFor(status) {
+        return status === 'Active' ? '#198754'
+             : status === 'Offline' ? '#dc3545'
+             : status === 'Maintenance' ? '#ffc107'
+             : '#6c757d';
+    }
+
+    const group = L.featureGroup();
+    markers.forEach(m => {
+        const marker = L.circleMarker([m.Lat, m.Lng], {
+            radius: Math.max(8, Math.min(20, m.CapacityKw / 5)),
+            fillColor: colorFor(m.Status),
+            color: '#fff',
+            weight: 2,
+            fillOpacity: 0.85
+        });
+
+        const alertBadge = m.UnresolvedAlerts > 0
+            ? `<span class="badge bg-danger ms-1">${m.UnresolvedAlerts} alert</span>` : '';
+
+        marker.bindPopup(`
+            <div style="min-width:180px">
+                <strong>${m.Name}</strong>${alertBadge}<br>
+                <small class="text-muted">${m.SiteCode || ''}</small><br>
+                <div class="mt-1">
+                    <span class="badge" style="background:${colorFor(m.Status)}">${m.Status}</span>
+                    <span class="badge bg-info">${m.Brand}</span>
+                </div>
+                <div class="mt-1 small">${m.CapacityKw} kW</div>
+                <a href="/Installations/Detail/${m.Id}" class="btn btn-sm btn-primary mt-2 w-100">
+                    Open Site
+                </a>
+            </div>
+        `);
+
+        marker.addTo(map);
+        group.addLayer(marker);
+    });
+
+    if (markers.length > 1) {
+        map.fitBounds(group.getBounds().pad(0.1));
+    }
+})();
+</script>
+}

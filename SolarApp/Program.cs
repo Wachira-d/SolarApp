@@ -73,6 +73,11 @@ try
     // ── Middleware ──
     app.UseDeveloperExceptionPage();
     app.UseStaticFiles();
+
+    // Localization: must come BEFORE UseRouting
+    var locOpt = app.Services.GetService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>>();
+    if (locOpt != null) app.UseRequestLocalization(locOpt.Value);
+
     app.UseRouting();
     app.UseAuthentication();
     app.UseAuthorization();
@@ -84,6 +89,8 @@ try
     }
 
     app.MapRazorPages();
+    app.MapControllers();
+    app.MapHub<SolarApp.Hubs.DashboardHub>("/hubs/dashboard");
     SolarApp.Startup.MapApiEndpoints(app);
     SolarApp.Startup.MapDiagnosticEndpoint(app, logFile);
 

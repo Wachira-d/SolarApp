@@ -66,10 +66,30 @@ public class Startup
         builder.Services.AddScoped<Services.Performance.IPerformanceMetricsService, Services.Performance.PerformanceMetricsService>();
         builder.Services.AddScoped<Services.AlertRules.IAlertRulesEngine, Services.AlertRules.AlertRulesEngine>();
         builder.Services.AddScoped<Services.LineApi.ILineMessagingService, Services.LineApi.LineMessagingService>();
+        builder.Services.AddScoped<Services.Weather.IWeatherService, Services.Weather.WeatherService>();
+        builder.Services.AddMemoryCache();
         builder.Services.AddValidatorsFromAssemblyContaining<Startup>();
         builder.Services.AddScoped<BackgroundJobs.SolarDataSyncJob>();
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
-        builder.Services.AddRazorPages();
+
+        // ── Localization ──
+        builder.Services.AddLocalization(opt => opt.ResourcesPath = "Resources");
+        builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>(opt =>
+        {
+            var supported = new[] { "en", "th" };
+            opt.SetDefaultCulture("en")
+                .AddSupportedCultures(supported)
+                .AddSupportedUICultures(supported);
+            opt.FallBackToParentCultures = true;
+        });
+
+        // ── SignalR for real-time dashboard updates ──
+        builder.Services.AddSignalR();
+
+        builder.Services.AddRazorPages()
+            .AddViewLocalization()
+            .AddDataAnnotationsLocalization();
+        builder.Services.AddControllers();
     }
 
     public static void ConfigureHangfire(WebApplicationBuilder builder, string connectionString)
@@ -285,6 +305,80 @@ public class Startup
             catch (Exception ex)
             {
                 log($"DB: Schema upgrade '{table}.{column}' failed: {ex.Message}");
+            }
+        }
+
+        // ── Create AlertRules table if missing ──
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(@"
+                IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'AlertRules')
+                BEGIN
+                    CREATE TABLE [AlertRules] (
+                        [Id] int IDENTITY(1,1) PRIMARY KEY,
+                        [Name] nvarchar(100) NOT NULL,
+                        [Description] nvarchar(300) NULL,
+                        [Metric] int NOT NULL,
+                        [Operator] int NOT NULL,
+                        [Threshold] decimal(14,4) NOT NULL,
+                        [ConsecutiveChecks] int NOT NULL DEFAULT 1,
+                        [Severity] int NOT NULL,
+                        [AlertType] int NOT NULL,
+                        [InstallationId] int NULL,
+                        [BrandScope] int NULL,
+                        [IsEnabled] bit NOT NULL DEFAULT 1,
+                        [CooldownMinutes] int NOT NULL DEFAULT 60,
+                        [LastFiredAt] datetime2 NULL,
+                        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                        [CreatedByUserId] nvarchar(450) NULL,
+                        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                        CONSTRAINT FK_AlertRules_Installations FOREIGN KEY ([InstallationId])
+                            REFERENCES [Installations]([Id]) ON DELETE CASCADE,
+                        CONSTRAINT FK_AlertRules_AspNetUsers FOREIGN KEY ([CreatedByUserId])
+                            REFERENCES [AspNetUsers]([Id]) ON DELETE SET NULL
+                    );
+                    CREATE INDEX IX_AlertRules_IsEnabled ON [AlertRules]([IsEnabled]);
+                    CREATE INDEX IX_AlertRules_InstallationId ON [AlertRules]([InstallationId]);
+                    CREATE INDEX IX_AlertRules_Metric ON [AlertRules]([Metric]);
+                END");
+            log("DB: AlertRules table ensured");
+        }
+        catch (Exception ex)
+        {
+            log($"DB: AlertRules table creation failed: {ex.Message}");
+        }
+
+        // ── Ensure missing FK indexes (idempotent) ──
+        var indexUpgrades = new (string Name, string Table, string Columns)[]
+        {
+            ("IX_SystemAlerts_AcknowledgedByUserId", "SystemAlerts", "[AcknowledgedByUserId]"),
+            ("IX_SystemAlerts_Severity", "SystemAlerts", "[Severity]"),
+            ("IX_ServiceTickets_ReportedByUserId", "ServiceTickets", "[ReportedByUserId]"),
+            ("IX_ServiceTickets_AssignedToUserId", "ServiceTickets", "[AssignedToUserId]"),
+            ("IX_MaintenanceRecords_PerformedByUserId", "MaintenanceRecords", "[PerformedByUserId]"),
+            ("IX_MaintenanceRecords_Status", "MaintenanceRecords", "[Status]"),
+            ("IX_MaintenanceRecords_InstallationId_ScheduledDate", "MaintenanceRecords", "[InstallationId], [ScheduledDate]"),
+            ("IX_WarrantyRecords_EquipmentId", "WarrantyRecords", "[EquipmentId]"),
+            ("IX_WarrantyRecords_WarrantyType", "WarrantyRecords", "[WarrantyType]"),
+            ("IX_CleaningRecords_PerformedByUserId", "CleaningRecords", "[PerformedByUserId]"),
+            ("IX_CleaningRecords_Status", "CleaningRecords", "[Status]"),
+        };
+
+        foreach (var (name, table, cols) in indexUpgrades)
+        {
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync($@"
+                    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}')
+                    AND EXISTS (SELECT 1 FROM sys.tables WHERE name = '{table}')
+                    BEGIN
+                        CREATE INDEX [{name}] ON [{table}]({cols});
+                    END");
+                log($"DB: Index '{name}' ensured");
+            }
+            catch (Exception ex)
+            {
+                log($"DB: Index '{name}' failed: {ex.Message}");
             }
         }
     }

@@ -334,6 +334,25 @@ html[data-theme="dark"] .shadow-sm {
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) !important;
 }
 
+/* Live feed indicator LED */
+#liveLed {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #6c757d;
+    margin-right: 6px;
+    transition: background 0.3s, box-shadow 0.3s;
+}
+#liveLed.bg-success {
+    box-shadow: 0 0 6px rgba(25, 135, 84, 0.6);
+    animation: ledPulse 2s ease-in-out;
+}
+@keyframes ledPulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(25, 135, 84, 0.4); }
+    50%      { box-shadow: 0 0 12px rgba(25, 135, 84, 0.9); }
+}
+
 /* Theme toggle button */
 .theme-toggle {
     cursor: pointer;

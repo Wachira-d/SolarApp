@@ -15,9 +15,22 @@
                 <i class="bi bi-speedometer2 me-2"></i>Dashboard
             </a>
         </li>
+        @if (User.IsInRole("Customer"))
+        {
+            <li class="nav-item">
+                <a class="nav-link text-white @ActiveClass("/myhome")" asp-page="/MyHome/Index">
+                    <i class="bi bi-sun-fill me-2 text-warning"></i>My Solar
+                </a>
+            </li>
+        }
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/installations")" asp-page="/Installations/Index">
                 <i class="bi bi-house-gear me-2"></i>Installations
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link text-white @ActiveClass("/map")" asp-page="/Map/Index">
+                <i class="bi bi-geo-alt me-2"></i>Map
             </a>
         </li>
         <li class="nav-item">
@@ -48,6 +61,11 @@
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/users")" asp-page="/Admin/Users">
                     <i class="bi bi-people me-2"></i>User Management
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link text-white @ActiveClass("/admin/importinstallations")" asp-page="/Admin/ImportInstallations">
+                    <i class="bi bi-upload me-2"></i>Bulk Import
                 </a>
             </li>
             <li class="nav-item">

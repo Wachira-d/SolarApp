@@ -238,7 +238,7 @@ else
                 <tbody>
                     @foreach (var inst in d.AllInstallations)
                     {
-                        <tr class="searchable" data-search="@inst.SiteName @inst.CustomerName @inst.PartnerName @inst.InverterBrand">
+                        <tr class="searchable" data-install-id="@inst.Id" data-search="@inst.SiteName @inst.CustomerName @inst.PartnerName @inst.InverterBrand">
                             <td><span class="badge @inst.StatusBadgeClass">@inst.Status</span></td>
                             <td>
                                 <a asp-page="/Installations/Detail" asp-route-id="@inst.Id" class="text-decoration-none">
@@ -314,6 +314,7 @@ else
 </div>
 
 @section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
     <script>
         // Search filter
         document.getElementById('searchInput')?.addEventListener('input', function () {
@@ -322,5 +323,28 @@ else
                 row.style.display = row.dataset.search.toLowerCase().includes(q) ? '' : 'none';
             });
         });
+
+        // ─── SignalR live updates ───
+        (function () {
+            if (typeof signalR === 'undefined') return;
+            const conn = new signalR.HubConnectionBuilder()
+                .withUrl('/hubs/dashboard')
+                .withAutomaticReconnect()
+                .build();
+
+            conn.on('RealtimeUpdate', payload => {
+                const row = document.querySelector(`tr[data-install-id="${payload.Id}"]`);
+                if (row) {
+                    row.classList.add('table-success');
+                    setTimeout(() => row.classList.remove('table-success'), 1500);
+                }
+                const led = document.getElementById('liveLed');
+                if (led) { led.classList.add('bg-success'); led.title = 'Live update at ' + new Date().toLocaleTimeString(); }
+            });
+
+            conn.start()
+                .then(() => conn.invoke('Subscribe', 'all'))
+                .catch(err => console.warn('SignalR connect failed', err));
+        })();
     </script>
 }

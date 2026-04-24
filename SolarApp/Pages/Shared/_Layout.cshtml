@@ -3,7 +3,7 @@
 @inject SignInManager<ApplicationUser> SignInManager
 @inject UserManager<ApplicationUser> UserManager
 <!DOCTYPE html>
-<html lang="en">
+<html lang="@System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -77,10 +77,20 @@
                     <div class="container-fluid">
                         <span class="navbar-text fw-bold">@ViewData["Title"]</span>
                         <div class="ms-auto d-flex align-items-center">
-                            <span class="me-3 text-muted">
+                            <span class="me-3 text-muted d-none d-md-inline">
+                                <span id="liveLed" title="Live feed status"></span>
                                 <i class="bi bi-person-circle me-1"></i>
                                 @UserManager.GetUserName(User)
                             </span>
+                            <div class="dropdown me-2">
+                                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                    <i class="bi bi-translate"></i> @(System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToUpper())
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="/Language/Set?culture=en&returnUrl=@Context.Request.Path">English</a></li>
+                                    <li><a class="dropdown-item" href="/Language/Set?culture=th&returnUrl=@Context.Request.Path">ไทย</a></li>
+                                </ul>
+                            </div>
                             <button type="button" class="theme-toggle me-2" onclick="toggleTheme()" title="Toggle theme">
                                 <i class="bi bi-moon-fill"></i><i class="bi bi-sun-fill"></i>
                             </button>

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Weather;
 
 namespace SolarApp.Services.Performance;
 
@@ -58,13 +59,16 @@ public class PerformanceMetricsService : IPerformanceMetricsService
 
     private readonly ApplicationDbContext _context;
     private readonly Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> _userManager;
+    private readonly IWeatherService _weather;
 
     public PerformanceMetricsService(
         ApplicationDbContext context,
-        Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> userManager)
+        Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> userManager,
+        IWeatherService weather)
     {
         _context = context;
         _userManager = userManager;
+        _weather = weather;
     }
 
     public async Task<InstallationPerformance> GetPerformanceAsync(int installationId, DateTime from, DateTime to)
@@ -98,11 +102,27 @@ public class PerformanceMetricsService : IPerformanceMetricsService
         var exportRate = tariff?.ExportRatePerKwh ?? 2.2m;
 
         var capacity = installation.SystemCapacityKw;
-        var expectedPerDay = capacity * DefaultPeakSunHours * DefaultDerateFactor;
+
+        // Try weather-based PSH per day if lat/lng present; fall back to constant
+        Dictionary<DateTime, decimal>? pshByDate = null;
+        if (installation.Latitude.HasValue && installation.Longitude.HasValue
+            && Math.Abs(installation.Latitude.Value) > 0.0001
+            && Math.Abs(installation.Longitude.Value) > 0.0001)
+        {
+            try
+            {
+                var forecast = await _weather.GetForecastAsync(
+                    installation.Latitude.Value, installation.Longitude.Value, fromDate, toDate);
+                if (forecast != null)
+                    pshByDate = forecast.Days.ToDictionary(d => d.Date.Date, d => d.PeakSunHours);
+            }
+            catch { /* weather failures non-fatal */ }
+        }
 
         var seriesByDate = dailyRecords.ToDictionary(d => d.Timestamp.Date);
         var series = new List<DailyProduction>();
         decimal actualTotal = 0;
+        decimal expectedTotal = 0;
         int offlineDays = 0;
 
         for (var d = fromDate; d <= toDate; d = d.AddDays(1))
@@ -110,13 +130,15 @@ public class PerformanceMetricsService : IPerformanceMetricsService
             decimal actual = 0;
             if (seriesByDate.TryGetValue(d, out var rec)) actual = rec.EnergyGenerationKwh;
             if (actual <= 0) offlineDays++;
-
             actualTotal += actual;
+
+            var psh = pshByDate != null && pshByDate.TryGetValue(d, out var p) ? p : DefaultPeakSunHours;
+            var expectedPerDay = capacity * psh * DefaultDerateFactor;
+            expectedTotal += expectedPerDay;
+
             var pr = expectedPerDay > 0 ? Math.Round(actual / expectedPerDay, 3) : 0;
             series.Add(new DailyProduction(d, actual, expectedPerDay, pr));
         }
-
-        var expectedTotal = expectedPerDay * days;
         var performanceRatio = expectedTotal > 0 ? actualTotal / expectedTotal : 0;
         var capacityFactor = capacity > 0 ? actualTotal / (capacity * 24 * days) : 0;
         var specificYield = capacity > 0 ? actualTotal / capacity : 0;

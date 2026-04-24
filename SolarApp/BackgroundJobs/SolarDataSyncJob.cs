@@ -1,6 +1,8 @@
 using Hangfire;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
+using SolarApp.Hubs;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.InverterApi;
@@ -18,15 +20,18 @@ public class SolarDataSyncJob
     private readonly ApplicationDbContext _context;
     private readonly IInverterApiAdapterFactory _adapterFactory;
     private readonly ILogger<SolarDataSyncJob> _logger;
+    private readonly IHubContext<DashboardHub> _hub;
 
     public SolarDataSyncJob(
         ApplicationDbContext context,
         IInverterApiAdapterFactory adapterFactory,
-        ILogger<SolarDataSyncJob> logger)
+        ILogger<SolarDataSyncJob> logger,
+        IHubContext<DashboardHub> hub)
     {
         _context = context;
         _adapterFactory = adapterFactory;
         _logger = logger;
+        _hub = hub;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
@@ -84,6 +89,29 @@ public class SolarDataSyncJob
                 installation.LastOnlineAt = realtime.IsOnline ? DateTime.UtcNow : installation.LastOnlineAt;
                 if (realtime.IsOnline && installation.Status == InstallationStatus.Offline)
                     installation.Status = InstallationStatus.Active;
+
+                // Push real-time update to dashboard viewers
+                try
+                {
+                    var payload = new
+                    {
+                        installation.Id,
+                        installation.SiteName,
+                        PowerKw = realtime.CurrentPowerKw,
+                        TodayKwh = realtime.TodayEnergyKwh,
+                        BatterySoc = realtime.BatterySocPercent,
+                        Timestamp = DateTime.UtcNow,
+                        realtime.IsOnline
+                    };
+                    await _hub.Clients.Group("all").SendAsync("RealtimeUpdate", payload);
+                    if (installation.PartnerId.HasValue)
+                        await _hub.Clients.Group($"partner-{installation.PartnerId}").SendAsync("RealtimeUpdate", payload);
+                    await _hub.Clients.Group($"customer-{installation.CustomerId}").SendAsync("RealtimeUpdate", payload);
+                }
+                catch (Exception hubEx)
+                {
+                    _logger.LogDebug(hubEx, "Hub broadcast failed (non-critical)");
+                }
 
                 // ─── 2. Daily aggregate (upsert today) ───
                 var today = DateTime.UtcNow.Date;

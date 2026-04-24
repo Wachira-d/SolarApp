@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <data name="Dashboard"><value>แดชบอร์ด</value></data>
+  <data name="Installations"><value>ระบบติดตั้ง</value></data>
+  <data name="Maintenance"><value>การบำรุงรักษา</value></data>
+  <data name="ServiceTickets"><value>ใบแจ้งปัญหา</value></data>
+  <data name="Performance"><value>ประสิทธิภาพ</value></data>
+  <data name="Reports"><value>รายงาน</value></data>
+  <data name="Map"><value>แผนที่</value></data>
+
+  <data name="Admin"><value>ผู้ดูแลระบบ</value></data>
+  <data name="UserManagement"><value>จัดการผู้ใช้</value></data>
+  <data name="AllAlerts"><value>แจ้งเตือนทั้งหมด</value></data>
+  <data name="AlertRules"><value>กฎแจ้งเตือน</value></data>
+  <data name="SyncSchedule"><value>ตารางซิงค์</value></data>
+  <data name="LineSettings"><value>ตั้งค่า LINE</value></data>
+  <data name="AuditLogs"><value>บันทึกระบบ</value></data>
+
+  <data name="Logout"><value>ออกจากระบบ</value></data>
+  <data name="Login"><value>เข้าสู่ระบบ</value></data>
+  <data name="Save"><value>บันทึก</value></data>
+  <data name="Cancel"><value>ยกเลิก</value></data>
+  <data name="Delete"><value>ลบ</value></data>
+  <data name="Edit"><value>แก้ไข</value></data>
+  <data name="Back"><value>กลับ</value></data>
+  <data name="Apply"><value>ใช้งาน</value></data>
+  <data name="Search"><value>ค้นหา</value></data>
+  <data name="New"><value>ใหม่</value></data>
+
+  <data name="TotalSites"><value>ไซต์ทั้งหมด</value></data>
+  <data name="Online"><value>ออนไลน์</value></data>
+  <data name="Offline"><value>ออฟไลน์</value></data>
+  <data name="Active"><value>ใช้งานอยู่</value></data>
+  <data name="Inactive"><value>ไม่ได้ใช้งาน</value></data>
+
+  <data name="PerformanceRatio"><value>ค่าประสิทธิภาพ</value></data>
+  <data name="CapacityFactor"><value>ค่าตัวประกอบกำลังผลิต</value></data>
+  <data name="Uptime"><value>เวลาทำงาน</value></data>
+  <data name="SpecificYield"><value>ผลผลิตต่อกิโลวัตต์</value></data>
+  <data name="EnergyGenerated"><value>พลังงานที่ผลิตได้</value></data>
+  <data name="EstimatedSavings"><value>ประหยัดโดยประมาณ</value></data>
+  <data name="ExportRevenue"><value>รายได้จากการขายไฟ</value></data>
+
+  <data name="Language"><value>ภาษา</value></data>
+  <data name="Theme"><value>ธีม</value></data>
+  <data name="DarkMode"><value>โหมดมืด</value></data>
+  <data name="LightMode"><value>โหมดสว่าง</value></data>
+</root>
