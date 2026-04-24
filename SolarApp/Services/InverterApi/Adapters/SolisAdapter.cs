@@ -62,10 +62,14 @@ public class SolisAdapter : IInverterApiAdapter
             {
                 var token = await WebLoginAsync(credentials);
                 if (string.IsNullOrEmpty(token))
-                    return (false, "Solis web login failed. " +
-                        "The password is sent as MD5 hash (same as soliscloud.com does). " +
-                        "If this keeps failing, the web API may have changed — " +
-                        "consider using official API mode (get API Key from SolisCloud > Profile > API Management).");
+                {
+                    var diagnostic = _lastWebLoginError ?? "No diagnostic info";
+                    return (false, $"Solis web login failed. SolisCloud changed their web API and we tried " +
+                        $"multiple endpoint/password variants. Diagnostic:\n{Truncate(diagnostic, 1500)}\n\n" +
+                        "RECOMMENDATION: Switch to official API mode — it's more stable. " +
+                        "Get API Key ID + Secret from SolisCloud > My Account > API Management, " +
+                        "then save with those values instead of SOLISWEB.");
+                }
 
                 var plant = await GetPlantInfoAsync(credentials);
                 return plant != null
@@ -400,7 +404,10 @@ public class SolisAdapter : IInverterApiAdapter
     private string? _webToken;
     private DateTime _webTokenExpiry = DateTime.MinValue;
     private string? _webTokenUser;
+    private string? _lastWebLoginError;
     private static readonly TimeSpan WebTokenTtl = TimeSpan.FromMinutes(25);
+
+    internal string? LastWebLoginError => _lastWebLoginError;
 
     private async Task<string?> WebLoginAsync(ApiCredentials credentials, bool forceRefresh = false)
     {
@@ -411,101 +418,146 @@ public class SolisAdapter : IInverterApiAdapter
             && DateTime.UtcNow < _webTokenExpiry)
             return _webToken;
 
+        _lastWebLoginError = null;
+        var attemptLog = new List<string>();
+
         try
         {
             var client = _httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.DefaultRequestHeaders.Add("Accept", "application/json, text/plain, */*");
+            client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
             client.DefaultRequestHeaders.Add("User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
             client.DefaultRequestHeaders.Add("Origin", WebBaseUrl);
             client.DefaultRequestHeaders.Add("Referer", $"{WebBaseUrl}/");
+            client.DefaultRequestHeaders.Add("X-Requested-With", "XMLHttpRequest");
 
-            // SolisCloud web app hashes the password with MD5 before sending
             var passwordMd5 = ComputeMd5(credentials.Password ?? "");
 
-            // Try multiple known login endpoints (Solis changes these periodically)
-            var loginPayloads = new[]
+            // Try all known endpoints x password formats
+            // SolisCloud has moved login endpoints multiple times; we probe each
+            var endpoints = new[]
             {
-                // Current (2024+): /u/login with MD5 password
-                (Url: $"{WebBaseUrl}/u/login", Payload: new Dictionary<string, string>
-                {
-                    ["userInfo"] = credentials.Username ?? "",
-                    ["passWord"] = passwordMd5
-                }),
-                // Alternative: some regions use different field names
-                (Url: $"{WebBaseUrl}/u/login", Payload: new Dictionary<string, string>
-                {
-                    ["username"] = credentials.Username ?? "",
-                    ["password"] = passwordMd5
-                }),
-                // Fallback: try plaintext password (older API versions)
-                (Url: $"{WebBaseUrl}/u/login", Payload: new Dictionary<string, string>
-                {
-                    ["userInfo"] = credentials.Username ?? "",
-                    ["passWord"] = credentials.Password ?? ""
-                }),
+                $"{WebBaseUrl}/api/login",          // Current 2024+
+                $"{WebBaseUrl}/api/user/login",     // Variant
+                $"{WebBaseUrl}/u/login",            // Older
             };
 
-            foreach (var (url, payload) in loginPayloads)
+            var passwordVariants = new[]
             {
-                try
+                ("MD5", passwordMd5),
+                ("plain", credentials.Password ?? ""),
+            };
+
+            var fieldVariants = new (string UserField, string PwField)[]
+            {
+                ("userInfo", "passWord"),
+                ("username", "password"),
+                ("account", "password"),
+            };
+
+            foreach (var endpoint in endpoints)
+            {
+                foreach (var (pwLabel, pw) in passwordVariants)
                 {
-                    var response = await client.PostAsJsonAsync(url, payload);
-                    var body = await response.Content.ReadAsStringAsync();
-                    _logger.LogInformation("Solis web login attempt ({Url}): HTTP {Code}, len={Len}",
-                        url, (int)response.StatusCode, body.Length);
-
-                    if (!response.IsSuccessStatusCode)
+                    foreach (var (userField, pwField) in fieldVariants)
                     {
-                        _logger.LogDebug("Solis web login body: {Body}", Truncate(body, 500));
-                        continue;
+                        var tag = $"{endpoint.Replace(WebBaseUrl, "")} [{userField}/{pwField}/{pwLabel}]";
+                        try
+                        {
+                            var payload = new Dictionary<string, string>
+                            {
+                                [userField] = credentials.Username ?? "",
+                                [pwField] = pw
+                            };
+
+                            var response = await client.PostAsJsonAsync(endpoint, payload);
+                            var body = await response.Content.ReadAsStringAsync();
+                            var code = (int)response.StatusCode;
+
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                attemptLog.Add($"{tag} → HTTP {code}: {Truncate(body, 120)}");
+                                continue;
+                            }
+
+                            JsonElement json;
+                            try { json = JsonDocument.Parse(body).RootElement; }
+                            catch
+                            {
+                                attemptLog.Add($"{tag} → HTTP {code} non-JSON: {Truncate(body, 120)}");
+                                continue;
+                            }
+
+                            // Check explicit error: code != "0" or success=false
+                            var respCode = SafeGetString(json, "code");
+                            var respMsg = SafeGetString(json, "msg") ?? SafeGetString(json, "message");
+                            if (respCode != null && respCode != "0" && respCode != "200")
+                            {
+                                attemptLog.Add($"{tag} → {code} code={respCode} msg={respMsg}");
+                                // If "invalid user" type error, no need to keep trying password variants
+                                if (respMsg != null && (respMsg.Contains("密码", StringComparison.OrdinalIgnoreCase)
+                                    || respMsg.Contains("password", StringComparison.OrdinalIgnoreCase)
+                                    || respMsg.Contains("login", StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    // Keep trying other payloads
+                                }
+                                continue;
+                            }
+
+                            // Extract token
+                            string? token = null;
+                            if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+                            {
+                                token = SafeGetString(data, "token")
+                                    ?? SafeGetString(data, "csrfToken")
+                                    ?? SafeGetString(data, "sessionId")
+                                    ?? SafeGetString(data, "Access-Token")
+                                    ?? SafeGetString(data, "access_token");
+                            }
+                            token ??= SafeGetString(json, "token") ?? SafeGetString(json, "csrfToken");
+
+                            // Check response cookies for session token
+                            if (string.IsNullOrEmpty(token)
+                                && response.Headers.TryGetValues("Set-Cookie", out var cookies))
+                            {
+                                foreach (var c in cookies)
+                                {
+                                    if (c.StartsWith("token=", StringComparison.OrdinalIgnoreCase)
+                                        || c.StartsWith("SESSION=", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        token = c.Split(';')[0].Split('=')[1];
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (!string.IsNullOrEmpty(token))
+                            {
+                                _webToken = token;
+                                _webTokenExpiry = DateTime.UtcNow.Add(WebTokenTtl);
+                                _webTokenUser = credentials.Username;
+                                _logger.LogInformation("Solis web login OK via {Tag}", tag);
+                                return _webToken;
+                            }
+
+                            attemptLog.Add($"{tag} → {code} OK but no token field. Body: {Truncate(body, 150)}");
+                        }
+                        catch (Exception attemptEx)
+                        {
+                            attemptLog.Add($"{tag} → exception: {attemptEx.Message}");
+                        }
                     }
-
-                    var json = JsonDocument.Parse(body).RootElement;
-
-                    // Check for explicit error response
-                    var success = SafeGetString(json, "success");
-                    if (success == "false" || success == "False")
-                    {
-                        var errMsg = SafeGetString(json, "msg") ?? SafeGetString(json, "message");
-                        _logger.LogWarning("Solis web login rejected: {Msg}", errMsg);
-                        continue;
-                    }
-
-                    // Extract token from data.token, data.csrfToken, or root-level token
-                    string? token = null;
-                    if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
-                    {
-                        token = SafeGetString(data, "token")
-                            ?? SafeGetString(data, "csrfToken")
-                            ?? SafeGetString(data, "sessionId");
-                    }
-                    token ??= SafeGetString(json, "token") ?? SafeGetString(json, "csrfToken");
-
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        _webToken = token;
-                        _webTokenExpiry = DateTime.UtcNow.Add(WebTokenTtl);
-                        _webTokenUser = credentials.Username;
-                        _logger.LogInformation("Solis web login OK (token obtained, cached {Min}min)", WebTokenTtl.TotalMinutes);
-                        return _webToken;
-                    }
-
-                    _logger.LogDebug("Solis web login: response had no token. Body: {Body}", Truncate(body, 300));
-                }
-                catch (Exception attemptEx)
-                {
-                    _logger.LogDebug(attemptEx, "Solis web login attempt failed for {Url}", url);
                 }
             }
 
-            _logger.LogWarning("Solis web login: all attempts exhausted. " +
-                "If you can login at soliscloud.com, the web API may have changed. " +
-                "Consider using official API mode instead (get API Key from SolisCloud > Profile > API Management).");
+            _lastWebLoginError = "All login attempts failed:\n" + string.Join("\n", attemptLog.Take(12));
+            _logger.LogWarning("Solis web login exhausted all variants:\n{Log}", _lastWebLoginError);
             return null;
         }
         catch (Exception ex)
         {
+            _lastWebLoginError = $"Exception: {ex.Message}";
             _logger.LogError(ex, "Solis web login failed");
             return null;
         }
