@@ -37,6 +37,12 @@ public class EditModel : PageModel
     public InstallationInput Input { get; set; } = new();
 
     public string CustomerDisplayName { get; set; } = string.Empty;
+
+    // Show "configured" badges in the UI without exposing the actual values
+    public bool HasApiKey { get; set; }
+    public bool HasApiSecret { get; set; }
+    public bool HasUsername { get; set; }
+    public bool HasPassword { get; set; }
     public List<SelectListItem> Partners { get; set; } = new();
 
     public class InstallationInput
@@ -138,11 +144,17 @@ public class EditModel : PageModel
         installation.InverterCount = Input.InverterCount;
         installation.InverterSizeKw = Input.InverterSizeKw;
         installation.SystemType = Input.SystemType;
-        // Form always shows decrypted values; always re-encrypt on save.
-        installation.CloudApiKey = _credProtector.Protect(Input.CloudApiKey);
-        installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret);
-        installation.CloudUsername = _credProtector.Protect(Input.CloudUsername);
-        installation.CloudPassword = _credProtector.Protect(Input.CloudPassword);
+        // Form NEVER displays stored secrets. Leaving blank = "keep existing"
+        // (so users don't accidentally wipe credentials they saved before).
+        // Only overwrite the stored value when the user actually typed something new.
+        if (!string.IsNullOrEmpty(Input.CloudApiKey))
+            installation.CloudApiKey = _credProtector.Protect(Input.CloudApiKey);
+        if (!string.IsNullOrEmpty(Input.CloudApiSecret))
+            installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret);
+        if (!string.IsNullOrEmpty(Input.CloudUsername))
+            installation.CloudUsername = _credProtector.Protect(Input.CloudUsername);
+        if (!string.IsNullOrEmpty(Input.CloudPassword))
+            installation.CloudPassword = _credProtector.Protect(Input.CloudPassword);
         installation.PlantId = Input.PlantId;
         installation.SystemCapacityKw = Input.SystemCapacityKw;
         installation.NumberOfPanels = Input.NumberOfPanels;
@@ -186,6 +198,11 @@ public class EditModel : PageModel
 
     private void MapToInput(Installation installation)
     {
+        HasApiKey    = !string.IsNullOrEmpty(installation.CloudApiKey);
+        HasApiSecret = !string.IsNullOrEmpty(installation.CloudApiSecret);
+        HasUsername  = !string.IsNullOrEmpty(installation.CloudUsername);
+        HasPassword  = !string.IsNullOrEmpty(installation.CloudPassword);
+
         Input = new InstallationInput
         {
             Id = installation.Id,
@@ -203,11 +220,14 @@ public class EditModel : PageModel
             InverterCount = installation.InverterCount,
             InverterSizeKw = installation.InverterSizeKw,
             SystemType = installation.SystemType,
-            // Decrypt for display in the form; user may edit or leave unchanged
-            CloudApiKey = _credProtector.Unprotect(installation.CloudApiKey),
-            CloudApiSecret = _credProtector.Unprotect(installation.CloudApiSecret),
-            CloudUsername = _credProtector.Unprotect(installation.CloudUsername),
-            CloudPassword = _credProtector.Unprotect(installation.CloudPassword),
+            // NEVER echo stored secrets back to the form. The view shows a masked
+            // "configured" badge + empty input with a "(leave blank to keep)"
+            // placeholder. This prevents accidental wipes and doesn't leak
+            // credentials to the HTML source. The has-value flags drive the UI.
+            CloudApiKey = null,
+            CloudApiSecret = null,
+            CloudUsername = null,
+            CloudPassword = null,
             PlantId = installation.PlantId,
             SystemCapacityKw = installation.SystemCapacityKw,
             NumberOfPanels = installation.NumberOfPanels,

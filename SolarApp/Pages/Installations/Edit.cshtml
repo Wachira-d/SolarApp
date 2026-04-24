@@ -106,24 +106,40 @@
                             <input asp-for="Input.PlantId" class="form-control" />
                         </div>
                         <div class="col-md-6">
-                            <label asp-for="Input.CloudApiKey" class="form-label">API Key</label>
-                            <input asp-for="Input.CloudApiKey" class="form-control" />
+                            <label asp-for="Input.CloudApiKey" class="form-label">
+                                API Key
+                                @if (Model.HasApiKey) { <span class="badge bg-success ms-1">Saved</span> }
+                            </label>
+                            <input asp-for="Input.CloudApiKey" class="form-control"
+                                   placeholder="@(Model.HasApiKey ? "•••••••••• (saved — leave blank to keep)" : "Enter API Key")" />
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
-                            <label asp-for="Input.CloudUsername" class="form-label">Cloud Username</label>
-                            <input asp-for="Input.CloudUsername" class="form-control" />
+                            <label asp-for="Input.CloudUsername" class="form-label">
+                                Cloud Username
+                                @if (Model.HasUsername) { <span class="badge bg-success ms-1">Saved</span> }
+                            </label>
+                            <input asp-for="Input.CloudUsername" class="form-control"
+                                   placeholder="@(Model.HasUsername ? "•••••••••• (saved — leave blank to keep)" : "Enter username")" />
                         </div>
                         <div class="col-md-6">
-                            <label asp-for="Input.CloudPassword" class="form-label">Cloud Password</label>
-                            <input asp-for="Input.CloudPassword" class="form-control" type="password" />
+                            <label asp-for="Input.CloudPassword" class="form-label">
+                                Cloud Password
+                                @if (Model.HasPassword) { <span class="badge bg-success ms-1">Saved</span> }
+                            </label>
+                            <input asp-for="Input.CloudPassword" class="form-control" type="password"
+                                   placeholder="@(Model.HasPassword ? "•••••••••• (saved — leave blank to keep)" : "Enter password")" />
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
-                            <label asp-for="Input.CloudApiSecret" class="form-label">API Secret</label>
-                            <input asp-for="Input.CloudApiSecret" class="form-control" type="password" />
+                            <label asp-for="Input.CloudApiSecret" class="form-label">
+                                API Secret
+                                @if (Model.HasApiSecret) { <span class="badge bg-success ms-1">Saved</span> }
+                            </label>
+                            <input asp-for="Input.CloudApiSecret" class="form-control" type="password"
+                                   placeholder="@(Model.HasApiSecret ? "•••••••••• (saved — leave blank to keep)" : "Enter secret")" />
                         </div>
                         <div class="col-md-6 d-flex align-items-end">
                             <button type="button" id="testConnectionBtn" class="btn btn-outline-info">
@@ -217,6 +233,9 @@
             formData.append('username', document.querySelector('[name="Input.CloudUsername"]').value);
             formData.append('password', document.querySelector('[name="Input.CloudPassword"]').value);
             formData.append('plantId', document.querySelector('[name="Input.PlantId"]').value);
+            // Send installation ID so the endpoint can fall back to stored credentials
+            // when fields are left blank (Edit page preserves existing saved values).
+            formData.append('installationId', '@Model.Input.Id');
 
             btn.disabled = true;
             result.innerHTML = '<span class="text-muted"><i class="spinner-border spinner-border-sm"></i> Testing...</span>';

@@ -1078,10 +1078,15 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             }
         }).RequireAuthorization();
 
-        // Test inverter cloud API connection
+        // Test inverter cloud API connection.
+        // If installationId is supplied, missing credential fields are back-filled
+        // from the stored (encrypted) values for that installation. This lets the
+        // Edit page test without the user re-typing saved credentials.
         app.MapPost("/api/test-inverter-connection", async (
             HttpRequest req,
-            Services.InverterApi.IInverterApiAdapterFactory factory) =>
+            Services.InverterApi.IInverterApiAdapterFactory factory,
+            Data.ApplicationDbContext db,
+            Services.Security.ICredentialProtector credProtector) =>
         {
             try
             {
@@ -1089,13 +1094,40 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 if (!Enum.TryParse<Models.Enums.InverterBrand>(form["brand"].ToString(), out var brand))
                     return Results.Json(new { success = false, message = "Invalid brand" });
 
+                var apiKey    = form["apiKey"].ToString();
+                var apiSecret = form["apiSecret"].ToString();
+                var username  = form["username"].ToString();
+                var password  = form["password"].ToString();
+                var plantId   = form["plantId"].ToString();
+
+                // Fill any blank field from the stored installation credentials.
+                // Empty input from the form = "use the saved value" (same as Save).
+                if (int.TryParse(form["installationId"].ToString(), out var installId) && installId > 0)
+                {
+                    var inst = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                        .FirstOrDefaultAsync(db.Installations, i => i.Id == installId);
+                    if (inst != null)
+                    {
+                        if (string.IsNullOrEmpty(apiKey))
+                            apiKey = credProtector.Unprotect(inst.CloudApiKey) ?? "";
+                        if (string.IsNullOrEmpty(apiSecret))
+                            apiSecret = credProtector.Unprotect(inst.CloudApiSecret) ?? "";
+                        if (string.IsNullOrEmpty(username))
+                            username = credProtector.Unprotect(inst.CloudUsername) ?? "";
+                        if (string.IsNullOrEmpty(password))
+                            password = credProtector.Unprotect(inst.CloudPassword) ?? "";
+                        if (string.IsNullOrEmpty(plantId))
+                            plantId = inst.PlantId ?? "";
+                    }
+                }
+
                 var credentials = new Services.InverterApi.Models.ApiCredentials
                 {
-                    ApiKey = form["apiKey"].ToString(),
-                    ApiSecret = form["apiSecret"].ToString(),
-                    Username = form["username"].ToString(),
-                    Password = form["password"].ToString(),
-                    PlantId = form["plantId"].ToString()
+                    ApiKey = apiKey,
+                    ApiSecret = apiSecret,
+                    Username = username,
+                    Password = password,
+                    PlantId = plantId
                 };
 
                 var adapter = factory.GetAdapter(brand);
