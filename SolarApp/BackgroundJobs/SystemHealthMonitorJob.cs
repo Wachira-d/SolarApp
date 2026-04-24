@@ -219,6 +219,9 @@ public class SystemHealthMonitorJob
             .Where(i => i.Status == InstallationStatus.Active)
             .ToListAsync();
 
+        // Look back 7 days to distinguish real outages from "never worked" config errors
+        var sanityWindowStart = DateTime.UtcNow.AddDays(-7);
+
         foreach (var inst in candidates)
         {
             // Skip at night — inverters correctly offline when no sun
@@ -244,8 +247,57 @@ public class SystemHealthMonitorJob
             if (totalCount < 3) continue; // not enough syncs to be sure
             if (offlineCount < totalCount) continue; // inverter reported at least once — skip
 
-            // De-dup: only one daytime-offline alert per installation per day
+            // ─── Sanity check: has this site EVER been online in the last 7 days? ───
+            // If there's no [ONLINE]-tagged log in 7 days, this is NOT a real outage —
+            // it's a configuration error (wrong PlantId, bad credentials, etc.).
+            // Fire a different alert asking the user to verify config instead of
+            // sending someone on-site.
+            var everOnlineRecently = await _context.InverterApiLogs
+                .AnyAsync(l => l.InstallationId == inst.Id
+                               && l.RequestTime >= sanityWindowStart
+                               && l.IsSuccess
+                               && l.ErrorMessage != null
+                               && l.ErrorMessage.Contains("[ONLINE]"));
+
+            // De-dup: only one alert per installation per day for each category
             var sinceToday = DateTime.UtcNow.Date;
+
+            if (!everOnlineRecently)
+            {
+                var existingConfigAlert = await _context.SystemAlerts
+                    .AnyAsync(a => a.InstallationId == inst.Id
+                        && a.Title.StartsWith("Configuration Issue")
+                        && a.OccurredAt >= sinceToday);
+                if (existingConfigAlert) continue;
+
+                _context.SystemAlerts.Add(new SystemAlert
+                {
+                    InstallationId = inst.Id,
+                    AlertType = AlertType.Offline,
+                    Severity = AlertSeverity.Medium,
+                    Title = $"Configuration Issue: {inst.SiteName}",
+                    Message = $"[{inst.InverterBrand}] {inst.SiteName}: " +
+                        "Cloud API is reachable but we have NEVER seen this site report as online in the last 7 days. " +
+                        "This is most likely a configuration problem — NOT an inverter fault. " +
+                        "CHECK THESE FIRST (do not dispatch a technician yet):\n" +
+                        "  1. Plant / Station ID is correct (must match exactly as shown in the vendor's app)\n" +
+                        "  2. API credentials are for the account that OWNS this station\n" +
+                        "  3. Run 'Diagnose' from the Installation page to see available stations on your account",
+                    RootCauseAnalysis = $"⚠ LIKELY CONFIGURATION ERROR\n" +
+                        $"Sanity check: no [ONLINE] log found in the last 7 days.\n" +
+                        $"Observed {offlineCount}/{totalCount} [DEVICE OFFLINE] responses in last {OfflineHoursThreshold}h.\n" +
+                        $"If this were a real inverter fault, we'd expect to have seen it produce at some point in the past week.\n" +
+                        $"Most common cause: PlantId doesn't match any station on the configured Huawei/GoodWe/etc. account.",
+                    OccurredAt = DateTime.UtcNow,
+                    IsNotified = false
+                });
+
+                _logger.LogWarning(
+                    "Installation {Id} ({Site}): config-issue alert (no [ONLINE] in 7 days, {Count}/{Total} offline)",
+                    inst.Id, inst.SiteName, offlineCount, totalCount);
+                continue;
+            }
+
             var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == inst.Id
                     && a.Title.StartsWith("Inverter Silent (Daytime)")
@@ -268,8 +320,8 @@ public class SystemHealthMonitorJob
                           "  • Inverter display for error codes",
                 RootCauseAnalysis = $"⚠ DEVICE OFFLINE DURING DAYTIME\n" +
                     $"Observed {offlineCount} consecutive [DEVICE OFFLINE] API responses in the last {OfflineHoursThreshold} hours. " +
-                    $"The cloud API is healthy, but the inverter stopped reporting data. " +
-                    $"This pattern strongly suggests a physical problem at the site.",
+                    $"This site HAS been online in the past 7 days, so configuration is likely correct. " +
+                    $"The cloud API is healthy, but the inverter stopped reporting data — strongly suggests a physical problem at the site.",
                 OccurredAt = DateTime.UtcNow,
                 IsNotified = false
             });
