@@ -829,6 +829,23 @@ public class Startup
                 var plant = plantResult.Data;
                 var realtime = realtimeResult.Data;
                 var devices = devicesResult.Data ?? new();
+
+                // If the plant lookup said "wrong PlantId" we should FAIL the test —
+                // returning realtime data for a mismatched plant is a lie.
+                if (plantResult.Kind == Services.InverterApi.Models.ApiResultKind.PlantNotFound)
+                {
+                    return Results.Json(new
+                    {
+                        success = false,
+                        kind = plantResult.Kind.ToString(),
+                        message = testResult.Message + " — BUT: " + plantResult.Message,
+                        detail = "Fix the Plant/Station ID in the installation settings, then re-test.",
+                        durationMs = (int)(testResult.Duration + plantResult.Duration).TotalMilliseconds,
+                        plantInfo = (object?)null,
+                        realtime = (object?)null
+                    });
+                }
+
                 var message = testResult.Message
                     + (realtimeResult.Kind == Services.InverterApi.Models.ApiResultKind.DeviceOffline
                         ? " | Note: API works, but device is offline/sleeping."

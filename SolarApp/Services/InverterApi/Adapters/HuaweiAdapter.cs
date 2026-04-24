@@ -87,18 +87,59 @@ public class HuaweiAdapter : IInverterApiAdapter
             var json = await ReadJsonAsync(response);
             if (json == null) return null;
 
-            var station = FindFirstArrayItem(json.Value, "data", "list");
-            if (station == null) return null;
+            if (!json.Value.TryGetProperty("data", out var list)
+                || list.ValueKind != JsonValueKind.Array)
+                return null;
 
+            // Enumerate all stations to find the one matching credentials.PlantId.
+            // If user's PlantId is not in the list, return null with a helpful
+            // error listing available stations so they can fix the config.
+            var stations = list.EnumerateArray()
+                .Where(s => s.ValueKind == JsonValueKind.Object)
+                .ToList();
+            if (stations.Count == 0) return null;
+
+            JsonElement? match = null;
+            if (!string.IsNullOrEmpty(credentials.PlantId))
+            {
+                foreach (var s in stations)
+                {
+                    var code = SafeGetString(s, "stationCode")
+                            ?? SafeGetString(s, "plantCode");
+                    if (string.Equals(code, credentials.PlantId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        match = s;
+                        break;
+                    }
+                }
+            }
+
+            if (match == null)
+            {
+                // User's configured PlantId is not in their account. Surface a list
+                // of valid station codes so they can correct the installation.
+                var available = string.Join(", ", stations.Take(10).Select(s =>
+                    $"{SafeGetString(s, "stationCode") ?? "?"} ({SafeGetString(s, "stationName") ?? "?"})"));
+                _logger.LogWarning(
+                    "Huawei: configured PlantId '{Configured}' not found in account. Available: {Available}",
+                    credentials.PlantId, available);
+                _lastPlantLookupError = string.IsNullOrEmpty(credentials.PlantId)
+                    ? $"PlantId/Station Code is empty. Available stations on this account: {available}"
+                    : $"Configured PlantId '{credentials.PlantId}' is NOT in this Huawei account. " +
+                      $"Use one of: {available}";
+                return null;
+            }
+
+            _lastPlantLookupError = null;
             return new PlantInfo
             {
-                PlantId = SafeGetString(station.Value, "stationCode")
-                         ?? SafeGetString(station.Value, "plantCode") ?? "",
-                PlantName = SafeGetString(station.Value, "stationName")
-                           ?? SafeGetString(station.Value, "plantName") ?? "",
-                CapacityKw = SafeGetDecimal(station.Value, "capacity"),
-                Address = SafeGetString(station.Value, "stationAddr")
-                         ?? SafeGetString(station.Value, "plantAddress")
+                PlantId = SafeGetString(match.Value, "stationCode")
+                         ?? SafeGetString(match.Value, "plantCode") ?? "",
+                PlantName = SafeGetString(match.Value, "stationName")
+                           ?? SafeGetString(match.Value, "plantName") ?? "",
+                CapacityKw = SafeGetDecimal(match.Value, "capacity"),
+                Address = SafeGetString(match.Value, "stationAddr")
+                         ?? SafeGetString(match.Value, "plantAddress")
             };
         }
         catch (Exception ex)
@@ -111,6 +152,7 @@ public class HuaweiAdapter : IInverterApiAdapter
     // Cache error detail from last call for ApiResult translation
     private string? _lastRealtimeError;
     private int _lastRealtimeHttpCode;
+    private string? _lastPlantLookupError;
 
     public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
     {
@@ -650,10 +692,14 @@ public class HuaweiAdapter : IInverterApiAdapter
         {
             var info = await GetPlantInfoAsync(credentials);
             sw.Stop();
-            return info != null
-                ? ApiResult<PlantInfo>.Ok(info, "Plant info retrieved", sw.Elapsed)
-                : ApiResult<PlantInfo>.Fail(ApiResultKind.PlantNotFound,
-                    $"Plant '{credentials.PlantId}' not found on Huawei account.", duration: sw.Elapsed);
+            if (info != null)
+                return ApiResult<PlantInfo>.Ok(info, "Plant info retrieved", sw.Elapsed);
+
+            // Surface the detailed error (which includes the list of valid stations
+            // on the account) instead of a generic "not found".
+            var msg = _lastPlantLookupError
+                ?? $"Plant '{credentials.PlantId}' not found on Huawei account.";
+            return ApiResult<PlantInfo>.Fail(ApiResultKind.PlantNotFound, msg, duration: sw.Elapsed);
         }
         catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<PlantInfo>(ex, "Huawei", sw.Elapsed); }
     }
