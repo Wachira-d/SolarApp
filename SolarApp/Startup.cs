@@ -633,6 +633,29 @@ public class Startup
 
     public static void MapApiEndpoints(WebApplication app)
     {
+        // ─── Health / keep-alive endpoint ───
+        // Safe for anonymous access: returns app status + DB connectivity + last
+        // Hangfire job run. External uptime monitors (UptimeRobot, Windows
+        // Task Scheduler, etc.) ping this to keep the IIS process alive, so
+        // background jobs (LINE alerts, sync) keep running with no users online.
+        app.MapGet("/health", async (Data.ApplicationDbContext db) =>
+        {
+            var info = new
+            {
+                status = "ok",
+                time = DateTime.UtcNow,
+                appUptime = (DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()).ToString(@"d\.hh\:mm\:ss"),
+                version = typeof(Startup).Assembly.GetName().Version?.ToString() ?? "unknown",
+                dbConnected = await db.Database.CanConnectAsync(),
+                installations = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                    .CountAsync(db.Installations)
+            };
+            return Results.Json(info);
+        }).AllowAnonymous();
+
+        // Minimal liveness probe — no DB, no auth. For load balancers.
+        app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
+
         app.MapGet("/api/reports/excel/{installationId:int}", async (
             int installationId, DateTime? from, DateTime? to,
             System.Security.Claims.ClaimsPrincipal user,
