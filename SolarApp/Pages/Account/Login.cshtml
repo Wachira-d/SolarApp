@@ -37,6 +37,36 @@
 
                     <button type="submit" class="btn btn-warning w-100 mb-3">Login</button>
                 </form>
+
+                @if (Model.ExternalProviders.Any())
+                {
+                    <div class="text-center text-muted my-3">
+                        <small>— OR —</small>
+                    </div>
+                    <form method="post" asp-page="/Account/ExternalLogin" asp-route-returnUrl="@Model.ReturnUrl">
+                        @foreach (var provider in Model.ExternalProviders)
+                        {
+                            var (label, icon, colour) = provider.Name switch
+                            {
+                                "Microsoft" => ("Sign in with Microsoft / Office 365", "bi-microsoft", "btn-outline-primary"),
+                                "LINE"      => ("Sign in with LINE", "bi-chat-dots-fill", "btn-success"),
+                                _           => ($"Sign in with {provider.DisplayName}", "bi-box-arrow-in-right", "btn-outline-secondary")
+                            };
+                            <button type="submit" name="provider" value="@provider.Name"
+                                    class="btn @colour w-100 mb-2">
+                                <i class="bi @icon me-2"></i>@label
+                            </button>
+                        }
+                    </form>
+                }
+                else
+                {
+                    <div class="alert alert-light small text-muted mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        External login (Microsoft/LINE) is not configured. Ask your admin to fill in
+                        <code>Authentication:Microsoft</code> or <code>Authentication:LINE</code> in appsettings.
+                    </div>
+                }
             </div>
         </div>
     </div>

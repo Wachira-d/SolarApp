@@ -57,6 +57,66 @@ public class Startup
             options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax; // Lax allows top-level nav from email links
         });
 
+        // ─── External login (Microsoft/Office 365 + LINE) ───
+        var authBuilder = builder.Services.AddAuthentication();
+
+        var msClientId = builder.Configuration["Authentication:Microsoft:ClientId"];
+        var msClientSecret = builder.Configuration["Authentication:Microsoft:ClientSecret"];
+        if (!string.IsNullOrWhiteSpace(msClientId) && !string.IsNullOrWhiteSpace(msClientSecret))
+        {
+            authBuilder.AddMicrosoftAccount("Microsoft", options =>
+            {
+                options.ClientId = msClientId;
+                options.ClientSecret = msClientSecret;
+                options.CallbackPath = "/signin-microsoft";
+                options.SaveTokens = true;
+                // Request profile + email scopes so we can create a local user
+                options.Scope.Add("User.Read");
+            });
+        }
+
+        var lineClientId = builder.Configuration["Authentication:LINE:ClientId"];
+        var lineClientSecret = builder.Configuration["Authentication:LINE:ClientSecret"];
+        if (!string.IsNullOrWhiteSpace(lineClientId) && !string.IsNullOrWhiteSpace(lineClientSecret))
+        {
+            authBuilder.AddOAuth("LINE", "LINE", options =>
+            {
+                options.ClientId = lineClientId;
+                options.ClientSecret = lineClientSecret;
+                options.CallbackPath = "/signin-line";
+                options.AuthorizationEndpoint = "https://access.line.me/oauth2/v2.1/authorize";
+                options.TokenEndpoint = "https://api.line.me/oauth2/v2.1/token";
+                options.UserInformationEndpoint = "https://api.line.me/v2/profile";
+                options.SaveTokens = true;
+                options.Scope.Add("profile");
+                options.Scope.Add("openid");
+                // Only add 'email' if the LINE Login channel has email permission enabled
+                // options.Scope.Add("email");
+
+                options.ClaimActions.MapJsonKey(System.Security.Claims.ClaimTypes.NameIdentifier, "userId");
+                options.ClaimActions.MapJsonKey(System.Security.Claims.ClaimTypes.Name, "displayName");
+                options.ClaimActions.MapJsonKey("urn:line:picture", "pictureUrl");
+
+                options.Events = new Microsoft.AspNetCore.Authentication.OAuth.OAuthEvents
+                {
+                    OnCreatingTicket = async context =>
+                    {
+                        var request = new HttpRequestMessage(HttpMethod.Get, options.UserInformationEndpoint);
+                        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", context.AccessToken);
+
+                        using var response = await context.Backchannel.SendAsync(request,
+                            System.Net.Http.HttpCompletionOption.ResponseHeadersRead, context.HttpContext.RequestAborted);
+                        response.EnsureSuccessStatusCode();
+
+                        using var payload = System.Text.Json.JsonDocument.Parse(
+                            await response.Content.ReadAsStringAsync());
+                        context.RunClaimActions(payload.RootElement);
+                    }
+                };
+            });
+        }
+
         builder.Services.AddAntiforgery(options =>
         {
             options.Cookie.HttpOnly = true;

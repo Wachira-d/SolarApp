@@ -20,6 +20,9 @@ public class LoginModel : PageModel
 
     public string? ReturnUrl { get; set; }
 
+    public IList<Microsoft.AspNetCore.Authentication.AuthenticationScheme> ExternalProviders { get; set; } =
+        new List<Microsoft.AspNetCore.Authentication.AuthenticationScheme>();
+
     public class InputModel
     {
         [Required(ErrorMessage = "Email is required")]
@@ -33,9 +36,11 @@ public class LoginModel : PageModel
         public bool RememberMe { get; set; }
     }
 
-    public void OnGet(string? returnUrl = null)
+    public async Task OnGetAsync(string? returnUrl = null)
     {
         ReturnUrl = returnUrl ?? Url.Content("~/");
+        var schemes = await _signInManager.GetExternalAuthenticationSchemesAsync();
+        ExternalProviders = schemes.ToList();
     }
 
     public async Task<IActionResult> OnPostAsync(string? returnUrl = null)
@@ -44,6 +49,9 @@ public class LoginModel : PageModel
         // Open-redirect guard
         if (!Url.IsLocalUrl(returnUrl) || returnUrl.StartsWith("//") || returnUrl.Contains(':'))
             returnUrl = Url.Content("~/");
+
+        // Re-populate providers in case we re-render on error
+        ExternalProviders = (await _signInManager.GetExternalAuthenticationSchemesAsync()).ToList();
 
         if (!ModelState.IsValid)
             return Page();
