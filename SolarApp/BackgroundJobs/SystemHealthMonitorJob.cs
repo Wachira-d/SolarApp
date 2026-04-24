@@ -58,6 +58,7 @@ public class SystemHealthMonitorJob
     {
         var offlineThreshold = _configuration.GetValue("InverterApis:OfflineThresholdMinutes", 15);
         var threshold = DateTime.UtcNow.AddMinutes(-offlineThreshold);
+        var minFailedCalls = _configuration.GetValue("InverterApis:MinFailedCallsForAlert", 2);
 
         var offlineInstallations = await _context.Installations
             .Where(i => i.Status == InstallationStatus.Active
@@ -68,6 +69,22 @@ public class SystemHealthMonitorJob
         foreach (var installation in offlineInstallations)
         {
             installation.Status = InstallationStatus.Offline;
+
+            // Gate alert by consecutive API failures in recent window (noise reduction).
+            // A single failed call shouldn't page on-call — wait for sustained failure.
+            var recentFailures = await _context.InverterApiLogs
+                .Where(l => l.InstallationId == installation.Id
+                            && !l.IsSuccess
+                            && l.RequestTime >= threshold)
+                .CountAsync();
+
+            if (recentFailures < minFailedCalls)
+            {
+                _logger.LogInformation(
+                    "Installation {Id} offline but only {Count} recent failure(s) (< {Min}) — skipping alert",
+                    installation.Id, recentFailures, minFailedCalls);
+                continue;
+            }
 
             var recentLogs = await _context.InverterApiLogs
                 .Where(l => l.InstallationId == installation.Id && !l.IsSuccess)
@@ -82,46 +99,84 @@ public class SystemHealthMonitorJob
                     && a.AlertType == AlertType.Offline
                     && a.ResolvedAt == null);
 
-            if (!existingAlert)
+            if (existingAlert) continue;
+
+            // ─── Nighttime detection (solar-specific quiet hours) ───
+            // If it's nighttime at the installation's location, device offline is
+            // EXPECTED — inverters shut down with no sun. Downgrade severity and
+            // avoid LINE pager spam at 3 AM.
+            var isNighttime = IsLikelyNighttime(installation);
+
+            var offlineDuration = installation.LastOnlineAt.HasValue
+                ? DateTime.UtcNow - installation.LastOnlineAt.Value
+                : (TimeSpan?)null;
+            var durationStr = offlineDuration.HasValue
+                ? offlineDuration.Value.TotalHours >= 1
+                    ? $"{offlineDuration.Value.TotalHours:0.0} hours"
+                    : $"{offlineDuration.Value.TotalMinutes:0} minutes"
+                : "unknown duration";
+
+            var isApiIssue = rootCause.Contains("API CONNECTION") || rootCause.Contains("TIMEOUT")
+                || rootCause.Contains("NETWORK") || rootCause.Contains("AUTHENTICATION")
+                || rootCause.Contains("RATE LIMITED") || rootCause.Contains("CLOUD SERVER");
+
+            // ─── Severity determination ───
+            // API connectivity issues: Critical (our infrastructure problem)
+            // Device offline during daytime: Critical (real fault)
+            // Device offline during nighttime: Low (expected, no-action)
+            // Short offline (< 1h) during night: skip entirely to avoid noise
+            AlertSeverity severity;
+            if (isApiIssue)
+                severity = AlertSeverity.Critical;
+            else if (isNighttime)
             {
-                var offlineDuration = installation.LastOnlineAt.HasValue
-                    ? DateTime.UtcNow - installation.LastOnlineAt.Value
-                    : (TimeSpan?)null;
-                var durationStr = offlineDuration.HasValue
-                    ? offlineDuration.Value.TotalHours >= 1
-                        ? $"{offlineDuration.Value.TotalHours:0.0} hours"
-                        : $"{offlineDuration.Value.TotalMinutes:0} minutes"
-                    : "unknown duration";
-
-                var isApiIssue = rootCause.Contains("API CONNECTION") || rootCause.Contains("TIMEOUT")
-                    || rootCause.Contains("NETWORK") || rootCause.Contains("AUTHENTICATION")
-                    || rootCause.Contains("RATE LIMITED") || rootCause.Contains("CLOUD SERVER");
-
-                _context.SystemAlerts.Add(new SystemAlert
+                if (offlineDuration.HasValue && offlineDuration.Value.TotalHours < 2)
                 {
-                    InstallationId = installation.Id,
-                    AlertType = AlertType.Offline,
-                    Severity = AlertSeverity.Critical,
-                    Title = isApiIssue
-                        ? $"API Connection Lost: {installation.SiteName}"
-                        : $"Device Offline: {installation.SiteName}",
-                    Message = isApiIssue
-                        ? $"[{installation.InverterBrand}] {installation.SiteName}: " +
-                          $"Cannot reach cloud API for {durationStr}. " +
-                          "The inverter may still be working — this is a data connection issue, not necessarily an inverter problem. " +
-                          $"Last successful contact: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}."
-                        : $"[{installation.InverterBrand}] {installation.SiteName}: " +
-                          $"Inverter reports offline for {durationStr}. " +
-                          "API connection is working — the inverter itself is not reporting data. " +
-                          $"Last online: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}. " +
-                          "If nighttime, this is normal. If daytime, check inverter hardware and WiFi.",
-                    RootCauseAnalysis = rootCause,
-                    IsNotified = false
-                });
-
-                _logger.LogWarning("Installation {Id} ({Site}) marked as offline",
-                    installation.Id, installation.SiteName);
+                    _logger.LogInformation(
+                        "Installation {Id} offline at night ({Dur}) — suppressing alert until morning check",
+                        installation.Id, durationStr);
+                    continue;
+                }
+                severity = AlertSeverity.Low; // log for the record, but no page
             }
+            else
+            {
+                // Daytime device offline — escalate by duration
+                severity = offlineDuration.HasValue && offlineDuration.Value.TotalHours >= 1
+                    ? AlertSeverity.Critical
+                    : AlertSeverity.High;
+            }
+
+            var nightNote = isNighttime ? " (NIGHTTIME — normal if sunset passed)" : "";
+
+            _context.SystemAlerts.Add(new SystemAlert
+            {
+                InstallationId = installation.Id,
+                AlertType = AlertType.Offline,
+                Severity = severity,
+                Title = isApiIssue
+                    ? $"API Connection Lost: {installation.SiteName}"
+                    : $"Device Offline: {installation.SiteName}{nightNote}",
+                Message = isApiIssue
+                    ? $"[{installation.InverterBrand}] {installation.SiteName}: " +
+                      $"Cannot reach cloud API for {durationStr}. " +
+                      "The inverter may still be working — this is a data connection issue, not necessarily an inverter problem. " +
+                      $"Last successful contact: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}."
+                    : $"[{installation.InverterBrand}] {installation.SiteName}: " +
+                      $"Inverter reports offline for {durationStr}. " +
+                      "API connection is working — the inverter itself is not reporting data. " +
+                      $"Last online: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}. " +
+                      (isNighttime
+                        ? "It's currently nighttime at the site — this is normal when solar production stops. " +
+                          "Will re-check at sunrise; a separate alert will fire if still offline then."
+                        : "This is DAYTIME at the site — check inverter hardware, WiFi, and DC isolator."),
+                RootCauseAnalysis = rootCause,
+                IsNotified = false
+            });
+
+            _logger.LogWarning(
+                "Installation {Id} ({Site}) marked offline — severity {Sev}, night={Night}, failures={Count}",
+                installation.Id, installation.SiteName, severity, isNighttime, recentFailures);
         }
 
         // Auto-resolve offline alerts for installations that came back online
@@ -322,6 +377,72 @@ public class SystemHealthMonitorJob
         await _context.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Approximates whether it is currently night at the installation's location.
+    /// Uses GPS (lat/lng) if present via a NOAA-style sunrise/sunset approximation;
+    /// otherwise falls back to local-time 19:00-06:00 (Thailand default TZ).
+    /// Solar inverters stop reporting when there is no DC, so night-time "offline"
+    /// is normal and must NOT page the operator at 3 AM.
+    /// </summary>
+    private static bool IsLikelyNighttime(Installation inst)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        if (inst.Latitude.HasValue && inst.Longitude.HasValue
+            && (Math.Abs(inst.Latitude.Value) > 0.0001 || Math.Abs(inst.Longitude.Value) > 0.0001))
+        {
+            try
+            {
+                var (sunriseUtc, sunsetUtc) = ApproximateSunriseSunsetUtc(
+                    nowUtc.Date, inst.Latitude.Value, inst.Longitude.Value);
+                // 30-min buffer before sunrise / after sunset — inverters stop producing
+                // in low-light conditions before the exact astronomical sunset
+                return nowUtc < sunriseUtc.AddMinutes(30)
+                       || nowUtc > sunsetUtc.AddMinutes(-30);
+            }
+            catch { /* fall through to time-based heuristic */ }
+        }
+
+        // Fallback: Thailand UTC+7 (most installations). 19:00-06:00 local = 12:00-23:00 UTC
+        var thHour = (nowUtc.Hour + 7) % 24;
+        return thHour >= 19 || thHour < 6;
+    }
+
+    /// <summary>
+    /// NOAA Solar Calculator simplified — returns UTC sunrise/sunset for given date
+    /// and lat/lng. Accurate within ~5 minutes for most locations.
+    /// </summary>
+    private static (DateTime Sunrise, DateTime Sunset) ApproximateSunriseSunsetUtc(
+        DateTime dateUtc, double lat, double lng)
+    {
+        var dayOfYear = dateUtc.DayOfYear;
+        // Solar declination (radians)
+        var gamma = 2.0 * Math.PI / 365.0 * (dayOfYear - 1);
+        var declination = 0.006918
+            - 0.399912 * Math.Cos(gamma)
+            + 0.070257 * Math.Sin(gamma)
+            - 0.006758 * Math.Cos(2 * gamma)
+            + 0.000907 * Math.Sin(2 * gamma)
+            - 0.002697 * Math.Cos(3 * gamma)
+            + 0.001480 * Math.Sin(3 * gamma);
+
+        var latRad = lat * Math.PI / 180.0;
+        var cosH = (Math.Cos(90.833 * Math.PI / 180.0)
+                    - Math.Sin(latRad) * Math.Sin(declination))
+                   / (Math.Cos(latRad) * Math.Cos(declination));
+
+        // Polar day/night edge cases — treat as daytime for safety
+        if (cosH < -1 || cosH > 1)
+            return (dateUtc.AddHours(6), dateUtc.AddHours(18));
+
+        var hourAngle = Math.Acos(cosH) * 180.0 / Math.PI;
+        var solarNoonUtc = 12.0 - lng / 15.0;
+        var sunriseUtcHours = solarNoonUtc - hourAngle / 15.0;
+        var sunsetUtcHours = solarNoonUtc + hourAngle / 15.0;
+
+        return (dateUtc.AddHours(sunriseUtcHours), dateUtc.AddHours(sunsetUtcHours));
+    }
+
     private static string AnalyzeRootCause(List<InverterApiLog> recentLogs)
     {
         if (!recentLogs.Any())
@@ -405,6 +526,41 @@ public class SystemHealthMonitorJob
                    "The cloud platform returned an internal error (5xx).\n" +
                    "This is the vendor's issue, not SolarApp or the inverter.\n" +
                    "ACTION: Wait and retry. Check vendor's status page for outage announcements.\n" +
+                   $"Latest: {latestError}";
+
+        // ─── Generic "no data" — most commonly means device offline ───
+        // e.g. GoodWe / Solis returns empty response when inverter hasn't reported
+        if (errors.Any(e => e.Contains("No data", StringComparison.OrdinalIgnoreCase)
+                            || e.Contains("returned no data", StringComparison.OrdinalIgnoreCase)
+                            || e.Contains("empty response", StringComparison.OrdinalIgnoreCase)))
+            return "⚠ DEVICE OFFLINE (likely)\n" +
+                   "The cloud API responded successfully but returned no inverter data.\n" +
+                   "This usually means the inverter itself is offline.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • Nighttime / no solar production (normal)\n" +
+                   "  • Inverter lost WiFi/LAN connection to its cloud\n" +
+                   "  • Inverter / data logger powered off\n" +
+                   "ACTION: If daytime, check inverter WiFi + DC isolator.\n" +
+                   $"Latest error: {latestError}\n" +
+                   $"Failed at: {latestTime:dd/MM/yyyy HH:mm:ss}";
+
+        // ─── Rate-limited specific: Huawei failCode=407 ───
+        if (errors.Any(e => e.Contains("failCode=407") || e.Contains("Rate limit")))
+            return "✕ RATE LIMITED (Huawei 1 req/min)\n" +
+                   "The cloud API is blocking requests due to too many calls.\n" +
+                   "ACTION: Increase sync interval to at least 5 minutes in Admin > Sync Schedule.\n" +
+                   $"Latest: {latestError}";
+
+        // ─── PlantId not found: e.g. Huawei failCode=20002 ───
+        if (errors.Any(e => e.Contains("failCode=20002") || e.Contains("PlantNotFound")
+                            || e.Contains("not found", StringComparison.OrdinalIgnoreCase)))
+            return "✕ PLANT / STATION NOT FOUND\n" +
+                   "The configured Plant ID / Station Code does not exist on this cloud account.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • Typo in the Plant ID\n" +
+                   "  • Site was transferred to a different account\n" +
+                   "  • Wrong credentials (different account owner)\n" +
+                   $"ACTION: Verify Plant ID in vendor portal, then update it in Installation settings.\n" +
                    $"Latest: {latestError}";
 
         return $"✕ UNKNOWN ISSUE\n" +
