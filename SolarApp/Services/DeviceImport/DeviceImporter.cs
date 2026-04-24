@@ -69,60 +69,62 @@ public class DeviceImporter : IDeviceImporter
 
         // 1. Try to get plant-level info (capacity, install date, location)
         string? installationNote = null;
-        try
+        var plantResult = await adapter.GetPlantInfoResultAsync(credentials, ct);
+        if (plantResult.IsSuccess && plantResult.Data is { } plant)
         {
-            var plant = await adapter.GetPlantInfoAsync(credentials);
-            if (plant != null)
+            bool changed = false;
+            if (plant.CapacityKw > 0 && installation.SystemCapacityKw != plant.CapacityKw)
             {
-                bool changed = false;
-                if (plant.CapacityKw > 0 && installation.SystemCapacityKw != plant.CapacityKw)
-                {
-                    installation.SystemCapacityKw = plant.CapacityKw;
-                    changed = true;
-                }
-                if (!string.IsNullOrWhiteSpace(plant.Address)
-                    && string.IsNullOrWhiteSpace(installation.Address))
-                {
-                    installation.Address = plant.Address;
-                    changed = true;
-                }
-                if (plant.InstallDate.HasValue && !installation.CommissionDate.HasValue)
-                {
-                    installation.CommissionDate = plant.InstallDate;
-                    changed = true;
-                }
-                if (changed)
-                {
-                    installation.UpdatedAt = DateTime.UtcNow;
-                    installationNote = "Installation metadata updated from cloud (capacity/address/commission date).";
-                }
+                installation.SystemCapacityKw = plant.CapacityKw;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(plant.Address)
+                && string.IsNullOrWhiteSpace(installation.Address))
+            {
+                installation.Address = plant.Address;
+                changed = true;
+            }
+            if (plant.InstallDate.HasValue && !installation.CommissionDate.HasValue)
+            {
+                installation.CommissionDate = plant.InstallDate;
+                changed = true;
+            }
+            if (plant.Latitude.HasValue && !installation.Latitude.HasValue)
+            {
+                installation.Latitude = plant.Latitude.Value;
+                changed = true;
+            }
+            if (plant.Longitude.HasValue && !installation.Longitude.HasValue)
+            {
+                installation.Longitude = plant.Longitude.Value;
+                changed = true;
+            }
+            if (changed)
+            {
+                installation.UpdatedAt = DateTime.UtcNow;
+                installationNote = "Installation metadata updated from cloud (capacity/address/commission date/GPS).";
             }
         }
-        catch (Exception ex)
+        else if (plantResult.IsApiFailure)
         {
-            _logger.LogWarning(ex, "DeviceImporter: GetPlantInfoAsync failed for installation {Id}", installationId);
+            _logger.LogWarning("DeviceImporter: GetPlantInfo for installation {Id} failed: {Kind} — {Msg}",
+                installationId, plantResult.Kind, plantResult.Message);
         }
 
         // 2. Fetch device list and upsert Equipment records
-        List<DeviceInfo> devices;
-        try
-        {
-            devices = await adapter.GetDevicesAsync(credentials);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "DeviceImporter: GetDevicesAsync failed for installation {Id}", installationId);
-            await _context.SaveChangesAsync(ct);
-            return new DeviceImportResult(false, $"Device list fetch failed: {ex.Message}",
-                0, 0, 0, installationNote);
-        }
+        var devResult = await adapter.GetDevicesResultAsync(credentials, ct);
+        var devices = devResult.Data ?? new List<DeviceInfo>();
 
         if (!devices.Any())
         {
             await _context.SaveChangesAsync(ct);
-            return new DeviceImportResult(true,
-                "Plant info updated but no devices returned. API might not expose device list for this plant.",
-                0, 0, 0, installationNote);
+            var reason = devResult.IsApiFailure
+                ? $"[{devResult.Kind}] {devResult.Message}"
+                : "API returned no devices for this plant. Possible causes: " +
+                  "wrong Plant ID, no device-level access for your Northbound account, or plant has no inverters.";
+            _logger.LogWarning("DeviceImporter: zero devices for installation {Id} ({Brand}). Reason: {Reason}",
+                installationId, installation.InverterBrand, reason);
+            return new DeviceImportResult(false, reason, 0, 0, 0, installationNote);
         }
 
         int created = 0, updated = 0;

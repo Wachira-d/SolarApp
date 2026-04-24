@@ -544,25 +544,69 @@ public class HuaweiAdapter : IInverterApiAdapter
 
     public async Task<List<DeviceInfo>> GetDevicesAsync(ApiCredentials credentials)
     {
+        _lastDevicesError = null;
         var devices = new List<DeviceInfo>();
-        if (string.IsNullOrEmpty(credentials.PlantId)) return devices;
+        if (string.IsNullOrEmpty(credentials.PlantId))
+        {
+            _lastDevicesError = "PlantId is empty";
+            return devices;
+        }
 
         try
         {
             var client = _httpClientFactory.CreateClient();
             var token = await LoginAsync(client, credentials);
-            if (token == null) return devices;
+            if (token == null)
+            {
+                _lastDevicesError = "Huawei login failed (getDevList needs fresh token)";
+                return devices;
+            }
+
+            // Normalize station code (users often paste '56946102', Huawei wants 'NE=56946102')
+            var stationCode = credentials.PlantId!.Trim();
+            if (!stationCode.StartsWith("NE=", StringComparison.OrdinalIgnoreCase))
+                stationCode = "NE=" + stationCode;
 
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getDevList",
-                new { stationCodes = credentials.PlantId });
-            if (!response.IsSuccessStatusCode) return devices;
+                new { stationCodes = stationCode });
 
-            var json = await ReadJsonAsync(response);
-            if (json == null) return devices;
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _lastDevicesError = $"/getDevList HTTP {(int)response.StatusCode}: {Truncate(body, 300)}";
+                return devices;
+            }
 
-            if (!json.Value.TryGetProperty("data", out var dataArr)
-                || dataArr.ValueKind != JsonValueKind.Array) return devices;
+            JsonElement json;
+            try { json = JsonDocument.Parse(body).RootElement; }
+            catch (Exception je)
+            {
+                _lastDevicesError = $"/getDevList returned non-JSON: {je.Message}";
+                return devices;
+            }
+
+            // Check for Huawei failCode error in body even when HTTP 200
+            var failCode = SafeGetInt(json, "failCode");
+            if (failCode.HasValue && failCode.Value != 0)
+            {
+                var errMsg = SafeGetString(json, "message") ?? SafeGetString(json, "data") ?? "Unknown";
+                _lastDevicesError = failCode.Value switch
+                {
+                    407 => $"Rate limited (failCode=407). Retry in 1 min.",
+                    305 or 401 => $"Auth expired (failCode={failCode}). Token cache will refresh.",
+                    20002 => $"Station '{stationCode}' not accessible by this Northbound account.",
+                    _ => $"Huawei failCode={failCode}: {errMsg}"
+                };
+                return devices;
+            }
+
+            if (!json.TryGetProperty("data", out var dataArr)
+                || dataArr.ValueKind != JsonValueKind.Array)
+            {
+                _lastDevicesError = $"/getDevList: no data array. Body: {Truncate(body, 300)}";
+                return devices;
+            }
 
             foreach (var item in dataArr.EnumerateArray())
             {
@@ -570,13 +614,17 @@ public class HuaweiAdapter : IInverterApiAdapter
                 {
                     if (item.ValueKind != JsonValueKind.Object) continue;
 
+                    var devTypeId = SafeGetInt(item, "devTypeId") ?? 0;
                     devices.Add(new DeviceInfo
                     {
                         DeviceId = SafeGetString(item, "id") ?? SafeGetString(item, "devDn") ?? "",
                         DeviceName = SafeGetString(item, "devName") ?? "",
-                        DeviceType = SafeGetString(item, "devTypeId") ?? "",
+                        DeviceType = MapHuaweiDevType(devTypeId),
+                        Model = SafeGetString(item, "invType") ?? SafeGetString(item, "model"),
                         SerialNumber = SafeGetString(item, "esnCode"),
-                        IsOnline = SafeGetInt(item, "devStatus") == 1
+                        FirmwareVersion = SafeGetString(item, "softwareVersion"),
+                        IsOnline = SafeGetInt(item, "devStatus") == 1,
+                        RatedPowerKw = SafeGetNullableDecimal(item, "invRatedPower")
                     });
                 }
                 catch (Exception itemEx)
@@ -584,12 +632,48 @@ public class HuaweiAdapter : IInverterApiAdapter
                     _logger.LogWarning(itemEx, "Huawei: skipping malformed device item");
                 }
             }
+
+            if (devices.Count == 0)
+            {
+                _lastDevicesError = $"/getDevList returned empty array. Station '{stationCode}' may have no devices registered, " +
+                    "or your Northbound account lacks device-level permission. Body: " + Truncate(body, 300);
+            }
         }
         catch (Exception ex)
         {
+            _lastDevicesError = $"{ex.GetType().Name}: {ex.Message}";
             _logger.LogError(ex, "Huawei GetDevices failed");
         }
         return devices;
+    }
+
+    private string? _lastDevicesError;
+    internal string? LastDevicesError => _lastDevicesError;
+
+    private static string MapHuaweiDevType(int devTypeId) => devTypeId switch
+    {
+        1 => "Inverter",
+        10 => "Smart Power Sensor (Meter)",
+        16 => "EMI / Datalogger",
+        17 => "Smart Logger",
+        39 => "Battery",
+        41 => "PCS",
+        62 => "Battery Pack",
+        _ => $"Device (type {devTypeId})"
+    };
+
+    private static decimal? SafeGetNullableDecimal(JsonElement el, string prop)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Null) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.String
+            && decimal.TryParse(v.GetString(),
+                System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var n2)) return n2;
+        return null;
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -956,7 +1040,17 @@ public class HuaweiAdapter : IInverterApiAdapter
         {
             var list = await GetDevicesAsync(credentials);
             sw.Stop();
-            return ApiResult<List<DeviceInfo>>.Ok(list, $"{list.Count} device(s) fetched", sw.Elapsed);
+            if (list.Count > 0)
+                return ApiResult<List<DeviceInfo>>.Ok(list, $"{list.Count} device(s) fetched", sw.Elapsed);
+            // Surface the detailed reason when empty so callers can tell the user
+            var detail = _lastDevicesError ?? "Empty device list (reason unknown)";
+            var kind = detail.Contains("Rate limited") ? ApiResultKind.RateLimited
+                     : detail.Contains("Auth expired") || detail.Contains("login failed", StringComparison.OrdinalIgnoreCase)
+                        ? ApiResultKind.AuthenticationFailed
+                     : detail.Contains("not accessible") ? ApiResultKind.PlantNotFound
+                     : detail.Contains("no device") || detail.Contains("no devices") ? ApiResultKind.DeviceOffline
+                     : ApiResultKind.CloudServerError;
+            return ApiResult<List<DeviceInfo>>.Fail(kind, detail, duration: sw.Elapsed);
         }
         catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<DeviceInfo>>(ex, "Huawei", sw.Elapsed); }
     }
