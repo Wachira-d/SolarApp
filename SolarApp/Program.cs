@@ -75,6 +75,12 @@ try
     SolarApp.Startup.ConfigureServices(builder);
     Log("Services OK");
 
+    // Report which external auth providers were actually registered
+    foreach (var kv in SolarApp.Startup.AuthProviderStatus)
+    {
+        Log($"  Auth provider {kv.Key}: {(kv.Value ? "REGISTERED" : "not configured (skipped)")}");
+    }
+
     // ── Hangfire (optional) ──
     var hangfireOk = false;
     try

@@ -14,6 +14,15 @@ namespace SolarApp;
 
 public class Startup
 {
+    /// <summary>
+    /// Which external auth providers were registered at startup and therefore
+    /// have active callback handlers (/signin-microsoft, /signin-line).
+    /// Read by Program.cs after ConfigureServices and logged to startup log.
+    /// </summary>
+    public static IReadOnlyDictionary<string, bool> AuthProviderStatus =>
+        _authProviderStatus ?? new Dictionary<string, bool>();
+    private static Dictionary<string, bool>? _authProviderStatus;
+
     // ══════════════════════════════════════════════════════════════
     //  SERVICE REGISTRATION
     // ══════════════════════════════════════════════════════════════
@@ -67,6 +76,9 @@ public class Startup
         var (msClientId, msClientSecret, lineClientId, lineClientSecret) =
             ReadExternalAuthConfig(builder);
 
+        var msRegistered = false;
+        var lineRegistered = false;
+
         if (!string.IsNullOrWhiteSpace(msClientId) && !string.IsNullOrWhiteSpace(msClientSecret))
         {
             authBuilder.AddMicrosoftAccount("Microsoft", options =>
@@ -78,6 +90,7 @@ public class Startup
                 // Request profile + email scopes so we can create a local user
                 options.Scope.Add("User.Read");
             });
+            msRegistered = true;
         }
 
         if (!string.IsNullOrWhiteSpace(lineClientId) && !string.IsNullOrWhiteSpace(lineClientSecret))
@@ -118,7 +131,16 @@ public class Startup
                     }
                 };
             });
+            lineRegistered = true;
         }
+
+        // Expose registration status so startup logs can tell the operator whether
+        // /signin-microsoft and /signin-line callbacks are active.
+        _authProviderStatus = new Dictionary<string, bool>
+        {
+            ["Microsoft (/signin-microsoft)"] = msRegistered,
+            ["LINE (/signin-line)"] = lineRegistered
+        };
 
         builder.Services.AddAntiforgery(options =>
         {
