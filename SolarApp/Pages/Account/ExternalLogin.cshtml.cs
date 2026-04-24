@@ -27,11 +27,15 @@ public class ExternalLoginModel : PageModel
     }
 
     [TempData] public string? ErrorMessage { get; set; }
+    [TempData] public string? StatusMessage { get; set; }
 
     /// <summary>
-    /// POST /Account/ExternalLogin?provider=Microsoft — kicks off the OAuth challenge.
-    /// The browser is redirected to the provider (Microsoft/LINE), which redirects back
-    /// to /signin-{provider}, which the auth middleware then funnels to OnGetCallback.
+    /// POST /Account/ExternalLogin?provider=Microsoft|LINE
+    /// Two modes:
+    ///   - Unauthenticated: kicks off OAuth for SIGN-IN (callback will sign in
+    ///     existing user or auto-create if provider is Microsoft).
+    ///   - Authenticated: kicks off OAuth for LINKING (callback attaches the
+    ///     external identity to the current user; no new user is created).
     /// </summary>
     public IActionResult OnPost(string provider, string? returnUrl = null)
     {
@@ -39,7 +43,6 @@ public class ExternalLoginModel : PageModel
             (provider != "Microsoft" && provider != "LINE"))
             return BadRequest("Unsupported provider");
 
-        // returnUrl sanitation
         if (!string.IsNullOrEmpty(returnUrl) && !Url.IsLocalUrl(returnUrl))
             returnUrl = "/";
 
@@ -67,26 +70,82 @@ public class ExternalLoginModel : PageModel
             return RedirectToPage("./Login");
         }
 
-        // Try sign-in with existing external login
-        var result = await _signInManager.ExternalLoginSignInAsync(
-            info.LoginProvider, info.ProviderKey, isPersistent: false, bypassTwoFactor: true);
-        if (result.Succeeded)
+        // ─── BRANCH A: User is already signed in → LINKING flow ───
+        if (User.Identity?.IsAuthenticated == true)
         {
-            _logger.LogInformation("{Provider} user signed in via external login",
+            var currentUser = await _userManager.GetUserAsync(User);
+            if (currentUser == null)
+            {
+                ErrorMessage = "Session lost. Please sign in again.";
+                return RedirectToPage("./Login");
+            }
+
+            // Ensure this external identity isn't already linked to a different user
+            var ownerOfExternal = await _userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
+            if (ownerOfExternal != null && ownerOfExternal.Id != currentUser.Id)
+            {
+                ErrorMessage = $"This {info.LoginProvider} account is already linked to another SolarApp user. " +
+                    "If you believe this is a mistake, ask an admin to unlink it first.";
+                return RedirectToPage("./Manage");
+            }
+
+            var addResult = await _userManager.AddLoginAsync(currentUser, info);
+            if (!addResult.Succeeded)
+            {
+                ErrorMessage = "Could not link: " +
+                    string.Join(", ", addResult.Errors.Select(e => e.Description));
+                return RedirectToPage("./Manage");
+            }
+
+            // If LINE, also store the LINE userId on the ApplicationUser
+            // so we can send LINE notifications.
+            if (info.LoginProvider == "LINE" && string.IsNullOrEmpty(currentUser.LineUserId))
+            {
+                currentUser.LineUserId = info.ProviderKey;
+                await _userManager.UpdateAsync(currentUser);
+            }
+
+            await _signInManager.UpdateExternalAuthenticationTokensAsync(info);
+            await _signInManager.RefreshSignInAsync(currentUser);
+            _logger.LogInformation("User {UserId} linked {Provider} account", currentUser.Id, info.LoginProvider);
+
+            StatusMessage = $"{info.LoginProvider} account linked successfully.";
+            return RedirectToPage("./Manage");
+        }
+
+        // ─── BRANCH B: Not signed in → SIGN-IN flow ───
+
+        // Existing link? Just sign in.
+        var signInResult = await _signInManager.ExternalLoginSignInAsync(
+            info.LoginProvider, info.ProviderKey, isPersistent: false, bypassTwoFactor: true);
+        if (signInResult.Succeeded)
+        {
+            _logger.LogInformation("{Provider} user signed in via existing external login",
                 info.LoginProvider);
             return LocalRedirect(returnUrl);
         }
-        if (result.IsLockedOut)
+        if (signInResult.IsLockedOut)
         {
             ErrorMessage = "Account locked. Try again in 15 minutes.";
             return RedirectToPage("./Login");
         }
 
-        // No local user linked yet — try to find by email (Microsoft) or create one
+        // No link yet. Provider-specific policy:
+        //   - Microsoft: allow auto-link or auto-create by email (SSO experience)
+        //   - LINE: LINK ONLY — the user must already have a local account,
+        //     and they must be signed in to link it. Never auto-create.
+        if (info.LoginProvider == "LINE")
+        {
+            ErrorMessage = "LINE login isn't linked to any SolarApp account yet. " +
+                "Please sign in with your email + password first, then go to " +
+                "Account → Manage Logins to link your LINE account.";
+            return RedirectToPage("./Login");
+        }
+
+        // Microsoft flow: try to match an existing local user by email
         var email = info.Principal.FindFirstValue(ClaimTypes.Email);
         var displayName = info.Principal.FindFirstValue(ClaimTypes.Name)
                        ?? info.Principal.FindFirstValue(ClaimTypes.GivenName);
-        var providerKey = info.ProviderKey;
 
         ApplicationUser? user = null;
         if (!string.IsNullOrEmpty(email))
@@ -94,17 +153,21 @@ public class ExternalLoginModel : PageModel
 
         if (user == null)
         {
-            // Create a new Customer-role user from external info.
-            // For LINE there's no email — synthesise a placeholder using providerKey.
-            var fakeEmail = email ?? $"{info.LoginProvider.ToLower()}.{providerKey}@solarapp.local";
+            // Create a new Customer-role user from Microsoft info
+            if (string.IsNullOrEmpty(email))
+            {
+                ErrorMessage = "Microsoft account did not return an email — cannot create a local account. " +
+                    "Ask your admin to create a user for you, then link Microsoft from profile settings.";
+                return RedirectToPage("./Login");
+            }
+
             user = new ApplicationUser
             {
-                UserName = fakeEmail,
-                Email = fakeEmail,
-                EmailConfirmed = !string.IsNullOrEmpty(email),
-                FullName = displayName ?? fakeEmail,
-                IsActive = true,
-                LineUserId = info.LoginProvider == "LINE" ? providerKey : null
+                UserName = email,
+                Email = email,
+                EmailConfirmed = true,
+                FullName = displayName ?? email,
+                IsActive = true
             };
             var createResult = await _userManager.CreateAsync(user);
             if (!createResult.Succeeded)
@@ -114,11 +177,9 @@ public class ExternalLoginModel : PageModel
                 return RedirectToPage("./Login");
             }
             await _userManager.AddToRoleAsync(user, UserRoles.Customer);
-            _logger.LogInformation("Created local user {Email} from {Provider} login",
-                user.Email, info.LoginProvider);
+            _logger.LogInformation("Created local user {Email} from Microsoft login", user.Email);
         }
 
-        // Link the external login to this local user
         var addLoginResult = await _userManager.AddLoginAsync(user, info);
         if (!addLoginResult.Succeeded)
         {
@@ -127,9 +188,7 @@ public class ExternalLoginModel : PageModel
             return RedirectToPage("./Login");
         }
 
-        // Save tokens (access/refresh) for later use if needed
         await _signInManager.UpdateExternalAuthenticationTokensAsync(info);
-
         await _signInManager.SignInAsync(user, isPersistent: false);
         return LocalRedirect(returnUrl);
     }

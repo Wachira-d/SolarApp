@@ -46,10 +46,12 @@
                     <form method="post" asp-page="/Account/ExternalLogin" asp-route-returnUrl="@Model.ReturnUrl">
                         @foreach (var provider in Model.ExternalProviders)
                         {
+                            // LINE is link-only: button hidden from Login, shown only in /Account/Manage
+                            if (provider.Name == "LINE") continue;
+
                             var (label, icon, colour) = provider.Name switch
                             {
                                 "Microsoft" => ("Sign in with Microsoft / Office 365", "bi-microsoft", "btn-outline-primary"),
-                                "LINE"      => ("Sign in with LINE", "bi-chat-dots-fill", "btn-success"),
                                 _           => ($"Sign in with {provider.DisplayName}", "bi-box-arrow-in-right", "btn-outline-secondary")
                             };
                             <button type="submit" name="provider" value="@provider.Name"
@@ -58,6 +60,14 @@
                             </button>
                         }
                     </form>
+                    @if (Model.ExternalProviders.Any(p => p.Name == "LINE"))
+                    {
+                        <div class="small text-muted text-center mt-2">
+                            <i class="bi bi-info-circle"></i>
+                            LINE login is available for linking — sign in first, then link LINE in
+                            <strong>Account → Manage Logins</strong>.
+                        </div>
+                    }
                 }
                 else
                 {

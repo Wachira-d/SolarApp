@@ -77,11 +77,27 @@
                     <div class="container-fluid">
                         <span class="navbar-text fw-bold">@ViewData["Title"]</span>
                         <div class="ms-auto d-flex align-items-center">
-                            <span class="me-3 text-muted d-none d-md-inline">
-                                <span id="liveLed" title="Live feed status"></span>
-                                <i class="bi bi-person-circle me-1"></i>
-                                @UserManager.GetUserName(User)
-                            </span>
+                            <div class="dropdown me-2 d-none d-md-inline">
+                                <button class="btn btn-link btn-sm text-muted text-decoration-none dropdown-toggle"
+                                        type="button" data-bs-toggle="dropdown">
+                                    <span id="liveLed" title="Live feed status"></span>
+                                    <i class="bi bi-person-circle me-1"></i>
+                                    @UserManager.GetUserName(User)
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" asp-page="/Account/Manage">
+                                        <i class="bi bi-shield-lock me-1"></i> Manage Logins
+                                    </a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <form asp-page="/Account/Logout" method="post" class="px-3">
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary w-100">
+                                                <i class="bi bi-box-arrow-right"></i> Logout
+                                            </button>
+                                        </form>
+                                    </li>
+                                </ul>
+                            </div>
                             <div class="dropdown me-2">
                                 <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
                                     <i class="bi bi-translate"></i> @(System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToUpper())

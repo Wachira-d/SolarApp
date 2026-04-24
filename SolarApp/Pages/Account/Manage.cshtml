@@ -1,0 +1,97 @@
+@page
+@model SolarApp.Pages.Account.ManageModel
+@{
+    ViewData["Title"] = "Manage Logins";
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <h4 class="mb-3"><i class="bi bi-shield-lock"></i> Manage Logins</h4>
+
+        @if (!string.IsNullOrEmpty(Model.StatusMessage))
+        {
+            <div class="alert alert-success">@Model.StatusMessage</div>
+        }
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="alert alert-danger alert-permanent">@Model.ErrorMessage</div>
+        }
+
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0">Your Account</h6></div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <div><strong>@Model.CurrentUser.FullName</strong></div>
+                        <small class="text-muted">@Model.CurrentUser.Email</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-link-45deg"></i> Linked External Logins</h6></div>
+            <div class="list-group list-group-flush">
+                @if (!Model.LinkedLogins.Any())
+                {
+                    <div class="list-group-item text-muted">No external logins linked yet.</div>
+                }
+                @foreach (var login in Model.LinkedLogins)
+                {
+                    var (icon, colour) = login.LoginProvider switch
+                    {
+                        "Microsoft" => ("bi-microsoft", "text-primary"),
+                        "LINE" => ("bi-chat-dots-fill", "text-success"),
+                        _ => ("bi-box", "text-muted")
+                    };
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <i class="bi @icon @colour me-2 fs-5"></i>
+                            <strong>@login.ProviderDisplayName</strong>
+                            <small class="text-muted ms-2">@login.ProviderKey</small>
+                        </div>
+                        <form method="post" asp-page-handler="Unlink"
+                              asp-route-loginProvider="@login.LoginProvider"
+                              asp-route-providerKey="@login.ProviderKey"
+                              onsubmit="return confirm('Unlink @login.LoginProvider from your account?')">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                <i class="bi bi-x-lg"></i> Unlink
+                            </button>
+                        </form>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (Model.AvailableProviders.Any())
+        {
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-plus-circle"></i> Add Login Method</h6></div>
+                <div class="card-body">
+                    <p class="small text-muted">Link another account so you can sign in with it next time.</p>
+                    <form method="post" asp-page="/Account/ExternalLogin" asp-route-returnUrl="/Account/Manage">
+                        @foreach (var provider in Model.AvailableProviders)
+                        {
+                            var (label, icon, colour) = provider.Name switch
+                            {
+                                "Microsoft" => ("Link Microsoft / Office 365", "bi-microsoft", "btn-outline-primary"),
+                                "LINE" => ("Link LINE Account", "bi-chat-dots-fill", "btn-success"),
+                                _ => ($"Link {provider.DisplayName}", "bi-box-arrow-in-right", "btn-outline-secondary")
+                            };
+                            <button type="submit" name="provider" value="@provider.Name"
+                                    class="btn @colour w-100 mb-2">
+                                <i class="bi @icon me-2"></i>@label
+                            </button>
+                        }
+                    </form>
+                </div>
+            </div>
+        }
+
+        <div class="small text-muted mt-3">
+            <i class="bi bi-info-circle"></i>
+            <strong>LINE linking:</strong> Once linked, SolarApp can send you alert notifications
+            via LINE Messaging API (if configured). Your LINE userId is stored for this purpose.
+        </div>
+    </div>
+</div>
