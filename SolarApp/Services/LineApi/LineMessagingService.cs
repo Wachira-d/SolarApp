@@ -99,43 +99,98 @@ public class LineMessagingService : ILineMessagingService
             return;
         }
 
-        try
+        const int maxAttempts = 3;
+        NotificationStatus finalStatus = NotificationStatus.Failed;
+        string? lastError = null;
+        int lastStatusCode = 0;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var client = _httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
-
-            var payload = new
+            try
             {
-                to = lineUserId,
-                messages = new[] { new { type = "text", text = message } }
-            };
+                var client = _httpClientFactory.CreateClient("default");
+                client.DefaultRequestHeaders.Remove("Authorization");
+                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
-            var response = await client.PostAsJsonAsync(PushUrl, payload);
-            var status = response.IsSuccessStatusCode
-                ? NotificationStatus.Sent : NotificationStatus.Failed;
-            var errorMsg = !response.IsSuccessStatusCode
-                ? await response.Content.ReadAsStringAsync() : null;
+                var payload = new
+                {
+                    to = lineUserId,
+                    messages = new[] { new { type = "text", text = message } }
+                };
 
-            // Log notification
-            _context.NotificationLogs.Add(new NotificationLog
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var response = await client.PostAsJsonAsync(PushUrl, payload, cts.Token);
+                lastStatusCode = (int)response.StatusCode;
+
+                if (response.IsSuccessStatusCode)
+                {
+                    finalStatus = NotificationStatus.Sent;
+                    lastError = null;
+                    break;
+                }
+
+                lastError = await response.Content.ReadAsStringAsync();
+
+                // 4xx (except 429) = don't retry — problem with request/auth/user
+                if (lastStatusCode == 401 || lastStatusCode == 403)
+                {
+                    _logger.LogError("LINE auth failed ({Code}) for {UserId}: {Error}",
+                        lastStatusCode, lineUserId, lastError);
+                    break;
+                }
+                if (lastStatusCode >= 400 && lastStatusCode < 500 && lastStatusCode != 429)
+                {
+                    _logger.LogWarning("LINE {Code} for {UserId}: {Error} — not retrying",
+                        lastStatusCode, lineUserId, lastError);
+                    break;
+                }
+
+                if (attempt < maxAttempts)
+                {
+                    var delayMs = (int)(500 * Math.Pow(2, attempt - 1) * (0.85 + Random.Shared.NextDouble() * 0.3));
+                    _logger.LogWarning("LINE attempt {Att}/{Max} failed ({Code}), retrying in {Ms}ms",
+                        attempt, maxAttempts, lastStatusCode, delayMs);
+                    await Task.Delay(delayMs);
+                }
+            }
+            catch (TaskCanceledException)
             {
-                RecipientLineId = lineUserId,
-                Channel = NotificationChannel.Line,
-                Title = "Text Message",
-                Message = message,
-                Status = status,
-                ErrorMessage = errorMsg,
-                SentAt = status == NotificationStatus.Sent ? DateTime.UtcNow : null
-            });
-            await _context.SaveChangesAsync();
-
-            if (!response.IsSuccessStatusCode)
-                _logger.LogError("LINE API error: {StatusCode} - {Error}", response.StatusCode, errorMsg);
+                lastError = "Timeout";
+                if (attempt < maxAttempts)
+                    await Task.Delay(500 * attempt);
+            }
+            catch (HttpRequestException hre)
+            {
+                lastError = hre.Message;
+                if (attempt < maxAttempts)
+                    await Task.Delay(500 * attempt);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error sending LINE to {UserId}", lineUserId);
+                lastError = ex.Message;
+                break; // Unknown error — don't retry
+            }
         }
-        catch (Exception ex)
+
+        // Log final outcome
+        _context.NotificationLogs.Add(new NotificationLog
         {
-            _logger.LogError(ex, "Failed to send LINE message to {UserId}", lineUserId);
-        }
+            RecipientLineId = lineUserId,
+            Channel = NotificationChannel.Line,
+            Title = "Text Message",
+            Message = message,
+            Status = finalStatus,
+            ErrorMessage = finalStatus == NotificationStatus.Failed
+                ? $"HTTP {lastStatusCode}: {lastError ?? "Unknown"}"
+                : null,
+            SentAt = finalStatus == NotificationStatus.Sent ? DateTime.UtcNow : null
+        });
+        await _context.SaveChangesAsync();
+
+        if (finalStatus != NotificationStatus.Sent)
+            _logger.LogError("LINE send FAILED to {UserId} after {Attempts} attempt(s): HTTP {Code} {Error}",
+                lineUserId, maxAttempts, lastStatusCode, lastError);
     }
 
     public async Task SendFlexAlertAsync(string lineUserId, string siteName, string alertTitle,

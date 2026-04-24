@@ -115,11 +115,32 @@ public class UsersModel : PageModel
 
     // ── User CRUD ──
 
+    // Whitelist of roles that can be assigned via UI
+    private static readonly HashSet<string> AllowedRoles = new(StringComparer.OrdinalIgnoreCase)
+        { UserRoles.Admin, UserRoles.Partner, UserRoles.Customer };
+
     public async Task<IActionResult> OnPostCreateUserAsync()
     {
         if (string.IsNullOrEmpty(NewUser.Password))
         {
             ErrorMessage = "Password is required for new users";
+            return RedirectToPage();
+        }
+        if (!AllowedRoles.Contains(NewUser.Role ?? ""))
+        {
+            ErrorMessage = "Invalid role. Must be Admin, Partner, or Customer.";
+            return RedirectToPage();
+        }
+        if (string.IsNullOrWhiteSpace(NewUser.Email) ||
+            !System.Text.RegularExpressions.Regex.IsMatch(NewUser.Email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+        {
+            ErrorMessage = "Valid email is required";
+            return RedirectToPage();
+        }
+        // Partner role must have a PartnerId
+        if (NewUser.Role == UserRoles.Partner && !NewUser.PartnerId.HasValue)
+        {
+            ErrorMessage = "Partner role requires a Partner assignment";
             return RedirectToPage();
         }
 
@@ -131,7 +152,7 @@ public class UsersModel : PageModel
             CompanyName = NewUser.CompanyName,
             PhoneNumber = NewUser.Phone,
             LineUserId = NewUser.LineUserId,
-            PartnerId = NewUser.PartnerId,
+            PartnerId = NewUser.Role == UserRoles.Partner ? NewUser.PartnerId : null,
             IsActive = true,
             EmailConfirmed = true
         };
@@ -165,13 +186,34 @@ public class UsersModel : PageModel
             return RedirectToPage();
         }
 
+        if (!AllowedRoles.Contains(EditUser.Role ?? ""))
+        {
+            ErrorMessage = "Invalid role. Must be Admin, Partner, or Customer.";
+            return RedirectToPage();
+        }
+
+        // Prevent admins from demoting themselves (lockout risk)
+        var currentUser = await _userManager.GetUserAsync(User);
+        if (currentUser?.Id == user.Id && EditUser.Role != UserRoles.Admin)
+        {
+            ErrorMessage = "You cannot change your own role away from Admin.";
+            return RedirectToPage();
+        }
+
+        // Partner assignment must match role
+        if (EditUser.Role == UserRoles.Partner && !EditUser.PartnerId.HasValue)
+        {
+            ErrorMessage = "Partner role requires a Partner assignment";
+            return RedirectToPage();
+        }
+
         user.FullName = EditUser.FullName;
         user.Email = EditUser.Email;
         user.UserName = EditUser.Email;
         user.CompanyName = EditUser.CompanyName;
         user.PhoneNumber = EditUser.Phone;
         user.LineUserId = EditUser.LineUserId;
-        user.PartnerId = EditUser.PartnerId;
+        user.PartnerId = EditUser.Role == UserRoles.Partner ? EditUser.PartnerId : null;
         user.IsActive = EditUser.IsActive;
 
         var result = await _userManager.UpdateAsync(user);
@@ -289,6 +331,17 @@ public class UsersModel : PageModel
             return RedirectToPage();
         }
 
+        // Uniqueness check on UserId link
+        if (!string.IsNullOrEmpty(NewCustomer.UserId))
+        {
+            var conflict = await _context.Customers.AnyAsync(c => c.UserId == NewCustomer.UserId);
+            if (conflict)
+            {
+                ErrorMessage = "That user is already linked to another customer.";
+                return RedirectToPage();
+            }
+        }
+
         _context.Customers.Add(new Customer
         {
             FirstName = NewCustomer.FirstName.Trim(),
@@ -318,9 +371,35 @@ public class UsersModel : PageModel
             return RedirectToPage();
         }
 
-        customer.FirstName = EditCustomer.FirstName;
-        customer.LastName = EditCustomer.LastName;
-        customer.Email = EditCustomer.Email;
+        // Uniqueness check: prevent re-assigning a UserId already linked to another Customer
+        // (identity theft / split-brain risk)
+        var newUserId = string.IsNullOrEmpty(EditCustomer.UserId) ? null : EditCustomer.UserId;
+        if (!string.IsNullOrEmpty(newUserId) && newUserId != customer.UserId)
+        {
+            var conflict = await _context.Customers
+                .AnyAsync(c => c.UserId == newUserId && c.Id != customer.Id);
+            if (conflict)
+            {
+                ErrorMessage = "That user is already linked to another customer.";
+                return RedirectToPage();
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(EditCustomer.FirstName) || string.IsNullOrWhiteSpace(EditCustomer.LastName))
+        {
+            ErrorMessage = "First name and last name are required";
+            return RedirectToPage();
+        }
+        if (!string.IsNullOrWhiteSpace(EditCustomer.Email) &&
+            !System.Text.RegularExpressions.Regex.IsMatch(EditCustomer.Email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+        {
+            ErrorMessage = "Invalid email format";
+            return RedirectToPage();
+        }
+
+        customer.FirstName = EditCustomer.FirstName.Trim();
+        customer.LastName = EditCustomer.LastName.Trim();
+        customer.Email = EditCustomer.Email?.Trim() ?? string.Empty;
         customer.Phone = EditCustomer.Phone;
         customer.LineUserId = EditCustomer.LineUserId;
         customer.Address = EditCustomer.Address;
@@ -328,7 +407,7 @@ public class UsersModel : PageModel
         customer.Province = EditCustomer.Province;
         customer.PostalCode = EditCustomer.PostalCode;
         customer.TaxId = EditCustomer.TaxId;
-        customer.UserId = string.IsNullOrEmpty(EditCustomer.UserId) ? null : EditCustomer.UserId;
+        customer.UserId = newUserId;
         customer.IsActive = EditCustomer.IsActive;
         customer.Notes = EditCustomer.Notes;
         customer.UpdatedAt = DateTime.UtcNow;
@@ -371,7 +450,8 @@ public class UsersModel : PageModel
             ErrorMessage = "Company name is required";
             return RedirectToPage();
         }
-        if (NewPartner.CommissionRate < 0 || NewPartner.CommissionRate > 100)
+        if (NewPartner.CommissionRate.HasValue
+            && (NewPartner.CommissionRate < 0 || NewPartner.CommissionRate > 100))
         {
             ErrorMessage = "Commission rate must be between 0 and 100";
             return RedirectToPage();
@@ -412,7 +492,25 @@ public class UsersModel : PageModel
             return RedirectToPage();
         }
 
-        partner.CompanyName = EditPartner.CompanyName;
+        if (string.IsNullOrWhiteSpace(EditPartner.CompanyName))
+        {
+            ErrorMessage = "Company name is required";
+            return RedirectToPage();
+        }
+        if (EditPartner.CommissionRate.HasValue
+            && (EditPartner.CommissionRate < 0 || EditPartner.CommissionRate > 100))
+        {
+            ErrorMessage = "Commission rate must be between 0 and 100";
+            return RedirectToPage();
+        }
+        if (EditPartner.ContractEndDate.HasValue && EditPartner.ContractStartDate.HasValue
+            && EditPartner.ContractEndDate < EditPartner.ContractStartDate)
+        {
+            ErrorMessage = "Contract end date cannot be before start date";
+            return RedirectToPage();
+        }
+
+        partner.CompanyName = EditPartner.CompanyName.Trim();
         partner.ContactEmail = EditPartner.ContactEmail;
         partner.ContactPhone = EditPartner.ContactPhone;
         partner.Address = EditPartner.Address;

@@ -37,7 +37,8 @@ public class SolarDataSyncJob
     public async Task ExecuteAsync()
     {
         var installations = await _context.Installations
-            .Where(i => i.Status != InstallationStatus.Inactive && i.PlantId != null)
+            .Where(i => i.Status != InstallationStatus.Inactive
+                        && i.PlantId != null && i.PlantId != "")
             .ToListAsync();
 
         _logger.LogInformation("Solar data sync: starting for {Count} installations", installations.Count);

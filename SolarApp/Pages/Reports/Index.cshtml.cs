@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 using SolarApp.Services.Interfaces;
 using SolarApp.ViewModels;
 
@@ -16,15 +17,18 @@ public class IndexModel : PageModel
     private readonly IInstallationService _installationService;
     private readonly IDashboardService _dashboardService;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IInstallationAccessHelper _access;
 
     public IndexModel(
         IInstallationService installationService,
         IDashboardService dashboardService,
-        UserManager<ApplicationUser> userManager)
+        UserManager<ApplicationUser> userManager,
+        IInstallationAccessHelper access)
     {
         _installationService = installationService;
         _dashboardService = dashboardService;
         _userManager = userManager;
+        _access = access;
     }
 
     [BindProperty(SupportsGet = true)]
@@ -39,7 +43,7 @@ public class IndexModel : PageModel
     public List<SelectListItem> InstallationOptions { get; set; } = new();
     public ProductionReportViewModel? Report { get; set; }
 
-    public async Task OnGetAsync()
+    public async Task<IActionResult> OnGetAsync()
     {
         await LoadInstallationsAsync();
 
@@ -48,9 +52,14 @@ public class IndexModel : PageModel
 
         if (InstallationId.HasValue)
         {
+            // Authorization: user can only view reports for installations they have access to
+            if (!await _access.CanAccessAsync(InstallationId.Value, User))
+                return Forbid();
+
             Report = await _dashboardService.GetProductionReportAsync(
                 InstallationId.Value, FromDate.Value, ToDate.Value);
         }
+        return Page();
     }
 
     private async Task LoadInstallationsAsync()

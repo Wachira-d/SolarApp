@@ -198,12 +198,56 @@ public class PerformanceMetricsService : IPerformanceMetricsService
         }
 
         var installations = await query
+            .Include(i => i.Customer)
+            .Include(i => i.Partner)
             .Where(i => i.Status != InstallationStatus.Inactive)
             .ToListAsync();
 
+        if (!installations.Any())
+            return new FleetPerformance { InstallationCount = 0 };
+
+        // ─── Batch-load all the data we need in 3 queries (was N+1) ───
+        var installationIds = installations.Select(i => i.Id).ToList();
+        var fromDate = from.Date;
+        var toDate = to.Date;
+
+        // 1. All daily energy records for all installations
+        var allDaily = await _context.EnergyData
+            .Where(e => installationIds.Contains(e.InstallationId)
+                        && e.Granularity == DataGranularity.Daily
+                        && e.Timestamp >= fromDate
+                        && e.Timestamp <= toDate)
+            .ToListAsync();
+        var dailyByInstall = allDaily.GroupBy(d => d.InstallationId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // 2. Applicable tariffs — latest per installation in the window
+        var allTariffs = await _context.ElectricityTariffs
+            .Where(t => installationIds.Contains(t.InstallationId)
+                        && t.EffectiveFrom <= toDate
+                        && (t.EffectiveTo == null || t.EffectiveTo >= fromDate))
+            .ToListAsync();
+        var tariffByInstall = allTariffs
+            .GroupBy(t => t.InstallationId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(t => t.EffectiveFrom).First());
+
+        // 3. Unresolved alert counts per installation
+        var alertCountsList = await _context.SystemAlerts
+            .Where(a => installationIds.Contains(a.InstallationId) && a.ResolvedAt == null)
+            .GroupBy(a => a.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToListAsync();
+        var alertCounts = alertCountsList.ToDictionary(x => x.InstallationId, x => x.Count);
+
+        // Now compute each installation's performance from the preloaded data
         var perInstallation = new List<InstallationPerformance>();
         foreach (var inst in installations)
-            perInstallation.Add(await GetPerformanceAsync(inst.Id, from, to));
+        {
+            var daily = dailyByInstall.GetValueOrDefault(inst.Id) ?? new List<EnergyData>();
+            var tariff = tariffByInstall.GetValueOrDefault(inst.Id);
+            var unresolved = alertCounts.GetValueOrDefault(inst.Id);
+            perInstallation.Add(ComputePerformanceFromData(inst, fromDate, toDate, daily, tariff, unresolved));
+        }
 
         var fleet = new FleetPerformance
         {
@@ -257,5 +301,67 @@ public class PerformanceMetricsService : IPerformanceMetricsService
             p.Recommendations.Add($"{p.OfflineDays} day(s) with zero production in period — potential inverter outage.");
         if (p.PerformanceRatio > 0.9m && p.UptimePercent > 98)
             p.Recommendations.Add("Excellent performance — system operating near ideal.");
+    }
+
+    /// <summary>
+    /// Pure-function variant used by the fleet view: given preloaded data,
+    /// compute an InstallationPerformance without touching the DB.
+    /// Used by GetFleetPerformanceAsync to avoid N+1 queries.
+    /// Note: skips weather lookup (constant PSH) so the fleet view is fast.
+    /// </summary>
+    private static InstallationPerformance ComputePerformanceFromData(
+        Installation installation, DateTime fromDate, DateTime toDate,
+        List<EnergyData> dailyRecords, ElectricityTariff? tariff, int unresolvedAlerts)
+    {
+        var days = Math.Max(1, (int)(toDate - fromDate).TotalDays + 1);
+        var importRate = tariff?.ImportRatePerKwh ?? 4.5m;
+        var exportRate = tariff?.ExportRatePerKwh ?? 2.2m;
+        var capacity = installation.SystemCapacityKw;
+        var expectedPerDay = capacity * DefaultPeakSunHours * DefaultDerateFactor;
+
+        var seriesByDate = dailyRecords.ToDictionary(d => d.Timestamp.Date);
+        var series = new List<DailyProduction>();
+        decimal actualTotal = 0;
+        int offlineDays = 0;
+
+        for (var d = fromDate; d <= toDate; d = d.AddDays(1))
+        {
+            decimal actual = 0;
+            if (seriesByDate.TryGetValue(d, out var rec)) actual = rec.EnergyGenerationKwh;
+            if (actual <= 0) offlineDays++;
+            actualTotal += actual;
+            var pr = expectedPerDay > 0 ? Math.Round(actual / expectedPerDay, 3) : 0;
+            series.Add(new DailyProduction(d, actual, expectedPerDay, pr));
+        }
+
+        var expectedTotal = expectedPerDay * days;
+        var performanceRatio = expectedTotal > 0 ? actualTotal / expectedTotal : 0;
+        var capacityFactor = capacity > 0 ? actualTotal / (capacity * 24 * days) : 0;
+        var specificYield = capacity > 0 ? actualTotal / capacity : 0;
+        var uptimePercent = days > 0 ? (decimal)(days - offlineDays) / days * 100 : 0;
+
+        var exportKwh = dailyRecords.Sum(d => d.GridExportKwh);
+        var selfConsumed = dailyRecords.Sum(d => d.SelfConsumptionKwh);
+
+        var result = new InstallationPerformance
+        {
+            Installation = installation,
+            From = fromDate,
+            To = toDate,
+            TotalActualKwh = Math.Round(actualTotal, 2),
+            TotalExpectedKwh = Math.Round(expectedTotal, 2),
+            PerformanceRatio = Math.Round(performanceRatio, 3),
+            CapacityFactor = Math.Round(capacityFactor, 3),
+            SpecificYieldKwhPerKw = Math.Round(specificYield, 2),
+            UptimePercent = Math.Round(uptimePercent, 1),
+            OfflineDays = offlineDays,
+            UnresolvedAlerts = unresolvedAlerts,
+            DailySeries = series,
+            EstimatedRevenue = Math.Round(exportKwh * exportRate, 2),
+            EstimatedSavings = Math.Round(selfConsumed * importRate, 2)
+        };
+
+        AssignHealthGrade(result);
+        return result;
     }
 }

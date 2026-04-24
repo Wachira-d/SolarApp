@@ -33,6 +33,8 @@ public class CleaningModel : PageModel
     [BindProperty] public List<IFormFile> BeforePhotoFiles { get; set; } = new();
     [BindProperty] public List<IFormFile> AfterPhotoFiles { get; set; } = new();
 
+    [TempData] public string? StatusMessage { get; set; }
+
     public class CleaningInput
     {
         public int InstallationId { get; set; }
@@ -91,13 +93,14 @@ public class CleaningModel : PageModel
             installation.UpdatedAt = DateTime.UtcNow;
         }
 
-        // Upload photos
-        foreach (var file in BeforePhotoFiles.Where(f => f != null && f.Length > 0))
+        // Upload photos (max 10 per kind per request)
+        const int MaxPhotosPerKind = 10;
+        foreach (var file in BeforePhotoFiles.Where(f => f != null && f.Length > 0).Take(MaxPhotosPerKind))
         {
             var (ok, url) = await _uploader.UploadAsync(file, "cleaning-before", Input.InstallationId);
             if (ok) record.BeforePhotos = _uploader.AddToCsv(record.BeforePhotos, url);
         }
-        foreach (var file in AfterPhotoFiles.Where(f => f != null && f.Length > 0))
+        foreach (var file in AfterPhotoFiles.Where(f => f != null && f.Length > 0).Take(MaxPhotosPerKind))
         {
             var (ok, url) = await _uploader.UploadAsync(file, "cleaning-after", Input.InstallationId);
             if (ok) record.AfterPhotos = _uploader.AddToCsv(record.AfterPhotos, url);
@@ -154,6 +157,14 @@ public class CleaningModel : PageModel
             .FirstOrDefaultAsync(c => c.Id == recordId);
 
         if (record == null) return NotFound();
+        if (!await _access.CanAccessAsync(record.InstallationId, User)) return Forbid();
+
+        // Idempotency: completing an already-completed record must not double-count
+        if (record.Status == CleaningStatus.Completed)
+        {
+            StatusMessage = "Record already marked completed.";
+            return RedirectToPage("Cleaning", new { id = record.InstallationId });
+        }
 
         record.Status = CleaningStatus.Completed;
         record.ActualDate = DateTime.UtcNow;

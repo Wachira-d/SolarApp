@@ -32,14 +32,25 @@ public class AlertRulesEngine : IAlertRulesEngine
             .Where(i => i.Status != InstallationStatus.Inactive)
             .ToListAsync(cancellationToken);
 
+        // Pre-load recent alerts per (rule.Title, installationId) to check cooldowns
+        // without N+1 queries. We bucket by rule title since that's what we store.
+        var ruleTitles = rules.Select(r => r.Name).Distinct().ToList();
+        var maxCooldown = rules.Max(r => r.CooldownMinutes);
+        var cooldownStart = now.AddMinutes(-maxCooldown);
+        var recentAlertsRaw = await _context.SystemAlerts
+            .Where(a => ruleTitles.Contains(a.Title)
+                        && a.ResolvedAt == null
+                        && a.OccurredAt > cooldownStart)
+            .Select(a => new { a.InstallationId, a.Title, a.OccurredAt })
+            .ToListAsync(cancellationToken);
+        // Key: (title + installationId) -> most recent OccurredAt
+        var lastAlertTime = recentAlertsRaw
+            .GroupBy(a => (a.Title, a.InstallationId))
+            .ToDictionary(g => g.Key, g => g.Max(x => x.OccurredAt));
+
         int fired = 0;
         foreach (var rule in rules)
         {
-            // Cooldown — skip if last fired recently
-            if (rule.LastFiredAt.HasValue
-                && now - rule.LastFiredAt.Value < TimeSpan.FromMinutes(rule.CooldownMinutes))
-                continue;
-
             var targets = allInstallations.Where(i =>
                 (rule.InstallationId == null || i.Id == rule.InstallationId)
                 && (rule.BrandScope == null || i.InverterBrand == rule.BrandScope)
@@ -49,17 +60,14 @@ public class AlertRulesEngine : IAlertRulesEngine
             {
                 try
                 {
+                    // Per-rule-per-installation cooldown (fixes original bug where
+                    // rule.LastFiredAt was global across all installations)
+                    if (lastAlertTime.TryGetValue((rule.Name, inst.Id), out var lastTime)
+                        && now - lastTime < TimeSpan.FromMinutes(rule.CooldownMinutes))
+                        continue;
+
                     var (shouldFire, observedValue, detail) = await EvaluateAsync(rule, inst, now, cancellationToken);
                     if (!shouldFire) continue;
-
-                    // Avoid duplicates — suppress if same rule already has an unresolved alert for this installation in the cooldown window
-                    var recent = await _context.SystemAlerts
-                        .Where(a => a.InstallationId == inst.Id
-                                    && a.Title == rule.Name
-                                    && a.ResolvedAt == null
-                                    && a.OccurredAt > now.AddMinutes(-rule.CooldownMinutes))
-                        .AnyAsync(cancellationToken);
-                    if (recent) continue;
 
                     _context.SystemAlerts.Add(new SystemAlert
                     {
@@ -71,7 +79,8 @@ public class AlertRulesEngine : IAlertRulesEngine
                         OccurredAt = now,
                         IsNotified = false
                     });
-                    rule.LastFiredAt = now;
+                    lastAlertTime[(rule.Name, inst.Id)] = now;
+                    rule.LastFiredAt = now; // still tracked for UI display
                     fired++;
                 }
                 catch (Exception ex)

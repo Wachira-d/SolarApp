@@ -26,10 +26,20 @@ public class Startup
         builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
         {
             options.SignIn.RequireConfirmedAccount = false;
+
+            // Password policy
             options.Password.RequireDigit = true;
             options.Password.RequireUppercase = true;
             options.Password.RequireNonAlphanumeric = true;
             options.Password.RequiredLength = 8;
+
+            // Lockout protects against brute-force
+            options.Lockout.AllowedForNewUsers = true;
+            options.Lockout.MaxFailedAccessAttempts = 5;
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+
+            // User settings — require unique email
+            options.User.RequireUniqueEmail = true;
         })
         .AddEntityFrameworkStores<ApplicationDbContext>()
         .AddDefaultTokenProviders();
@@ -556,8 +566,12 @@ public class Startup
     {
         app.MapGet("/api/reports/excel/{installationId:int}", async (
             int installationId, DateTime? from, DateTime? to,
+            System.Security.Claims.ClaimsPrincipal user,
+            Services.Authorization.IInstallationAccessHelper access,
             Services.ReportExport.IReportExportService svc) =>
         {
+            if (!await access.CanAccessAsync(installationId, user))
+                return Results.Forbid();
             var f = from ?? DateTime.UtcNow.AddMonths(-1);
             var t = to ?? DateTime.UtcNow;
             return Results.File(await svc.ExportProductionToExcelAsync(installationId, f, t),
@@ -567,8 +581,12 @@ public class Startup
 
         app.MapGet("/api/reports/pdf/{installationId:int}", async (
             int installationId, DateTime? from, DateTime? to,
+            System.Security.Claims.ClaimsPrincipal user,
+            Services.Authorization.IInstallationAccessHelper access,
             Services.ReportExport.IReportExportService svc) =>
         {
+            if (!await access.CanAccessAsync(installationId, user))
+                return Results.Forbid();
             var f = from ?? DateTime.UtcNow.AddMonths(-1);
             var t = to ?? DateTime.UtcNow;
             return Results.File(await svc.ExportProductionToPdfAsync(installationId, f, t),
@@ -578,10 +596,14 @@ public class Startup
         // Manually sync data from cloud for a specific installation
         app.MapPost("/api/installations/{id:int}/sync", async (
             int id,
+            System.Security.Claims.ClaimsPrincipal user,
+            Services.Authorization.IInstallationAccessHelper access,
             Data.ApplicationDbContext db,
             Services.InverterApi.IInverterApiAdapterFactory factory,
             Services.Security.ICredentialProtector credProtector) =>
         {
+            if (!await access.CanAccessAsync(id, user))
+                return Results.Forbid();
             var installation = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
                 .FirstOrDefaultAsync(db.Installations, i => i.Id == id);
             if (installation == null)
