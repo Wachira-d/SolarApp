@@ -43,6 +43,8 @@ public class EditModel : PageModel
     public bool HasApiSecret { get; set; }
     public bool HasUsername { get; set; }
     public bool HasPassword { get; set; }
+    public bool HasPlantId { get; set; }
+    public string CredentialStorageNote { get; set; } = "";
     public List<SelectListItem> Partners { get; set; } = new();
 
     public class InstallationInput
@@ -144,18 +146,22 @@ public class EditModel : PageModel
         installation.InverterCount = Input.InverterCount;
         installation.InverterSizeKw = Input.InverterSizeKw;
         installation.SystemType = Input.SystemType;
-        // Form NEVER displays stored secrets. Leaving blank = "keep existing"
-        // (so users don't accidentally wipe credentials they saved before).
-        // Only overwrite the stored value when the user actually typed something new.
-        if (!string.IsNullOrEmpty(Input.CloudApiKey))
-            installation.CloudApiKey = _credProtector.Protect(Input.CloudApiKey);
-        if (!string.IsNullOrEmpty(Input.CloudApiSecret))
-            installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret);
-        if (!string.IsNullOrEmpty(Input.CloudUsername))
-            installation.CloudUsername = _credProtector.Protect(Input.CloudUsername);
-        if (!string.IsNullOrEmpty(Input.CloudPassword))
-            installation.CloudPassword = _credProtector.Protect(Input.CloudPassword);
-        installation.PlantId = Input.PlantId;
+        // Form NEVER displays stored secrets. Leaving blank = "keep existing".
+        // Only overwrite when the user explicitly typed a new value.
+        // IMPORTANT: empty HTML input binds as "" (not null), so IsNullOrEmpty
+        // correctly detects "user didn't type anything".
+        if (!string.IsNullOrWhiteSpace(Input.CloudApiKey))
+            installation.CloudApiKey = _credProtector.Protect(Input.CloudApiKey.Trim());
+        if (!string.IsNullOrWhiteSpace(Input.CloudApiSecret))
+            installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret.Trim());
+        if (!string.IsNullOrWhiteSpace(Input.CloudUsername))
+            installation.CloudUsername = _credProtector.Protect(Input.CloudUsername.Trim());
+        if (!string.IsNullOrWhiteSpace(Input.CloudPassword))
+            installation.CloudPassword = _credProtector.Protect(Input.CloudPassword.Trim());
+        // PlantId is NOT a secret but same keep-existing logic to prevent accidental wipe
+        if (!string.IsNullOrWhiteSpace(Input.PlantId))
+            installation.PlantId = Input.PlantId.Trim();
+        // else keep the existing installation.PlantId
         installation.SystemCapacityKw = Input.SystemCapacityKw;
         installation.NumberOfPanels = Input.NumberOfPanels;
         installation.PanelWattage = Input.PanelWattage;
@@ -202,6 +208,15 @@ public class EditModel : PageModel
         HasApiSecret = !string.IsNullOrEmpty(installation.CloudApiSecret);
         HasUsername  = !string.IsNullOrEmpty(installation.CloudUsername);
         HasPassword  = !string.IsNullOrEmpty(installation.CloudPassword);
+        HasPlantId   = !string.IsNullOrEmpty(installation.PlantId);
+
+        // Diagnostic note for admin to understand storage state
+        var parts = new List<string>();
+        if (HasApiKey) parts.Add($"ApiKey: {(installation.CloudApiKey!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
+        if (HasApiSecret) parts.Add($"ApiSecret: {(installation.CloudApiSecret!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
+        if (HasUsername) parts.Add($"Username: {(installation.CloudUsername!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
+        if (HasPassword) parts.Add($"Password: {(installation.CloudPassword!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
+        CredentialStorageNote = parts.Any() ? string.Join(" | ", parts) : "No credentials stored";
 
         Input = new InstallationInput
         {
