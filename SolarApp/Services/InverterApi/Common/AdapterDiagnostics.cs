@@ -216,6 +216,10 @@ public class AdapterDiagnostics : IAdapterDiagnostics
                 if (string.IsNullOrEmpty(inst.CloudUsername)) missing.Add("Email");
                 if (string.IsNullOrEmpty(inst.CloudPassword)) missing.Add("Password");
                 break;
+            case InverterBrand.Hoymiles:
+                if (string.IsNullOrEmpty(inst.CloudUsername)) missing.Add("S-Miles Cloud email/phone");
+                if (string.IsNullOrEmpty(inst.CloudPassword)) missing.Add("S-Miles Cloud password");
+                break;
         }
 
         return new DiagnosticStep

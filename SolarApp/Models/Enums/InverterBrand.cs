@@ -7,5 +7,6 @@ public enum InverterBrand
     Solis = 3,
     GoodWe = 4,
     Deye = 5,
+    Hoymiles = 6,
     Other = 99
 }
