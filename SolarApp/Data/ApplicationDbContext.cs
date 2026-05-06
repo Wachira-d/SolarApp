@@ -25,6 +25,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ElectricityTariff> ElectricityTariffs => Set<ElectricityTariff>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
     public DbSet<AlertRule> AlertRules => Set<AlertRule>();
+    public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
+    public DbSet<WorkOrderItem> WorkOrderItems => Set<WorkOrderItem>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -314,6 +316,70 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(r => r.IsEnabled);
             entity.HasIndex(r => r.InstallationId);
             entity.HasIndex(r => r.Metric);
+        });
+
+        // ── WorkOrder ──
+        builder.Entity<WorkOrder>(entity =>
+        {
+            entity.HasOne(w => w.Installation)
+                .WithMany()
+                .HasForeignKey(w => w.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(w => w.Customer)
+                .WithMany()
+                .HasForeignKey(w => w.CustomerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(w => w.AssignedToUser)
+                .WithMany()
+                .HasForeignKey(w => w.AssignedToUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(w => w.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(w => w.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(w => w.ParentWorkOrder)
+                .WithMany()
+                .HasForeignKey(w => w.ParentWorkOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(w => w.ServiceTicket)
+                .WithMany()
+                .HasForeignKey(w => w.ServiceTicketId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(w => w.WorkOrderNumber).IsUnique();
+            entity.HasIndex(w => w.Status);
+            entity.HasIndex(w => w.ScheduledDate);
+            entity.HasIndex(w => w.AssignedToUserId);
+            entity.HasIndex(w => w.Type);
+            entity.HasIndex(w => w.InstallationId);
+            entity.HasIndex(w => w.CustomerId);
+
+            entity.Property(w => w.WorkOrderNumber).HasMaxLength(20);
+            entity.Property(w => w.LaborCost).HasPrecision(12, 2);
+            entity.Property(w => w.MaterialCost).HasPrecision(12, 2);
+            entity.Property(w => w.TravelCost).HasPrecision(12, 2);
+            entity.Property(w => w.OtherCost).HasPrecision(12, 2);
+        });
+
+        // ── WorkOrderItem (checklist) ──
+        builder.Entity<WorkOrderItem>(entity =>
+        {
+            entity.HasOne(i => i.WorkOrder)
+                .WithMany(w => w.ChecklistItems)
+                .HasForeignKey(i => i.WorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(i => i.CompletedByUser)
+                .WithMany()
+                .HasForeignKey(i => i.CompletedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(i => new { i.WorkOrderId, i.SortOrder });
         });
     }
 }

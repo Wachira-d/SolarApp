@@ -1,0 +1,126 @@
+@page
+@model SolarApp.Pages.WorkOrders.IndexModel
+@using SolarApp.Models.Enums
+@{
+    ViewData["Title"] = "Work Orders";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-clipboard2-check"></i> Work Orders</h4>
+        <small class="text-muted">Panel cleaning, PM, repair & standalone jobs</small>
+    </div>
+    <div class="d-flex gap-2">
+        <a asp-page="Calendar" class="btn btn-outline-info btn-sm">
+            <i class="bi bi-calendar3"></i> Calendar
+        </a>
+        <a asp-page="Create" class="btn btn-warning btn-sm">
+            <i class="bi bi-plus-circle"></i> New Work Order
+        </a>
+    </div>
+</div>
+
+<!-- KPI -->
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm text-center h-100"><div class="card-body py-2">
+            <div class="fs-4 fw-bold">@Model.TotalCount</div><small class="text-muted">Total</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm text-center h-100 @(Model.OverdueCount > 0 ? "border-danger border-2" : "")"><div class="card-body py-2">
+            <div class="fs-4 fw-bold text-danger">@Model.OverdueCount</div><small class="text-muted">Overdue</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm text-center h-100"><div class="card-body py-2">
+            <div class="fs-4 fw-bold text-primary">@Model.TodayCount</div><small class="text-muted">Today</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm text-center h-100"><div class="card-body py-2">
+            <div class="fs-4 fw-bold text-info">@Model.ThisWeekCount</div><small class="text-muted">This Week</small>
+        </div></div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <select asp-for="StatusFilter" class="form-select form-select-sm" asp-items="Html.GetEnumSelectList<WorkOrderStatus>()">
+                    <option value="">All Statuses</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select asp-for="TypeFilter" class="form-select form-select-sm" asp-items="Html.GetEnumSelectList<WorkOrderType>()">
+                    <option value="">All Types</option>
+                </select>
+            </div>
+            <div class="col">
+                <input asp-for="Search" class="form-control form-control-sm" placeholder="Search WO#, title, site..." />
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-filter"></i></button>
+                <a asp-page="Index" class="btn btn-sm btn-outline-secondary">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Table -->
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>WO#</th>
+                        <th>Type</th>
+                        <th>Site</th>
+                        <th>Scheduled</th>
+                        <th>Assigned</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (!Model.Orders.Any())
+                    {
+                        <tr><td colspan="7" class="text-center text-muted py-4">
+                            No work orders found.
+                            <a asp-page="Create" class="ms-2">Create one →</a>
+                        </td></tr>
+                    }
+                    @foreach (var wo in Model.Orders)
+                    {
+                        <tr class="@(wo.IsOverdue ? "table-danger" : "")">
+                            <td><strong>@wo.WorkOrderNumber</strong></td>
+                            <td><small>@wo.Type</small></td>
+                            <td>
+                                <div class="text-truncate" style="max-width:200px">
+                                    @wo.SiteName
+                                    @if (wo.IsStandalone)
+                                    { <span class="badge bg-info ms-1">Standalone</span> }
+                                </div>
+                            </td>
+                            <td>
+                                <small>@wo.ScheduledDate.ToString("dd/MM/yy")</small>
+                                @if (wo.ScheduledTime.HasValue)
+                                { <small class="text-muted">@wo.ScheduledTime.Value.ToString(@"hh\:mm")</small> }
+                            </td>
+                            <td><small>@(wo.AssignedToUser?.FullName ?? wo.AssignedTeam ?? "-")</small></td>
+                            <td><span class="badge @wo.StatusBadgeClass">@wo.Status</span></td>
+                            <td>
+                                <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>

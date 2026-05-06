@@ -613,6 +613,79 @@ BEGIN
     CREATE INDEX IX_AlertRules_Metric ON [AlertRules]([Metric]);
 END");
 
+        sb.AppendLine(@"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrders')
+BEGIN
+    CREATE TABLE [WorkOrders] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [WorkOrderNumber] nvarchar(20) NOT NULL,
+        [Type] int NOT NULL,
+        [Status] int NOT NULL DEFAULT 0,
+        [InstallationId] int NULL,
+        [ExternalSiteName] nvarchar(200) NULL,
+        [ExternalSiteAddress] nvarchar(500) NULL,
+        [ExternalCustomerName] nvarchar(100) NULL,
+        [ExternalCustomerPhone] nvarchar(50) NULL,
+        [ExternalLatitude] float NULL,
+        [ExternalLongitude] float NULL,
+        [CustomerId] int NULL,
+        [ScheduledDate] datetime2 NOT NULL,
+        [ScheduledTime] time NULL,
+        [EstimatedDurationMinutes] int NOT NULL DEFAULT 120,
+        [ActualStartTime] datetime2 NULL,
+        [ActualEndTime] datetime2 NULL,
+        [RecurrenceMonths] int NULL,
+        [ParentWorkOrderId] int NULL,
+        [AssignedTeam] nvarchar(200) NULL,
+        [AssignedToUserId] nvarchar(450) NULL,
+        [CreatedByUserId] nvarchar(450) NULL,
+        [Title] nvarchar(200) NOT NULL,
+        [Description] nvarchar(max) NULL,
+        [Scope] nvarchar(max) NULL,
+        [SpecialInstructions] nvarchar(max) NULL,
+        [LaborCost] decimal(12,2) NOT NULL DEFAULT 0,
+        [MaterialCost] decimal(12,2) NOT NULL DEFAULT 0,
+        [TravelCost] decimal(12,2) NOT NULL DEFAULT 0,
+        [OtherCost] decimal(12,2) NOT NULL DEFAULT 0,
+        [CostNotes] nvarchar(max) NULL,
+        [BeforePhotos] nvarchar(max) NULL,
+        [AfterPhotos] nvarchar(max) NULL,
+        [Attachments] nvarchar(max) NULL,
+        [CompletionNotes] nvarchar(max) NULL,
+        [CustomerSignature] nvarchar(max) NULL,
+        [CustomerSigned] bit NOT NULL DEFAULT 0,
+        [CustomerRating] int NULL,
+        [CustomerFeedback] nvarchar(max) NULL,
+        [ServiceTicketId] int NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE UNIQUE INDEX IX_WorkOrders_Number ON [WorkOrders]([WorkOrderNumber]);
+    CREATE INDEX IX_WorkOrders_Status ON [WorkOrders]([Status]);
+    CREATE INDEX IX_WorkOrders_ScheduledDate ON [WorkOrders]([ScheduledDate]);
+    CREATE INDEX IX_WorkOrders_AssignedToUserId ON [WorkOrders]([AssignedToUserId]);
+    CREATE INDEX IX_WorkOrders_Type ON [WorkOrders]([Type]);
+    CREATE INDEX IX_WorkOrders_InstallationId ON [WorkOrders]([InstallationId]);
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrderItems')
+BEGIN
+    CREATE TABLE [WorkOrderItems] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [WorkOrderId] int NOT NULL,
+        [SortOrder] int NOT NULL DEFAULT 0,
+        [Description] nvarchar(300) NOT NULL,
+        [IsCompleted] bit NOT NULL DEFAULT 0,
+        [CompletedAt] datetime2 NULL,
+        [CompletedByUserId] nvarchar(450) NULL,
+        [Notes] nvarchar(max) NULL,
+        [Photos] nvarchar(max) NULL,
+        CONSTRAINT FK_WorkOrderItems_WorkOrders FOREIGN KEY ([WorkOrderId])
+            REFERENCES [WorkOrders]([Id]) ON DELETE CASCADE
+    );
+    CREATE INDEX IX_WorkOrderItems_WorkOrderId_SortOrder ON [WorkOrderItems]([WorkOrderId], [SortOrder]);
+END");
+
         foreach (var (name, table, cols) in indexUpgrades)
         {
             sb.AppendLine($@"

@@ -1,0 +1,232 @@
+@page "{id:int}"
+@model SolarApp.Pages.WorkOrders.DetailModel
+@using SolarApp.Models.Enums
+@{
+    var wo = Model.Order;
+    ViewData["Title"] = $"WO {wo.WorkOrderNumber}";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0">
+            <span class="badge @wo.StatusBadgeClass me-2">@wo.Status</span>
+            @wo.WorkOrderNumber
+        </h4>
+        <small class="text-muted">@wo.Type · @wo.SiteName · @wo.ScheduledDate.ToString("dd MMM yyyy")</small>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        @if (wo.Status == WorkOrderStatus.Scheduled || wo.Status == WorkOrderStatus.Assigned)
+        {
+            <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress">
+                <button class="btn btn-sm btn-warning"><i class="bi bi-play-fill"></i> Start Work</button>
+            </form>
+        }
+        @if (wo.Status == WorkOrderStatus.InProgress)
+        {
+            <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#completeModal">
+                <i class="bi bi-check-circle"></i> Complete
+            </button>
+        }
+        @if (wo.Status == WorkOrderStatus.Completed && User.IsInRole("Admin"))
+        {
+            <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="Verified">
+                <button class="btn btn-sm btn-primary"><i class="bi bi-check2-all"></i> Verify</button>
+            </form>
+        }
+        @if (wo.Status < WorkOrderStatus.Completed)
+        {
+            <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="Cancelled"
+                  onsubmit="return confirm('Cancel this work order?')">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg"></i> Cancel</button>
+            </form>
+        }
+        <a asp-page="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> List</a>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{ <div class="alert alert-success">@Model.StatusMessage</div> }
+
+<div class="row g-3">
+    <!-- LEFT: Details -->
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0">Job Details</h6></div>
+            <div class="card-body">
+                <div class="row g-2 small">
+                    <div class="col-6"><strong>Title:</strong> @wo.Title</div>
+                    <div class="col-6"><strong>Type:</strong> @wo.Type</div>
+                    @if (!string.IsNullOrWhiteSpace(wo.Description))
+                    { <div class="col-12"><strong>Description:</strong> @wo.Description</div> }
+                    @if (!string.IsNullOrWhiteSpace(wo.Scope))
+                    { <div class="col-12"><strong>Scope:</strong> @wo.Scope</div> }
+                    @if (!string.IsNullOrWhiteSpace(wo.SpecialInstructions))
+                    { <div class="col-12 text-warning"><strong>⚠ Instructions:</strong> @wo.SpecialInstructions</div> }
+                </div>
+            </div>
+        </div>
+
+        <!-- Checklist -->
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white d-flex justify-content-between">
+                <h6 class="mb-0"><i class="bi bi-list-check"></i> Checklist</h6>
+                <small class="text-muted">@wo.ChecklistItems.Count(i => i.IsCompleted) / @wo.ChecklistItems.Count</small>
+            </div>
+            <div class="list-group list-group-flush">
+                @if (!wo.ChecklistItems.Any())
+                {
+                    <div class="list-group-item text-muted">No checklist items.</div>
+                }
+                @foreach (var item in wo.ChecklistItems)
+                {
+                    <div class="list-group-item">
+                        <form method="post" asp-page-handler="CheckItem" asp-route-id="@wo.Id" asp-route-itemId="@item.Id"
+                              class="d-flex align-items-start gap-2">
+                            <button type="submit" class="btn btn-sm p-0 border-0" style="min-width:24px">
+                                @if (item.IsCompleted)
+                                { <i class="bi bi-check-circle-fill text-success fs-5"></i> }
+                                else
+                                { <i class="bi bi-circle text-muted fs-5"></i> }
+                            </button>
+                            <div class="flex-grow-1">
+                                <span class="@(item.IsCompleted ? "text-decoration-line-through text-muted" : "")">
+                                    @item.Description
+                                </span>
+                                @if (item.CompletedAt.HasValue)
+                                {
+                                    <small class="d-block text-muted">
+                                        ✓ @item.CompletedAt.Value.ToString("dd/MM HH:mm")
+                                    </small>
+                                }
+                            </div>
+                        </form>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Photos -->
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white"><h6 class="mb-0">Before Photos</h6></div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            @foreach (var url in wo.BeforePhotoList)
+                            { <a href="@url" target="_blank"><img src="@url" class="img-thumbnail" style="max-height:80px" /></a> }
+                        </div>
+                        <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="before" enctype="multipart/form-data">
+                            <div class="input-group input-group-sm">
+                                <input type="file" name="BeforePhotoFiles" multiple accept="image/*" class="form-control" />
+                                <button type="submit" class="btn btn-outline-primary"><i class="bi bi-upload"></i></button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-header bg-white"><h6 class="mb-0">After Photos</h6></div>
+                    <div class="card-body">
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            @foreach (var url in wo.AfterPhotoList)
+                            { <a href="@url" target="_blank"><img src="@url" class="img-thumbnail" style="max-height:80px" /></a> }
+                        </div>
+                        <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="after" enctype="multipart/form-data">
+                            <div class="input-group input-group-sm">
+                                <input type="file" name="AfterPhotoFiles" multiple accept="image/*" class="form-control" />
+                                <button type="submit" class="btn btn-outline-primary"><i class="bi bi-upload"></i></button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: Info -->
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0">Site</h6></div>
+            <div class="card-body small">
+                <strong>@wo.SiteName</strong> @if (wo.IsStandalone) { <span class="badge bg-info">Standalone</span> }
+                @if (!string.IsNullOrWhiteSpace(wo.SiteAddress)) { <div class="text-muted">@wo.SiteAddress</div> }
+                @if (wo.Installation != null) { <a asp-page="/Installations/Detail" asp-route-id="@wo.InstallationId" class="small">Open Installation →</a> }
+                @if (!string.IsNullOrWhiteSpace(wo.ExternalCustomerName))
+                { <div class="mt-1"><i class="bi bi-person"></i> @wo.ExternalCustomerName @wo.ExternalCustomerPhone</div> }
+            </div>
+        </div>
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0">Schedule & Assignment</h6></div>
+            <div class="card-body small">
+                <div class="row g-1">
+                    <div class="col-6"><strong>Date:</strong> @wo.ScheduledDate.ToString("dd/MM/yyyy")</div>
+                    <div class="col-6"><strong>Time:</strong> @(wo.ScheduledTime?.ToString(@"hh\:mm") ?? "—")</div>
+                    <div class="col-6"><strong>Duration:</strong> @wo.EstimatedDurationMinutes min</div>
+                    <div class="col-6"><strong>Recurrence:</strong> @(wo.RecurrenceMonths.HasValue ? $"Every {wo.RecurrenceMonths}mo" : "One-time")</div>
+                    <div class="col-6"><strong>Team:</strong> @(wo.AssignedTeam ?? "—")</div>
+                    <div class="col-6"><strong>Assigned:</strong> @(wo.AssignedToUser?.FullName ?? "Unassigned")</div>
+                    <div class="col-6"><strong>Created by:</strong> @(wo.CreatedByUser?.FullName ?? "—")</div>
+                    <div class="col-6"><strong>Created:</strong> @wo.CreatedAt.ToString("dd/MM/yy HH:mm")</div>
+                    @if (wo.ActualStartTime.HasValue) { <div class="col-6"><strong>Started:</strong> @wo.ActualStartTime.Value.ToString("dd/MM HH:mm")</div> }
+                    @if (wo.ActualEndTime.HasValue) { <div class="col-6"><strong>Ended:</strong> @wo.ActualEndTime.Value.ToString("dd/MM HH:mm")</div> }
+                </div>
+            </div>
+        </div>
+        @if (wo.TotalCost > 0 || wo.Status >= WorkOrderStatus.Completed)
+        {
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-white"><h6 class="mb-0">Costs</h6></div>
+                <div class="card-body small">
+                    <div class="d-flex justify-content-between"><span>Labor:</span><strong>฿@wo.LaborCost.ToString("N0")</strong></div>
+                    <div class="d-flex justify-content-between"><span>Materials:</span><strong>฿@wo.MaterialCost.ToString("N0")</strong></div>
+                    <div class="d-flex justify-content-between"><span>Travel:</span><strong>฿@wo.TravelCost.ToString("N0")</strong></div>
+                    <hr class="my-1" />
+                    <div class="d-flex justify-content-between"><strong>Total:</strong><strong class="fs-5">฿@wo.TotalCost.ToString("N0")</strong></div>
+                </div>
+            </div>
+        }
+        @if (!string.IsNullOrWhiteSpace(wo.CompletionNotes))
+        {
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-white"><h6 class="mb-0">Completion Notes</h6></div>
+                <div class="card-body small">@wo.CompletionNotes</div>
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Complete modal -->
+<div class="modal fade" id="completeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="Completed">
+            <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">Complete Work Order</h5></div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label">Completion Notes</label>
+                        <textarea asp-for="CompletionNotes" class="form-control" rows="3"></textarea>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-4">
+                            <label class="form-label">Labor ฿</label>
+                            <input asp-for="LaborCost" type="number" step="any" class="form-control" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Material ฿</label>
+                            <input asp-for="MaterialCost" type="number" step="any" class="form-control" />
+                        </div>
+                        <div class="col-4">
+                            <label class="form-label">Travel ฿</label>
+                            <input asp-for="TravelCost" type="number" step="any" class="form-control" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check-circle"></i> Complete</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
