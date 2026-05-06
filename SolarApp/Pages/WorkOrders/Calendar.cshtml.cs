@@ -16,25 +16,35 @@ public class CalendarModel : PageModel
 
     public async Task OnGetAsync()
     {
-        var orders = await _context.WorkOrders
+        var raw = await _context.WorkOrders
             .Where(w => w.Status != WorkOrderStatus.Cancelled)
             .Select(w => new
             {
-                id = w.Id,
-                title = w.WorkOrderNumber + " " + w.Title,
-                start = w.ScheduledDate.ToString("yyyy-MM-dd"),
-                color = w.Status switch
-                {
-                    WorkOrderStatus.Completed or WorkOrderStatus.Verified or WorkOrderStatus.Closed => "#198754",
-                    WorkOrderStatus.InProgress => "#ffc107",
-                    WorkOrderStatus.Cancelled => "#dc3545",
-                    _ => w.ScheduledDate.Date < DateTime.UtcNow.Date ? "#dc3545" : "#0d6efd"
-                },
-                url = $"/WorkOrders/Detail/{w.Id}",
-                extendedProps = new { type = w.Type.ToString(), status = w.Status.ToString(), site = w.ExternalSiteName ?? "" }
+                w.Id,
+                w.WorkOrderNumber,
+                w.Title,
+                w.ScheduledDate,
+                w.Status,
+                w.Type,
+                Site = w.ExternalSiteName ?? ""
             })
             .ToListAsync();
 
-        EventsJson = System.Text.Json.JsonSerializer.Serialize(orders);
+        var now = DateTime.UtcNow.Date;
+        var events = raw.Select(w => new
+        {
+            id = w.Id,
+            title = w.WorkOrderNumber + " " + w.Title,
+            start = w.ScheduledDate.ToString("yyyy-MM-dd"),
+            color = w.Status switch
+            {
+                WorkOrderStatus.Completed or WorkOrderStatus.Verified or WorkOrderStatus.Closed => "#198754",
+                WorkOrderStatus.InProgress => "#ffc107",
+                _ => w.ScheduledDate.Date < now ? "#dc3545" : "#0d6efd"
+            },
+            url = $"/WorkOrders/Detail/{w.Id}"
+        });
+
+        EventsJson = System.Text.Json.JsonSerializer.Serialize(events);
     }
 }
