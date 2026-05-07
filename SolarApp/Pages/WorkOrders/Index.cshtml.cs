@@ -32,8 +32,25 @@ public class IndexModel : PageModel
     public int TodayCount { get; set; }
     public int ThisWeekCount { get; set; }
 
+    public string? TableError { get; set; }
+
     public async Task OnGetAsync()
     {
+        // Guard: table might not exist yet if schema upgrade hasn't run
+        try
+        {
+            #pragma warning disable EF1002
+            await _context.Database.ExecuteSqlRawAsync("SELECT TOP 0 * FROM [WorkOrders]");
+            #pragma warning restore EF1002
+        }
+        catch
+        {
+            TableError = "WorkOrders table does not exist yet. Please restart the IIS Application Pool " +
+                "(or the app process) so the schema upgrade can create it. " +
+                "If the problem persists, check Admin → Startup Logs for errors.";
+            return;
+        }
+
         var user = await _userManager.GetUserAsync(User);
         var roles = user != null ? await _userManager.GetRolesAsync(user) : new List<string>();
 
