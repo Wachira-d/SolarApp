@@ -598,8 +598,13 @@ public class Startup
         // Build one big idempotent batch
         foreach (var (table, column, sql) in upgrades)
         {
+            // Guard: only ALTER if both the table EXISTS and the column does NOT.
+            // Without the table-existence check, ALTER TABLE on a table that's
+            // created later in the same batch (e.g. WorkOrders) would fail and
+            // abort the entire script.
             sb.AppendLine($@"
-IF NOT EXISTS (SELECT 1 FROM sys.columns
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = N'{table}')
+AND NOT EXISTS (SELECT 1 FROM sys.columns
     WHERE Name = N'{column}' AND Object_ID = Object_ID(N'[{table}]'))
 BEGIN {sql}; END");
         }
