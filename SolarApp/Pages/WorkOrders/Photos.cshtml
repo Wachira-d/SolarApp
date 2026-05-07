@@ -4,6 +4,7 @@
 @{
     var wo = Model.Order;
     ViewData["Title"] = $"Photos — {wo.WorkOrderNumber}";
+    var canEdit = User.IsInRole("Admin") || User.IsInRole("Partner");
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -15,9 +16,12 @@
         <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-arrow-left"></i> Back to WO
         </a>
-        <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal">
-            <i class="bi bi-camera-fill"></i> Add Photos
-        </button>
+        @if (canEdit)
+        {
+            <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="bi bi-camera-fill"></i> Add Photos
+            </button>
+        }
     </div>
 </div>
 
@@ -26,14 +30,17 @@
     <div class="alert alert-success">@Model.StatusMessage</div>
 }
 
-<!-- Quick upload bar (mobile-friendly) -->
-<div class="card border-0 shadow-sm mb-3 d-md-none">
-    <div class="card-body py-2">
-        <button type="button" class="btn btn-warning w-100" data-bs-toggle="modal" data-bs-target="#uploadModal">
-            <i class="bi bi-camera-fill me-2"></i> ถ่ายรูป / เลือกรูป
-        </button>
+<!-- Quick upload bar (mobile-friendly, admin/partner only) -->
+@if (canEdit)
+{
+    <div class="card border-0 shadow-sm mb-3 d-md-none">
+        <div class="card-body py-2">
+            <button type="button" class="btn btn-warning w-100" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="bi bi-camera-fill me-2"></i> ถ่ายรูป / เลือกรูป
+            </button>
+        </div>
     </div>
-</div>
+}
 
 <!-- Photo gallery by category -->
 @if (!Model.PhotosByCategory.Any())
@@ -42,10 +49,17 @@
         <div class="card-body text-center py-5">
             <i class="bi bi-camera text-muted" style="font-size:3rem"></i>
             <h5 class="mt-3">ยังไม่มีรูปภาพ</h5>
-            <p class="text-muted">กดปุ่ม "Add Photos" เพื่อเริ่มถ่ายรูปหรืออัพโหลด</p>
-            <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#uploadModal">
-                <i class="bi bi-camera-fill"></i> Add Photos
-            </button>
+            @if (canEdit)
+            {
+                <p class="text-muted">กดปุ่ม "Add Photos" เพื่อเริ่มถ่ายรูปหรืออัพโหลด</p>
+                <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                    <i class="bi bi-camera-fill"></i> Add Photos
+                </button>
+            }
+            else
+            {
+                <p class="text-muted">ยังไม่มีรูปภาพสำหรับงานนี้</p>
+            }
         </div>
     </div>
 }
@@ -76,14 +90,17 @@ else
                                 <span class="badge @photo.TimingBadgeClass position-absolute top-0 start-0 m-1">
                                     @photo.Timing
                                 </span>
-                                <form method="post" asp-page-handler="Delete"
-                                      asp-route-id="@wo.Id" asp-route-photoId="@photo.Id"
-                                      class="position-absolute top-0 end-0 m-1"
-                                      onsubmit="return confirm('Delete this photo?')">
-                                    <button type="submit" class="btn btn-sm btn-danger py-0 px-1" style="opacity:0.8">
-                                        <i class="bi bi-x"></i>
-                                    </button>
-                                </form>
+                                @if (canEdit)
+                                {
+                                    <form method="post" asp-page-handler="Delete"
+                                          asp-route-id="@wo.Id" asp-route-photoId="@photo.Id"
+                                          class="position-absolute top-0 end-0 m-1"
+                                          onsubmit="return confirm('Delete this photo?')">
+                                        <button type="submit" class="btn btn-sm btn-danger py-0 px-1" style="opacity:0.8">
+                                            <i class="bi bi-x"></i>
+                                        </button>
+                                    </form>
+                                }
                                 @if (!string.IsNullOrWhiteSpace(photo.Description))
                                 {
                                     <div class="small text-muted mt-1">@photo.Description</div>
