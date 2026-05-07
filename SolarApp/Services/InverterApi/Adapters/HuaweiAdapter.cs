@@ -264,6 +264,27 @@ public class HuaweiAdapter : IInverterApiAdapter
 
     public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
     {
+        // Huawei NBI enforces ~1 request/minute across ALL endpoints.
+        // If we get failCode=407, wait 62 seconds and retry ONCE.
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            var result = await GetRealtimeDataInternalAsync(credentials);
+            if (result != null) return result;
+
+            // If rate-limited on first attempt, wait and retry
+            if (attempt == 1 && _lastRealtimeError != null && _lastRealtimeError.Contains("407"))
+            {
+                _logger.LogInformation("Huawei rate-limited (407), waiting 62s before retry...");
+                await Task.Delay(TimeSpan.FromSeconds(62));
+                continue;
+            }
+            break;
+        }
+        return null;
+    }
+
+    private async Task<RealtimeData?> GetRealtimeDataInternalAsync(ApiCredentials credentials)
+    {
         _lastRealtimeError = null;
         _lastRealtimeHttpCode = 0;
 

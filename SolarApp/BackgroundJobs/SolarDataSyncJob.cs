@@ -46,8 +46,21 @@ public class SolarDataSyncJob
         int totalRealtime = 0, totalDaily = 0, totalAlarms = 0;
         int totalApiFailures = 0, totalDeviceOffline = 0;
 
+        // Sort installations so rate-limited brands (Huawei = 1 req/min)
+        // are spread out. Group by brand and interleave where possible.
+        InverterBrand? lastBrand = null;
+
         foreach (var installation in installations)
         {
+            // Huawei NBI: ~1 request/minute hard limit across ALL endpoints.
+            // Add delay between consecutive Huawei installations.
+            if (installation.InverterBrand == InverterBrand.Huawei && lastBrand == InverterBrand.Huawei)
+            {
+                _logger.LogDebug("Sync: waiting 62s between Huawei installations (rate limit)");
+                await Task.Delay(TimeSpan.FromSeconds(62));
+            }
+            lastBrand = installation.InverterBrand;
+
             try
             {
                 var adapter = _adapterFactory.GetAdapter(installation.InverterBrand);
