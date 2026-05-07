@@ -204,6 +204,9 @@ public class Startup
         builder.Services.AddScoped<Services.Weather.IWeatherService, Services.Weather.WeatherService>();
         builder.Services.AddMemoryCache();
         builder.Services.AddValidatorsFromAssemblyContaining<Startup>();
+        // Self-keepalive: pings /ping every 4 min to prevent IIS idle shutdown
+        builder.Services.AddHostedService<BackgroundJobs.SelfKeepAliveService>();
+
         builder.Services.AddScoped<BackgroundJobs.SolarDataSyncJob>();
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
 
