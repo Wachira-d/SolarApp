@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 
 namespace SolarApp.Pages.WorkOrders;
 
@@ -10,14 +11,25 @@ namespace SolarApp.Pages.WorkOrders;
 public class CalendarModel : PageModel
 {
     private readonly ApplicationDbContext _context;
-    public CalendarModel(ApplicationDbContext context) => _context = context;
+    private readonly IWorkOrderAccessHelper _access;
+
+    public CalendarModel(ApplicationDbContext context, IWorkOrderAccessHelper access)
+    {
+        _context = context;
+        _access = access;
+    }
 
     public string EventsJson { get; set; } = "[]";
 
     public async Task OnGetAsync()
     {
-        var raw = await _context.WorkOrders
-            .Where(w => w.Status != WorkOrderStatus.Cancelled)
+        var baseQuery = _context.WorkOrders
+            .Include(w => w.Installation)
+            .Where(w => w.Status != WorkOrderStatus.Cancelled);
+
+        var visible = await _access.ApplyVisibilityFilterAsync(baseQuery, User);
+
+        var raw = await visible
             .Select(w => new
             {
                 w.Id,

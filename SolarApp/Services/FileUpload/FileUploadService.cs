@@ -39,7 +39,7 @@ public class FileUploadService : IFileUploadService
         _logger = logger;
     }
 
-    public async Task<(bool Success, string UrlOrError)> UploadAsync(IFormFile file, string category, int installationId)
+    public async Task<(bool Success, string UrlOrError)> UploadAsync(IFormFile file, string category, int installationId, bool stripExif = false)
     {
         if (file == null || file.Length == 0)
             return (false, "No file provided");
@@ -82,8 +82,23 @@ public class FileUploadService : IFileUploadService
             var fileName = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}{ext}";
             var fullPath = Path.Combine(dir, fileName);
 
-            await using var stream = new FileStream(fullPath, FileMode.Create);
-            await file.CopyToAsync(stream);
+            // Strip EXIF for JPEGs when requested. Other formats are written as-is —
+            // PNG/WEBP/GIF do not carry GPS in the way phone cameras embed it in JPEG.
+            var shouldStripExif = stripExif && (ext == ".jpg" || ext == ".jpeg");
+            if (shouldStripExif)
+            {
+                await using var inStream = file.OpenReadStream();
+                using var ms = new MemoryStream();
+                await inStream.CopyToAsync(ms);
+                var bytes = ms.ToArray();
+                var stripped = JpegExifStripper.Strip(bytes);
+                await File.WriteAllBytesAsync(fullPath, stripped);
+            }
+            else
+            {
+                await using var stream = new FileStream(fullPath, FileMode.Create);
+                await file.CopyToAsync(stream);
+            }
 
             // URL path (forward slashes, relative to wwwroot)
             var urlPath = $"/uploads/{safeCategory}/{installationId}/{fileName}";

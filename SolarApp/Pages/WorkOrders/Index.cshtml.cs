@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -6,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 
 namespace SolarApp.Pages.WorkOrders;
 
@@ -14,11 +16,16 @@ public class IndexModel : PageModel
 {
     private readonly ApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IWorkOrderAccessHelper _access;
 
-    public IndexModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager)
+    public IndexModel(
+        ApplicationDbContext context,
+        UserManager<ApplicationUser> userManager,
+        IWorkOrderAccessHelper access)
     {
         _context = context;
         _userManager = userManager;
+        _access = access;
     }
 
     public List<WorkOrder> Orders { get; set; } = new();
@@ -26,6 +33,8 @@ public class IndexModel : PageModel
     [BindProperty(SupportsGet = true)] public WorkOrderStatus? StatusFilter { get; set; }
     [BindProperty(SupportsGet = true)] public WorkOrderType? TypeFilter { get; set; }
     [BindProperty(SupportsGet = true)] public string? Search { get; set; }
+    [BindProperty(SupportsGet = true), DataType(DataType.Date)] public DateTime? FromDate { get; set; }
+    [BindProperty(SupportsGet = true), DataType(DataType.Date)] public DateTime? ToDate { get; set; }
 
     public int TotalCount { get; set; }
     public int OverdueCount { get; set; }
@@ -51,40 +60,26 @@ public class IndexModel : PageModel
             return;
         }
 
-        var user = await _userManager.GetUserAsync(User);
-        var roles = user != null ? await _userManager.GetRolesAsync(user) : new List<string>();
-
-        var q = _context.WorkOrders
+        var baseQ = _context.WorkOrders
             .Include(w => w.Installation)
             .Include(w => w.AssignedToUser)
             .Include(w => w.Customer)
             .AsQueryable();
 
-        // Role-based filter
-        if (!roles.Contains(UserRoles.Admin))
-        {
-            if (roles.Contains(UserRoles.Partner))
-                q = q.Where(w => (w.Installation != null && w.Installation.PartnerId == user!.PartnerId)
-                              || w.CreatedByUserId == user!.Id
-                              || w.AssignedToUserId == user!.Id);
-            else if (roles.Contains(UserRoles.Customer))
-            {
-                // Customer sees WOs linked to their installations OR where they're the customer
-                var custId = await _context.Customers
-                    .Where(c => c.UserId == user!.Id)
-                    .Select(c => c.Id)
-                    .FirstOrDefaultAsync();
-                q = q.Where(w =>
-                    (w.Installation != null && w.Installation.CustomerId == custId)
-                    || w.CustomerId == custId
-                    || w.CreatedByUserId == user!.Id);
-            }
-            else
-                q = q.Where(w => w.CreatedByUserId == user!.Id || w.AssignedToUserId == user!.Id);
-        }
+        var q = await _access.ApplyVisibilityFilterAsync(baseQ, User);
 
         if (StatusFilter.HasValue) q = q.Where(w => w.Status == StatusFilter);
         if (TypeFilter.HasValue) q = q.Where(w => w.Type == TypeFilter);
+        if (FromDate.HasValue)
+        {
+            var from = FromDate.Value.Date;
+            q = q.Where(w => w.ScheduledDate >= from);
+        }
+        if (ToDate.HasValue)
+        {
+            var to = ToDate.Value.Date.AddDays(1);
+            q = q.Where(w => w.ScheduledDate < to);
+        }
         if (!string.IsNullOrWhiteSpace(Search))
         {
             var s = Search.Trim().ToLower();
@@ -101,6 +96,6 @@ public class IndexModel : PageModel
         TodayCount = await q.CountAsync(w => w.ScheduledDate.Date == now);
         ThisWeekCount = await q.CountAsync(w => w.ScheduledDate.Date >= now && w.ScheduledDate.Date <= weekEnd);
 
-        Orders = await q.OrderByDescending(w => w.ScheduledDate).Take(100).ToListAsync();
+        Orders = await q.OrderByDescending(w => w.ScheduledDate).Take(200).ToListAsync();
     }
 }

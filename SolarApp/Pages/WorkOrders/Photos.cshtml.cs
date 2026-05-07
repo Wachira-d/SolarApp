@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Authorization;
 using SolarApp.Services.FileUpload;
 
 namespace SolarApp.Pages.WorkOrders;
@@ -16,12 +17,18 @@ public class PhotosModel : PageModel
     private readonly ApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IFileUploadService _uploader;
+    private readonly IWorkOrderAccessHelper _access;
 
-    public PhotosModel(ApplicationDbContext context, UserManager<ApplicationUser> userManager, IFileUploadService uploader)
+    public PhotosModel(
+        ApplicationDbContext context,
+        UserManager<ApplicationUser> userManager,
+        IFileUploadService uploader,
+        IWorkOrderAccessHelper access)
     {
         _context = context;
         _userManager = userManager;
         _uploader = uploader;
+        _access = access;
     }
 
     public WorkOrder Order { get; set; } = null!;
@@ -55,6 +62,8 @@ public class PhotosModel : PageModel
             .Include(w => w.Installation)
             .FirstOrDefaultAsync(w => w.Id == id);
         if (wo == null) return NotFound();
+        if (!await _access.CanViewAsync(wo, User)) return Forbid();
+
         Order = wo;
         PhotosByCategory = wo.Photos.GroupBy(p => p.Category).ToList();
         return Page();
@@ -64,12 +73,14 @@ public class PhotosModel : PageModel
     {
         var wo = await _context.WorkOrders.FindAsync(id);
         if (wo == null) return NotFound();
+        if (!await _access.CanEditAsync(wo, User)) return Forbid();
+
         var user = await _userManager.GetUserAsync(User);
 
         int uploaded = 0;
         foreach (var file in PhotoFiles.Where(f => f != null && f.Length > 0).Take(20))
         {
-            var (ok, urlOrErr) = await _uploader.UploadAsync(file, $"wo-{id}-photos", id);
+            var (ok, urlOrErr) = await _uploader.UploadAsync(file, $"wo-{id}-photos", id, stripExif: true);
             if (!ok)
             {
                 StatusMessage = $"Upload failed: {urlOrErr}";
@@ -101,6 +112,10 @@ public class PhotosModel : PageModel
 
     public async Task<IActionResult> OnPostDeleteAsync(int id, int photoId)
     {
+        var wo = await _context.WorkOrders.FindAsync(id);
+        if (wo == null) return NotFound();
+        if (!await _access.CanEditAsync(wo, User)) return Forbid();
+
         var photo = await _context.WorkOrderPhotos.FindAsync(photoId);
         if (photo == null || photo.WorkOrderId != id) return NotFound();
         _uploader.Delete(photo.FilePath);

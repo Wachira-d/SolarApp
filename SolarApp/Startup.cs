@@ -198,6 +198,7 @@ public class Startup
         builder.Services.AddScoped<Services.InverterApi.Common.IAdapterDiagnostics, Services.InverterApi.Common.AdapterDiagnostics>();
         builder.Services.AddScoped<Services.InverterApi.Common.IConnectionHealthChecker, Services.InverterApi.Common.ConnectionHealthChecker>();
         builder.Services.AddScoped<Services.Authorization.IInstallationAccessHelper, Services.Authorization.InstallationAccessHelper>();
+        builder.Services.AddScoped<Services.Authorization.IWorkOrderAccessHelper, Services.Authorization.WorkOrderAccessHelper>();
         builder.Services.AddScoped<Services.Performance.IPerformanceMetricsService, Services.Performance.PerformanceMetricsService>();
         builder.Services.AddScoped<Services.AlertRules.IAlertRulesEngine, Services.AlertRules.AlertRulesEngine>();
         builder.Services.AddScoped<Services.LineApi.ILineMessagingService, Services.LineApi.LineMessagingService>();

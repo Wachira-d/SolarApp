@@ -18,6 +18,15 @@
         <a asp-page="Photos" asp-route-id="@wo.Id" class="btn btn-sm btn-outline-info">
             <i class="bi bi-camera"></i> Photos (@wo.Photos.Count)
         </a>
+        @if (Model.CanEdit
+             && wo.Status != WorkOrderStatus.Closed
+             && wo.Status != WorkOrderStatus.Cancelled
+             && (User.IsInRole("Admin") || User.IsInRole("Partner")))
+        {
+            <a asp-page="Edit" asp-route-id="@wo.Id" class="btn btn-sm btn-outline-warning">
+                <i class="bi bi-pencil"></i> Edit
+            </a>
+        }
         @if (wo.Status == WorkOrderStatus.Scheduled || wo.Status == WorkOrderStatus.Assigned)
         {
             <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress">
@@ -213,15 +222,15 @@
                     <div class="row g-2">
                         <div class="col-4">
                             <label class="form-label">Labor ฿</label>
-                            <input asp-for="LaborCost" type="number" step="any" class="form-control" />
+                            <input asp-for="LaborCost" type="number" min="0" step="any" class="form-control" />
                         </div>
                         <div class="col-4">
                             <label class="form-label">Material ฿</label>
-                            <input asp-for="MaterialCost" type="number" step="any" class="form-control" />
+                            <input asp-for="MaterialCost" type="number" min="0" step="any" class="form-control" />
                         </div>
                         <div class="col-4">
                             <label class="form-label">Travel ฿</label>
-                            <input asp-for="TravelCost" type="number" step="any" class="form-control" />
+                            <input asp-for="TravelCost" type="number" min="0" step="any" class="form-control" />
                         </div>
                     </div>
                 </div>

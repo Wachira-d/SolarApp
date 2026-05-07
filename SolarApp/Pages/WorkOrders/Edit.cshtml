@@ -1,0 +1,93 @@
+@page "{id:int}"
+@model SolarApp.Pages.WorkOrders.EditModel
+@using SolarApp.Models.Enums
+@{
+    var wo = Model.Order;
+    ViewData["Title"] = $"Edit — {wo.WorkOrderNumber}";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-pencil-square"></i> Edit Work Order</h4>
+        <small class="text-muted">@wo.WorkOrderNumber · @wo.SiteName</small>
+    </div>
+    <div>
+        <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Back
+        </a>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body">
+        <form method="post">
+            <input type="hidden" asp-for="Input.Id" />
+
+            <div asp-validation-summary="All" class="alert alert-danger" role="alert"></div>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label asp-for="Input.Title" class="form-label">Title</label>
+                    <input asp-for="Input.Title" class="form-control" />
+                    <span asp-validation-for="Input.Title" class="text-danger small"></span>
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="Input.Type" class="form-label">Type</label>
+                    <select asp-for="Input.Type" class="form-select"
+                            asp-items="Html.GetEnumSelectList<WorkOrderType>()"></select>
+                </div>
+                <div class="col-md-3">
+                    <label asp-for="Input.RecurrenceMonths" class="form-label">Recurrence (months)</label>
+                    <input asp-for="Input.RecurrenceMonths" type="number" min="0" max="120" class="form-control" />
+                    <span asp-validation-for="Input.RecurrenceMonths" class="text-danger small"></span>
+                </div>
+
+                <div class="col-md-4">
+                    <label asp-for="Input.ScheduledDate" class="form-label">Scheduled Date</label>
+                    <input asp-for="Input.ScheduledDate" type="date" class="form-control" />
+                    <span asp-validation-for="Input.ScheduledDate" class="text-danger small"></span>
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="Input.ScheduledTimeStr" class="form-label">Scheduled Time</label>
+                    <input asp-for="Input.ScheduledTimeStr" type="time" class="form-control" />
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="Input.EstimatedDurationMinutes" class="form-label">Estimated Duration (min)</label>
+                    <input asp-for="Input.EstimatedDurationMinutes" type="number" min="15" max="1440" class="form-control" />
+                    <span asp-validation-for="Input.EstimatedDurationMinutes" class="text-danger small"></span>
+                </div>
+
+                <div class="col-md-6">
+                    <label asp-for="Input.AssignedToUserId" class="form-label">Assigned To</label>
+                    <select asp-for="Input.AssignedToUserId" class="form-select" asp-items="Model.Users">
+                        <option value="">— unassigned —</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.AssignedTeam" class="form-label">Assigned Team</label>
+                    <input asp-for="Input.AssignedTeam" class="form-control" placeholder="e.g. Cleaning Crew A" />
+                </div>
+
+                <div class="col-12">
+                    <label asp-for="Input.Description" class="form-label">Description</label>
+                    <textarea asp-for="Input.Description" class="form-control" rows="2"></textarea>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.Scope" class="form-label">Scope</label>
+                    <textarea asp-for="Input.Scope" class="form-control" rows="3"></textarea>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.SpecialInstructions" class="form-label">Special Instructions</label>
+                    <textarea asp-for="Input.SpecialInstructions" class="form-control" rows="3"></textarea>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary">Cancel</a>
+                <button type="submit" class="btn btn-warning">
+                    <i class="bi bi-save"></i> Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
