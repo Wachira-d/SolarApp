@@ -43,6 +43,7 @@ public class DetailModel : PageModel
             .Include(w => w.AssignedToUser)
             .Include(w => w.CreatedByUser)
             .Include(w => w.ChecklistItems.OrderBy(i => i.SortOrder))
+            .Include(w => w.Photos)
             .Include(w => w.ServiceTicket)
             .FirstOrDefaultAsync(w => w.Id == id);
         if (wo == null) return NotFound();

@@ -15,6 +15,9 @@
         <small class="text-muted">@wo.Type · @wo.SiteName · @wo.ScheduledDate.ToString("dd MMM yyyy")</small>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+        <a asp-page="Photos" asp-route-id="@wo.Id" class="btn btn-sm btn-outline-info">
+            <i class="bi bi-camera"></i> Photos (@wo.Photos.Count)
+        </a>
         @if (wo.Status == WorkOrderStatus.Scheduled || wo.Status == WorkOrderStatus.Assigned)
         {
             <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress">

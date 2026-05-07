@@ -1,0 +1,180 @@
+@page "{id:int}"
+@model SolarApp.Pages.WorkOrders.PhotosModel
+@using SolarApp.Models.Enums
+@{
+    var wo = Model.Order;
+    ViewData["Title"] = $"Photos — {wo.WorkOrderNumber}";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-camera"></i> Job Photos</h4>
+        <small class="text-muted">@wo.WorkOrderNumber · @wo.SiteName · @wo.Photos.Count photo(s)</small>
+    </div>
+    <div class="d-flex gap-2">
+        <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Back to WO
+        </a>
+        <button type="button" class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal">
+            <i class="bi bi-camera-fill"></i> Add Photos
+        </button>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success">@Model.StatusMessage</div>
+}
+
+<!-- Quick upload bar (mobile-friendly) -->
+<div class="card border-0 shadow-sm mb-3 d-md-none">
+    <div class="card-body py-2">
+        <button type="button" class="btn btn-warning w-100" data-bs-toggle="modal" data-bs-target="#uploadModal">
+            <i class="bi bi-camera-fill me-2"></i> ถ่ายรูป / เลือกรูป
+        </button>
+    </div>
+</div>
+
+<!-- Photo gallery by category -->
+@if (!Model.PhotosByCategory.Any())
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-camera text-muted" style="font-size:3rem"></i>
+            <h5 class="mt-3">ยังไม่มีรูปภาพ</h5>
+            <p class="text-muted">กดปุ่ม "Add Photos" เพื่อเริ่มถ่ายรูปหรืออัพโหลด</p>
+            <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="bi bi-camera-fill"></i> Add Photos
+            </button>
+        </div>
+    </div>
+}
+else
+{
+    @foreach (var group in Model.PhotosByCategory)
+    {
+        var cat = group.Key;
+        var photos = group.ToList();
+        var sample = photos.First();
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">
+                    @sample.CategoryDisplayName
+                    <span class="badge bg-secondary ms-1">@photos.Count</span>
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="row g-2">
+                    @foreach (var photo in photos)
+                    {
+                        <div class="col-6 col-md-4 col-lg-3">
+                            <div class="position-relative">
+                                <a href="@photo.FilePath" target="_blank">
+                                    <img src="@photo.FilePath" class="img-fluid rounded shadow-sm"
+                                         style="height:150px; width:100%; object-fit:cover;" loading="lazy" />
+                                </a>
+                                <span class="badge @photo.TimingBadgeClass position-absolute top-0 start-0 m-1">
+                                    @photo.Timing
+                                </span>
+                                <form method="post" asp-page-handler="Delete"
+                                      asp-route-id="@wo.Id" asp-route-photoId="@photo.Id"
+                                      class="position-absolute top-0 end-0 m-1"
+                                      onsubmit="return confirm('Delete this photo?')">
+                                    <button type="submit" class="btn btn-sm btn-danger py-0 px-1" style="opacity:0.8">
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                </form>
+                                @if (!string.IsNullOrWhiteSpace(photo.Description))
+                                {
+                                    <div class="small text-muted mt-1">@photo.Description</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+<!-- Summary: which categories have been photographed -->
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-check2-square"></i> Photo Checklist</h6></div>
+    <div class="card-body">
+        <div class="row g-2 small">
+            @foreach (var (groupName, items) in PhotosModel.CategoryGroups)
+            {
+                <div class="col-12 col-md-6 col-lg-4">
+                    <strong>@groupName</strong>
+                    @foreach (var cat in items)
+                    {
+                        var count = wo.Photos.Count(p => p.Category == cat);
+                        var icon = count > 0 ? "bi-check-circle-fill text-success" : "bi-circle text-muted";
+                        <div class="d-flex align-items-center gap-1">
+                            <i class="bi @icon"></i>
+                            <span class="@(count > 0 ? "" : "text-muted")">
+                                @(new WorkOrderPhoto { Category = cat }.CategoryDisplayName)
+                                @if (count > 0) { <span class="badge bg-success ms-1">@count</span> }
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Upload Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="post" asp-page-handler="Upload" asp-route-id="@wo.Id" enctype="multipart/form-data">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-camera-fill"></i> Add Photos</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Category *</label>
+                        <select asp-for="UploadCategory" class="form-select">
+                            @foreach (var (groupName, items) in PhotosModel.CategoryGroups)
+                            {
+                                <optgroup label="@groupName">
+                                    @foreach (var cat in items)
+                                    {
+                                        <option value="@((int)cat)">@(new WorkOrderPhoto { Category = cat }.CategoryDisplayName)</option>
+                                    }
+                                </optgroup>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Timing</label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="UploadTiming" id="timBefore" value="1" checked>
+                            <label class="btn btn-outline-warning" for="timBefore">Before</label>
+                            <input type="radio" class="btn-check" name="UploadTiming" id="timDuring" value="2">
+                            <label class="btn btn-outline-info" for="timDuring">During</label>
+                            <input type="radio" class="btn-check" name="UploadTiming" id="timAfter" value="3">
+                            <label class="btn btn-outline-success" for="timAfter">After</label>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Photos * (max 20)</label>
+                        <input type="file" name="PhotoFiles" multiple accept="image/*" capture="environment"
+                               class="form-control" required />
+                        <small class="text-muted">กดเลือกหลายรูปได้ หรือถ่ายจากกล้องโดยตรง</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Note (optional)</label>
+                        <input asp-for="UploadDescription" class="form-control" placeholder="e.g. Row A, String 1-4" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning"><i class="bi bi-upload"></i> Upload</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>

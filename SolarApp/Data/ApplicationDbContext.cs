@@ -27,6 +27,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<AlertRule> AlertRules => Set<AlertRule>();
     public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
     public DbSet<WorkOrderItem> WorkOrderItems => Set<WorkOrderItem>();
+    public DbSet<WorkOrderPhoto> WorkOrderPhotos => Set<WorkOrderPhoto>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -380,6 +381,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(i => new { i.WorkOrderId, i.SortOrder });
+        });
+
+        // ── WorkOrderPhoto ──
+        builder.Entity<WorkOrderPhoto>(entity =>
+        {
+            entity.HasOne(p => p.WorkOrder)
+                .WithMany(w => w.Photos)
+                .HasForeignKey(p => p.WorkOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(p => p.UploadedByUser)
+                .WithMany()
+                .HasForeignKey(p => p.UploadedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(p => new { p.WorkOrderId, p.Category, p.Timing });
         });
     }
 }

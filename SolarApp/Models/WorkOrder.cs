@@ -105,6 +105,7 @@ public class WorkOrder
 
     // ─── Navigation ───
     public ICollection<WorkOrderItem> ChecklistItems { get; set; } = new List<WorkOrderItem>();
+    public ICollection<WorkOrderPhoto> Photos { get; set; } = new List<WorkOrderPhoto>();
 
     // ─── Computed ───
     public string SiteName => Installation?.SiteName ?? ExternalSiteName ?? "Unspecified Site";

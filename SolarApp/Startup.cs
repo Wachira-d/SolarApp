@@ -688,6 +688,28 @@ BEGIN
             REFERENCES [WorkOrders]([Id]) ON DELETE CASCADE
     );
     CREATE INDEX IX_WorkOrderItems_WorkOrderId_SortOrder ON [WorkOrderItems]([WorkOrderId], [SortOrder]);
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrderPhotos')
+BEGIN
+    CREATE TABLE [WorkOrderPhotos] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [WorkOrderId] int NOT NULL,
+        [Category] int NOT NULL,
+        [Timing] int NOT NULL DEFAULT 1,
+        [Description] nvarchar(500) NULL,
+        [FilePath] nvarchar(500) NOT NULL,
+        [ContentType] nvarchar(100) NULL,
+        [FileSizeBytes] bigint NOT NULL DEFAULT 0,
+        [Latitude] float NULL,
+        [Longitude] float NULL,
+        [UploadedByUserId] nvarchar(450) NULL,
+        [UploadedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [SortOrder] int NOT NULL DEFAULT 0,
+        CONSTRAINT FK_WorkOrderPhotos_WorkOrders FOREIGN KEY ([WorkOrderId])
+            REFERENCES [WorkOrders]([Id]) ON DELETE CASCADE
+    );
+    CREATE INDEX IX_WorkOrderPhotos_WO_Cat_Timing ON [WorkOrderPhotos]([WorkOrderId], [Category], [Timing]);
 END");
 
         foreach (var (name, table, cols) in indexUpgrades)
