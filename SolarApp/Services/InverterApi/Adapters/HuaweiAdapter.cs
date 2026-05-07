@@ -262,25 +262,14 @@ public class HuaweiAdapter : IInverterApiAdapter
     private int _lastRealtimeHttpCode;
     private string? _lastPlantLookupError;
 
-    public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
+    public Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
     {
-        // Huawei NBI enforces ~1 request/minute across ALL endpoints.
-        // If we get failCode=407, wait 62 seconds and retry ONCE.
-        for (var attempt = 1; attempt <= 2; attempt++)
-        {
-            var result = await GetRealtimeDataInternalAsync(credentials);
-            if (result != null) return result;
-
-            // If rate-limited on first attempt, wait and retry
-            if (attempt == 1 && _lastRealtimeError != null && _lastRealtimeError.Contains("407"))
-            {
-                _logger.LogInformation("Huawei rate-limited (407), waiting 62s before retry...");
-                await Task.Delay(TimeSpan.FromSeconds(62));
-                continue;
-            }
-            break;
-        }
-        return null;
+        // Huawei NBI: 1 req/min per account. The retry-after-62s pattern used
+        // to live here, but it blocked the entire sync loop for >1 minute on
+        // every rate-limit hit. The HuaweiRateGate now handles spacing globally
+        // — if the window is busy, the call returns RateLimited fast and the
+        // next sync cycle picks it up.
+        return GetRealtimeDataInternalAsync(credentials);
     }
 
     private async Task<RealtimeData?> GetRealtimeDataInternalAsync(ApiCredentials credentials)
@@ -293,6 +282,17 @@ public class HuaweiAdapter : IInverterApiAdapter
             _lastRealtimeError = "PlantId (Station Code) is empty in installation settings.";
             return null;
         }
+
+        // ── Rate gate: skip fast if the per-account 1 req/min window is busy ──
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+        var (defer, wait) = HuaweiRateGate.Decide(accountKey);
+        if (defer)
+        {
+            _lastRealtimeError = $"[RATE LIMITED] Skipped — Huawei NBI 1 req/min window busy " +
+                $"(next allowed in {wait.TotalSeconds:0.0}s). Will retry next sync cycle.";
+            return null;
+        }
+        if (wait > TimeSpan.Zero) await Task.Delay(wait);
 
         try
         {
@@ -311,6 +311,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                 stationCode = "NE=" + stationCode;
 
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
+            HuaweiRateGate.MarkCalled(accountKey);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationRealKpi",
                 new { stationCodes = stationCode });
             _lastRealtimeHttpCode = (int)response.StatusCode;
@@ -340,6 +341,10 @@ public class HuaweiAdapter : IInverterApiAdapter
                     var cacheKey = $"{credentials.Username}|{credentials.Password?.Length ?? 0}";
                     InvalidateToken(cacheKey);
                 }
+
+                // Real 407 from server — back off harder so we stop self-poking the rate limit
+                if (failCode.Value == 407)
+                    HuaweiRateGate.RecordRateLimitResponse(accountKey);
 
                 var msg = SafeGetString(json, "message") ?? SafeGetString(json, "data") ?? "Unknown";
                 _lastRealtimeError = $"Huawei error failCode={failCode.Value}: {msg}. " +
@@ -441,6 +446,8 @@ public class HuaweiAdapter : IInverterApiAdapter
         var records = new List<EnergyRecord>();
         if (string.IsNullOrEmpty(credentials.PlantId)) return records;
 
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -453,9 +460,21 @@ public class HuaweiAdapter : IInverterApiAdapter
             var cur = from.Date;
             while (cur <= to.Date)
             {
+                // Per-day rate gate — defer remaining days if quota is busy
+                var (defer, wait) = HuaweiRateGate.Decide(accountKey);
+                if (defer)
+                {
+                    _logger.LogInformation(
+                        "Huawei historical: deferring remaining days starting {Date} — rate gate busy ({Wait:0.0}s)",
+                        cur, wait.TotalSeconds);
+                    break;
+                }
+                if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
                 try
                 {
                     var collectTime = new DateTimeOffset(cur).ToUnixTimeMilliseconds();
+                    HuaweiRateGate.MarkCalled(accountKey);
                     var response = await client.PostAsJsonAsync($"{BaseUrl}/getKpiStationDay",
                         new { stationCodes = credentials.PlantId, collectTime });
 
@@ -509,6 +528,13 @@ public class HuaweiAdapter : IInverterApiAdapter
         var alarms = new List<AlarmRecord>();
         if (string.IsNullOrEmpty(credentials.PlantId)) return alarms;
 
+        // Rate gate: skip silently if the window is busy. Alarms are non-critical;
+        // missing one cycle is fine.
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+        var (defer, wait) = HuaweiRateGate.Decide(accountKey);
+        if (defer) return alarms;
+        if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -518,12 +544,21 @@ public class HuaweiAdapter : IInverterApiAdapter
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
             var beginTime = new DateTimeOffset(from).ToUnixTimeMilliseconds();
             var endTime = new DateTimeOffset(to).ToUnixTimeMilliseconds();
+            HuaweiRateGate.MarkCalled(accountKey);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getAlarmList",
                 new { stationCodes = credentials.PlantId, beginTime, endTime, pageNo = 1, pageSize = 100 });
             if (!response.IsSuccessStatusCode) return alarms;
 
             var json = await ReadJsonAsync(response);
             if (json == null) return alarms;
+
+            // Detect 407 in body even on HTTP 200 — extend cooldown
+            var alarmFailCode = SafeGetInt(json.Value, "failCode");
+            if (alarmFailCode.HasValue && alarmFailCode.Value == 407)
+            {
+                HuaweiRateGate.RecordRateLimitResponse(accountKey);
+                return alarms;
+            }
 
             if (!json.Value.TryGetProperty("data", out var data)
                 || data.ValueKind != JsonValueKind.Object) return alarms;
@@ -573,6 +608,15 @@ public class HuaweiAdapter : IInverterApiAdapter
             return devices;
         }
 
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+        var (defer, wait) = HuaweiRateGate.Decide(accountKey);
+        if (defer)
+        {
+            _lastDevicesError = $"Rate gate busy ({wait.TotalSeconds:0.0}s). Try again later.";
+            return devices;
+        }
+        if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -589,6 +633,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                 stationCode = "NE=" + stationCode;
 
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
+            HuaweiRateGate.MarkCalled(accountKey);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/getDevList",
                 new { stationCodes = stationCode });
 
@@ -611,6 +656,9 @@ public class HuaweiAdapter : IInverterApiAdapter
             var failCode = SafeGetInt(json, "failCode");
             if (failCode.HasValue && failCode.Value != 0)
             {
+                if (failCode.Value == 407)
+                    HuaweiRateGate.RecordRateLimitResponse(accountKey);
+
                 var errMsg = SafeGetString(json, "message") ?? SafeGetString(json, "data") ?? "Unknown";
                 _lastDevicesError = failCode.Value switch
                 {
@@ -745,8 +793,25 @@ public class HuaweiAdapter : IInverterApiAdapter
                 return (cached.Token, "OK (cached)");
         }
 
+        // ── Rate gate ── login itself counts toward Huawei's 1 req/min budget.
+        // If we'd block too long, return whatever we last cached (even if expired)
+        // rather than firing a real login that's just going to 407.
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+        var (defer, wait) = HuaweiRateGate.Decide(accountKey);
+        if (defer)
+        {
+            lock (_tokenCacheLock)
+            {
+                if (_tokenCache.TryGetValue(cacheKey, out var stale))
+                    return (stale.Token, "OK (stale cached, rate gate busy)");
+            }
+            return (null, $"Rate gate busy ({wait.TotalSeconds:0.0}s) and no cached token available.");
+        }
+        if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
         try
         {
+            HuaweiRateGate.MarkCalled(accountKey);
             var response = await client.PostAsJsonAsync($"{BaseUrl}/login",
                 new { userName = credentials.Username, systemCode = credentials.Password });
 
@@ -779,9 +844,11 @@ public class HuaweiAdapter : IInverterApiAdapter
 
                     // 407 = rate limit. If we have a cached token from recent sync,
                     // use it — don't throw away a working session just because we
-                    // couldn't re-login this minute.
+                    // couldn't re-login this minute. Also extend the cooldown so
+                    // subsequent calls back off harder.
                     if (failCode.Value == 407)
                     {
+                        HuaweiRateGate.RecordRateLimitResponse(accountKey);
                         lock (_tokenCacheLock)
                         {
                             if (_tokenCache.TryGetValue(cacheKey, out var cached))

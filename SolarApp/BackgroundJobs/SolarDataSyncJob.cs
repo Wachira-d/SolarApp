@@ -45,22 +45,10 @@ public class SolarDataSyncJob
 
         int totalRealtime = 0, totalDaily = 0, totalAlarms = 0;
         int totalApiFailures = 0, totalDeviceOffline = 0;
-
-        // Sort installations so rate-limited brands (Huawei = 1 req/min)
-        // are spread out. Group by brand and interleave where possible.
-        InverterBrand? lastBrand = null;
+        int totalRateLimitDeferred = 0;
 
         foreach (var installation in installations)
         {
-            // Huawei NBI: ~1 request/minute hard limit across ALL endpoints.
-            // Add delay between consecutive Huawei installations.
-            if (installation.InverterBrand == InverterBrand.Huawei && lastBrand == InverterBrand.Huawei)
-            {
-                _logger.LogDebug("Sync: waiting 62s between Huawei installations (rate limit)");
-                await Task.Delay(TimeSpan.FromSeconds(62));
-            }
-            lastBrand = installation.InverterBrand;
-
             try
             {
                 var adapter = _adapterFactory.GetAdapter(installation.InverterBrand);
@@ -78,13 +66,31 @@ public class SolarDataSyncJob
 
                 if (realtimeResult.IsApiFailure)
                 {
+                    // ─── Rate-limit deferral is NOT an outage ───
+                    // Huawei's 1 req/min ceiling is something WE manage via HuaweiRateGate.
+                    // When the gate defers a call, the cloud is fine — we just chose
+                    // not to call it this cycle. Don't spam alerts, don't mark offline.
+                    if (realtimeResult.Kind == Services.InverterApi.Models.ApiResultKind.RateLimited)
+                    {
+                        totalRateLimitDeferred++;
+                        installation.LastOnlineAt = DateTime.UtcNow; // cloud reachable; we deferred
+                        if (installation.Status == InstallationStatus.Offline)
+                            installation.Status = InstallationStatus.Active;
+
+                        LogApiCall(installation, "GetRealtimeData",
+                            realtimeResult.HttpStatusCode ?? 0, true,  // success=true to keep out of failure stats
+                            $"[RATE LIMIT-DEFERRED] {realtimeResult.Message}. " +
+                            "Skipped this cycle to respect Huawei NBI 1-req/min budget. Will retry next cycle.");
+                        await _context.SaveChangesAsync();
+                        continue;
+                    }
+
                     totalApiFailures++;
                     var kindTag = realtimeResult.Kind switch
                     {
                         Services.InverterApi.Models.ApiResultKind.Timeout => "[TIMEOUT]",
                         Services.InverterApi.Models.ApiResultKind.NetworkError => "[NETWORK ERROR]",
                         Services.InverterApi.Models.ApiResultKind.AuthenticationFailed => "[AUTH FAILED]",
-                        Services.InverterApi.Models.ApiResultKind.RateLimited => "[RATE LIMITED]",
                         Services.InverterApi.Models.ApiResultKind.CloudServerError => "[CLOUD 5xx]",
                         Services.InverterApi.Models.ApiResultKind.ParseError => "[PARSE ERROR]",
                         Services.InverterApi.Models.ApiResultKind.PlantNotFound => "[PLANT NOT FOUND]",
@@ -238,46 +244,62 @@ public class SolarDataSyncJob
                     }
                 }
 
-                // ─── 4. Alarms (last 24 hours) ───
-                try
+                // ─── 4. Alarms (last 24 hours) — fetch at most hourly per
+                // installation to stay well within Huawei's 1 req/min budget. ───
+                var lastAlarmFetch = await _context.InverterApiLogs
+                    .Where(l => l.InstallationId == installation.Id
+                                && l.Endpoint == "GetAlarms"
+                                && l.IsSuccess)
+                    .OrderByDescending(l => l.RequestTime)
+                    .Select(l => (DateTime?)l.RequestTime)
+                    .FirstOrDefaultAsync();
+                var skipAlarms = lastAlarmFetch.HasValue
+                    && DateTime.UtcNow - lastAlarmFetch.Value < TimeSpan.FromMinutes(55);
+
+                if (!skipAlarms)
                 {
-                    var alarms = await adapter.GetAlarmsAsync(credentials,
-                        DateTime.UtcNow.AddHours(-24), DateTime.UtcNow);
-
-                    foreach (var a in alarms)
+                    try
                     {
-                        var exists = await _context.SystemAlerts.AnyAsync(x =>
-                            x.InstallationId == installation.Id
-                            && x.Title == a.AlarmName
-                            && x.OccurredAt == a.OccurredAt);
+                        var alarms = await adapter.GetAlarmsAsync(credentials,
+                            DateTime.UtcNow.AddHours(-24), DateTime.UtcNow);
+                        LogApiCall(installation, "GetAlarms", 200, true,
+                            $"[ALARMS] Fetched {alarms.Count} alarm(s).");
 
-                        if (!exists)
+                        foreach (var a in alarms)
                         {
-                            _context.SystemAlerts.Add(new SystemAlert
+                            var exists = await _context.SystemAlerts.AnyAsync(x =>
+                                x.InstallationId == installation.Id
+                                && x.Title == a.AlarmName
+                                && x.OccurredAt == a.OccurredAt);
+
+                            if (!exists)
                             {
-                                InstallationId = installation.Id,
-                                AlertType = AlertType.Error,
-                                Severity = a.Severity switch
+                                _context.SystemAlerts.Add(new SystemAlert
                                 {
-                                    1 => AlertSeverity.Critical,
-                                    2 => AlertSeverity.High,
-                                    3 => AlertSeverity.Medium,
-                                    _ => AlertSeverity.Low
-                                },
-                                Title = a.AlarmName,
-                                Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
-                                OccurredAt = a.OccurredAt,
-                                ResolvedAt = a.ClearedAt,
-                                IsNotified = false
-                            });
-                            totalAlarms++;
+                                    InstallationId = installation.Id,
+                                    AlertType = AlertType.Error,
+                                    Severity = a.Severity switch
+                                    {
+                                        1 => AlertSeverity.Critical,
+                                        2 => AlertSeverity.High,
+                                        3 => AlertSeverity.Medium,
+                                        _ => AlertSeverity.Low
+                                    },
+                                    Title = a.AlarmName,
+                                    Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
+                                    OccurredAt = a.OccurredAt,
+                                    ResolvedAt = a.ClearedAt,
+                                    IsNotified = false
+                                });
+                                totalAlarms++;
+                            }
                         }
                     }
-                }
-                catch (Exception alarmEx)
-                {
-                    // Alarms are non-critical, don't fail the whole sync
-                    _logger.LogWarning(alarmEx, "Failed to fetch alarms for installation {Id}", installation.Id);
+                    catch (Exception alarmEx)
+                    {
+                        // Alarms are non-critical, don't fail the whole sync
+                        _logger.LogWarning(alarmEx, "Failed to fetch alarms for installation {Id}", installation.Id);
+                    }
                 }
 
                 await _context.SaveChangesAsync();
@@ -314,8 +336,9 @@ public class SolarDataSyncJob
 
         _logger.LogInformation(
             "Sync complete: {Total} installations | {Realtime} realtime OK | {Daily} daily records | {Alarms} alarms | " +
-            "{ApiFailures} API failures | {DeviceOffline} device-offline",
-            installations.Count, totalRealtime, totalDaily, totalAlarms, totalApiFailures, totalDeviceOffline);
+            "{ApiFailures} API failures | {DeviceOffline} device-offline | {RateLimited} rate-limit-deferred",
+            installations.Count, totalRealtime, totalDaily, totalAlarms,
+            totalApiFailures, totalDeviceOffline, totalRateLimitDeferred);
     }
 
     private void LogApiCall(Installation installation, string endpoint, int statusCode, bool success, string? error = null)

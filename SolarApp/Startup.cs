@@ -212,6 +212,17 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
         builder.Services.AddScoped<BackgroundJobs.WorkOrderReminderJob>();
 
+        // ── Huawei NBI rate gate tunables ──
+        // Defaults to 65s spacing, which keeps us safely below Huawei's
+        // 1 req/min per-account ceiling. Override via appsettings:
+        //   "InverterApis": { "HuaweiMinSpacingSeconds": 70, "HuaweiBackoffSeconds": 120 }
+        Services.InverterApi.Common.HuaweiRateGate.MinSpacing = TimeSpan.FromSeconds(
+            builder.Configuration.GetValue("InverterApis:HuaweiMinSpacingSeconds", 65));
+        Services.InverterApi.Common.HuaweiRateGate.ExtendOnRateLimit = TimeSpan.FromSeconds(
+            builder.Configuration.GetValue("InverterApis:HuaweiBackoffSeconds", 120));
+        Services.InverterApi.Common.HuaweiRateGate.MaxAcceptableWait = TimeSpan.FromSeconds(
+            builder.Configuration.GetValue("InverterApis:HuaweiMaxAcceptableWaitSeconds", 30));
+
         // ── Localization ──
         builder.Services.AddLocalization(opt => opt.ResourcesPath = "Resources");
         builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>(opt =>

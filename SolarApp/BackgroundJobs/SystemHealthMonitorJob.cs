@@ -78,10 +78,14 @@ public class SystemHealthMonitorJob
 
             // Gate alert by consecutive API failures in recent window (noise reduction).
             // A single failed call shouldn't page on-call — wait for sustained failure.
+            // Exclude RATE-LIMIT-DEFERRED entries — those are our scheduling, not a cloud outage.
             var recentFailures = await _context.InverterApiLogs
                 .Where(l => l.InstallationId == installation.Id
                             && !l.IsSuccess
-                            && l.RequestTime >= threshold)
+                            && l.RequestTime >= threshold
+                            && (l.ErrorMessage == null
+                                || (!l.ErrorMessage.Contains("[RATE LIMIT-DEFERRED]")
+                                    && !l.ErrorMessage.Contains("[RATE LIMITED]"))))
                 .CountAsync();
 
             if (recentFailures < minFailedCalls)
@@ -122,9 +126,14 @@ public class SystemHealthMonitorJob
                     : $"{offlineDuration.Value.TotalMinutes:0} minutes"
                 : "unknown duration";
 
+            // NOTE: RATE LIMITED removed intentionally — it's our own scheduling
+            // (Huawei NBI 1 req/min budget), not an outage. The HuaweiRateGate
+            // defers calls without firing failure logs, so RATE LIMITED here
+            // would only mean a one-off 407 from the server, not a sustained
+            // problem worth waking ops up over.
             var isApiIssue = rootCause.Contains("API CONNECTION") || rootCause.Contains("TIMEOUT")
                 || rootCause.Contains("NETWORK") || rootCause.Contains("AUTHENTICATION")
-                || rootCause.Contains("RATE LIMITED") || rootCause.Contains("CLOUD SERVER");
+                || rootCause.Contains("CLOUD SERVER");
 
             // ─── Severity determination ───
             // API connectivity issues: Critical (our infrastructure problem)
@@ -197,6 +206,25 @@ public class SystemHealthMonitorJob
         {
             alert.ResolvedAt = DateTime.UtcNow;
         }
+
+        // Auto-resolve LEGACY rate-limit-caused offline alerts. These were
+        // created before we treated RATE LIMITED as scheduling (not an outage).
+        // The user already has the dashboard visibility — no need to keep them open.
+        var staleRateLimitAlerts = await _context.SystemAlerts
+            .Where(a => a.AlertType == AlertType.Offline
+                && a.ResolvedAt == null
+                && a.RootCauseAnalysis != null
+                && (a.RootCauseAnalysis.Contains("RATE LIMITED")
+                    || a.RootCauseAnalysis.Contains("ACCESS_FREQUENCY")
+                    || a.RootCauseAnalysis.Contains("failCode=407")))
+            .ToListAsync();
+        foreach (var alert in staleRateLimitAlerts)
+        {
+            alert.ResolvedAt = DateTime.UtcNow;
+            alert.AcknowledgedAt ??= DateTime.UtcNow;
+        }
+        if (staleRateLimitAlerts.Count > 0)
+            _logger.LogInformation("Auto-resolved {Count} stale rate-limit-caused offline alert(s)", staleRateLimitAlerts.Count);
 
         await _context.SaveChangesAsync();
     }
