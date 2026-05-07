@@ -656,8 +656,12 @@ public class HuaweiAdapter : IInverterApiAdapter
         10 => "Smart Power Sensor (Meter)",
         16 => "EMI / Datalogger",
         17 => "Smart Logger",
+        37 => "MERC Optimizer",         // Huawei MERC power optimizer
+        38 => "Optimizer",
         39 => "Battery",
         41 => "PCS",
+        46 => "Smart Dongle",
+        47 => "Backup Box",
         62 => "Battery Pack",
         _ => $"Device (type {devTypeId})"
     };

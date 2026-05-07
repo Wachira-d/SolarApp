@@ -127,15 +127,31 @@ public class DeviceImporter : IDeviceImporter
             return new DeviceImportResult(false, reason, 0, 0, 0, installationNote);
         }
 
-        int created = 0, updated = 0;
+        int created = 0, updated = 0, skipped = 0;
         foreach (var dev in devices)
         {
-            // Match on SerialNumber (strongest) or DeviceId
             var serial = dev.SerialNumber?.Trim();
-            var devKey = string.IsNullOrWhiteSpace(serial) ? dev.DeviceId : serial;
+            var devKey = string.IsNullOrWhiteSpace(serial) ? dev.DeviceId?.Trim() : serial;
+            if (string.IsNullOrWhiteSpace(devKey))
+            {
+                skipped++;
+                continue;
+            }
 
+            // Match on SerialNumber (strongest) — check BOTH in-memory collection
+            // AND direct DB query to catch equipment added in previous Refresh clicks
             var equipment = installation.Equipment
-                .FirstOrDefault(e => (e.SerialNumber ?? "").Equals(devKey, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(e => !string.IsNullOrEmpty(e.SerialNumber)
+                    && e.SerialNumber.Equals(devKey, StringComparison.OrdinalIgnoreCase));
+
+            if (equipment == null)
+            {
+                // Double-check DB directly (handles race condition / stale Include)
+                equipment = await _context.Equipment
+                    .FirstOrDefaultAsync(e => e.InstallationId == installation.Id
+                        && e.SerialNumber != null
+                        && e.SerialNumber == devKey, ct);
+            }
 
             var eqType = ClassifyDeviceType(dev.DeviceType);
 
@@ -191,17 +207,31 @@ public class DeviceImporter : IDeviceImporter
 
         await _context.SaveChangesAsync(ct);
         return new DeviceImportResult(true,
-            $"Imported {created} new + updated {updated} existing equipment record(s)",
+            $"Imported {created} new + updated {updated} existing + skipped {skipped} (no serial). " +
+            $"Total from API: {devices.Count} device(s).",
             devices.Count, created, updated, installationNote);
     }
 
     private static EquipmentType ClassifyDeviceType(string deviceType)
     {
         var t = (deviceType ?? "").ToLowerInvariant();
-        if (t.Contains("inverter") || t.Contains("pcs")) return EquipmentType.Inverter;
-        if (t.Contains("batter") || t.Contains("bms") || t.Contains("ess")) return EquipmentType.Battery;
-        if (t.Contains("meter") || t.Contains("smart")) return EquipmentType.Meter;
-        if (t.Contains("panel") || t.Contains("module")) return EquipmentType.SolarPanel;
-        return EquipmentType.Inverter; // Most API-exposed devices are inverters
+
+        // Exact matches first (from Huawei MapHuaweiDevType + other brands)
+        if (t.Contains("meter") || t.Contains("sensor") || t.Contains("power meter"))
+            return EquipmentType.Meter;
+        if (t.Contains("batter") || t.Contains("bms") || t.Contains("ess") || t.Contains("battery pack"))
+            return EquipmentType.Battery;
+        if (t.Contains("logger") || t.Contains("datalog") || t.Contains("emi"))
+            return EquipmentType.Other;       // Smart Logger / EMI / Datalogger = not inverter
+        if (t.Contains("optimizer") || t.Contains("merc") || t.Contains("mlpe"))
+            return EquipmentType.Optimizer;
+        if (t.Contains("charger") || t.Contains("ev"))
+            return EquipmentType.Charger;
+        if (t.Contains("panel") || t.Contains("module"))
+            return EquipmentType.SolarPanel;
+        if (t.Contains("inverter") || t.Contains("pcs") || t.Contains("micro"))
+            return EquipmentType.Inverter;
+
+        return EquipmentType.Other;           // Unknown → Other (not Inverter)
     }
 }
