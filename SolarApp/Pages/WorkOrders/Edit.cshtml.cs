@@ -107,6 +107,12 @@ public class EditModel : PageModel
         wo.Scope = Input.Scope;
         wo.SpecialInstructions = Input.SpecialInstructions;
         wo.Type = Input.Type;
+
+        // If rescheduling to a different date, clear the reminder flag so the
+        // background job fires a fresh LINE notification for the new date.
+        if (wo.ScheduledDate.Date != Input.ScheduledDate.Date)
+            wo.ReminderSentAt = null;
+
         wo.ScheduledDate = Input.ScheduledDate;
         wo.ScheduledTime = TimeSpan.TryParse(Input.ScheduledTimeStr, out var ts) ? ts : null;
         wo.EstimatedDurationMinutes = Input.EstimatedDurationMinutes;

@@ -210,6 +210,7 @@ public class Startup
 
         builder.Services.AddScoped<BackgroundJobs.SolarDataSyncJob>();
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
+        builder.Services.AddScoped<BackgroundJobs.WorkOrderReminderJob>();
 
         // ── Localization ──
         builder.Services.AddLocalization(opt => opt.ResourcesPath = "Resources");
@@ -265,11 +266,14 @@ public class Startup
 
         var syncCron = GetSetting(ctx, "Schedule.DataSync", "*/15 * * * *");
         var healthCron = GetSetting(ctx, "Schedule.HealthMonitor", "*/5 * * * *");
+        var reminderCron = GetSetting(ctx, "Schedule.WorkOrderReminders", "*/30 * * * *");
 
         RecurringJob.AddOrUpdate<BackgroundJobs.SolarDataSyncJob>(
             "sync-production-data", job => job.ExecuteAsync(), syncCron);
         RecurringJob.AddOrUpdate<BackgroundJobs.SystemHealthMonitorJob>(
             "check-system-health", job => job.ExecuteAsync(), healthCron);
+        RecurringJob.AddOrUpdate<BackgroundJobs.WorkOrderReminderJob>(
+            "workorder-reminders", job => job.ExecuteAsync(), reminderCron);
     }
 
     /// <summary>
@@ -559,6 +563,8 @@ public class Startup
              Sql: "ALTER TABLE [CleaningRecords] ADD [BeforePhotos] nvarchar(max) NULL"),
             (Table: "CleaningRecords", Column: "AfterPhotos",
              Sql: "ALTER TABLE [CleaningRecords] ADD [AfterPhotos] nvarchar(max) NULL"),
+            (Table: "WorkOrders", Column: "ReminderSentAt",
+             Sql: "ALTER TABLE [WorkOrders] ADD [ReminderSentAt] datetime2 NULL"),
         };
 
         var indexUpgrades = new (string Name, string Table, string Columns)[]

@@ -103,6 +103,9 @@ public class WorkOrder
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>Last time we sent a LINE reminder for this WO. Null = never reminded.</summary>
+    public DateTime? ReminderSentAt { get; set; }
+
     // ─── Navigation ───
     public ICollection<WorkOrderItem> ChecklistItems { get; set; } = new List<WorkOrderItem>();
     public ICollection<WorkOrderPhoto> Photos { get; set; } = new List<WorkOrderPhoto>();

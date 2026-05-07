@@ -19,6 +19,7 @@ public class ScheduleModel : PageModel
 
     [BindProperty] public string DataSyncCron { get; set; } = "*/15 * * * *";
     [BindProperty] public string HealthMonitorCron { get; set; } = "*/5 * * * *";
+    [BindProperty] public string WorkOrderRemindersCron { get; set; } = "*/30 * * * *";
 
     public List<JobStatus> Jobs { get; set; } = new();
     [TempData] public string? StatusMessage { get; set; }
@@ -52,17 +53,26 @@ public class ScheduleModel : PageModel
             ErrorMessage = $"Invalid Health Monitor cron expression: '{HealthMonitorCron}'";
             return RedirectToPage();
         }
+        if (!IsValidCron(WorkOrderRemindersCron))
+        {
+            ErrorMessage = $"Invalid Work Order Reminders cron expression: '{WorkOrderRemindersCron}'";
+            return RedirectToPage();
+        }
 
         await UpsertSetting("Schedule.DataSync", DataSyncCron,
             "Cron for inverter data sync (fetches power/energy from cloud)");
         await UpsertSetting("Schedule.HealthMonitor", HealthMonitorCron,
             "Cron for system health monitor (checks offline, warranty, cleaning)");
+        await UpsertSetting("Schedule.WorkOrderReminders", WorkOrderRemindersCron,
+            "Cron for LINE reminders for upcoming/overdue work orders");
 
         // Apply immediately via Hangfire
         RecurringJob.AddOrUpdate<SolarDataSyncJob>(
             "sync-production-data", j => j.ExecuteAsync(), DataSyncCron);
         RecurringJob.AddOrUpdate<SystemHealthMonitorJob>(
             "check-system-health", j => j.ExecuteAsync(), HealthMonitorCron);
+        RecurringJob.AddOrUpdate<WorkOrderReminderJob>(
+            "workorder-reminders", j => j.ExecuteAsync(), WorkOrderRemindersCron);
 
         StatusMessage = "Schedule updated successfully!";
         return RedirectToPage();
@@ -72,6 +82,7 @@ public class ScheduleModel : PageModel
     {
         DataSyncCron = "*/15 * * * *";
         HealthMonitorCron = "*/5 * * * *";
+        WorkOrderRemindersCron = "*/30 * * * *";
         return OnPostSaveAsync().Result;
     }
 
@@ -83,6 +94,8 @@ public class ScheduleModel : PageModel
                 BackgroundJob.Enqueue<SolarDataSyncJob>(j => j.ExecuteAsync());
             else if (jobId == "check-system-health")
                 BackgroundJob.Enqueue<SystemHealthMonitorJob>(j => j.ExecuteAsync());
+            else if (jobId == "workorder-reminders")
+                BackgroundJob.Enqueue<WorkOrderReminderJob>(j => j.ExecuteAsync());
 
             StatusMessage = $"Job '{jobId}' queued for immediate execution";
         }
@@ -99,6 +112,8 @@ public class ScheduleModel : PageModel
             .FirstOrDefaultAsync(s => s.Key == "Schedule.DataSync"))?.Value ?? "*/15 * * * *";
         HealthMonitorCron = (await _context.SystemSettings
             .FirstOrDefaultAsync(s => s.Key == "Schedule.HealthMonitor"))?.Value ?? "*/5 * * * *";
+        WorkOrderRemindersCron = (await _context.SystemSettings
+            .FirstOrDefaultAsync(s => s.Key == "Schedule.WorkOrderReminders"))?.Value ?? "*/30 * * * *";
     }
 
     private async Task UpsertSetting(string key, string value, string description)

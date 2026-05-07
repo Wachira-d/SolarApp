@@ -81,6 +81,26 @@
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            <i class="bi bi-bell text-warning"></i> Work Order Reminders (LINE แจ้งช่าง/ลูกค้า)
+                        </label>
+                        <input asp-for="WorkOrderRemindersCron" class="form-control font-monospace" />
+                        <small class="text-muted">
+                            ส่ง LINE แจ้งงานที่ใกล้ถึงกำหนด (≤36 ชม.) และเตือนงานที่เลยกำหนด (ทุก 23 ชม.)
+                        </small>
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="WorkOrderRemindersCron" data-val="*/15 * * * *">ทุก 15 นาที</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary cron-preset"
+                                    data-target="WorkOrderRemindersCron" data-val="*/30 * * * *">ทุก 30 นาที (แนะนำ)</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="WorkOrderRemindersCron" data-val="0 * * * *">ทุกชั่วโมง</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
+                                    data-target="WorkOrderRemindersCron" data-val="0 7,17 * * *">07:00 + 17:00</button>
+                        </div>
+                    </div>
+
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-warning">
                             <i class="bi bi-save"></i> Save Schedule
@@ -177,12 +197,18 @@
                     <li>Log every API call to <code>InverterApiLogs</code></li>
                 </ul>
                 <p class="mb-2"><strong><i class="bi bi-heart-pulse text-danger"></i> check-system-health</strong></p>
-                <ul class="mb-0">
+                <ul class="mb-3">
                     <li>Check installations offline &gt; threshold -&gt; create alert</li>
                     <li>Check cleaning due -&gt; create alert</li>
                     <li>Check warranty expiring in 90 days -&gt; create alert</li>
                     <li>Send LINE notifications for new alerts</li>
                     <li>Auto-resolve alerts when systems come back online</li>
+                </ul>
+                <p class="mb-2"><strong><i class="bi bi-bell text-warning"></i> workorder-reminders</strong></p>
+                <ul class="mb-0">
+                    <li>หา WO ที่กำหนดภายใน 36 ชม. ข้างหน้า → ส่ง LINE ครั้งเดียว</li>
+                    <li>หา WO เลยกำหนด (ยังไม่ Completed) → ส่ง LINE ทุก 23 ชม. จนกว่าจะอัพเดต</li>
+                    <li>ส่งถึง: ช่างที่ assigned, ลูกค้า, LINE Alert Group (ถ้าตั้งไว้)</li>
                 </ul>
             </div>
         </div>
