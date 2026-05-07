@@ -242,7 +242,6 @@ public class EditModel : PageModel
             CloudUsername = _credProtector.Unprotect(installation.CloudUsername),
             CloudPassword = null,
             PlantId = installation.PlantId,
-            PlantId = installation.PlantId,
             SystemCapacityKw = installation.SystemCapacityKw,
             NumberOfPanels = installation.NumberOfPanels,
             PanelWattage = installation.PanelWattage,
