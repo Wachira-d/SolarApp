@@ -222,7 +222,10 @@ public class DeviceImporter : IDeviceImporter
             var primary = inverters.OrderByDescending(e => e.RatingKw ?? 0).First();
             installation.InverterModel = primary.Model;
             installation.InverterCount = inverters.Count;
-            installation.InverterSizeKw = primary.RatingKw ?? 0;
+            // Only update InverterSizeKw if the API returned a real value.
+            // Don't overwrite a user-set value (e.g. 150 kW) with 0.
+            if (primary.RatingKw.HasValue && primary.RatingKw.Value > 0)
+                installation.InverterSizeKw = primary.RatingKw.Value;
 
             // Total inverter capacity (for display "X kW × N = Y kW")
             // is computed from TotalInverterCapacityKw property using Count × Size
@@ -265,11 +268,13 @@ public class DeviceImporter : IDeviceImporter
             if (totalKwh > 0) installation.BatteryCapacityKwh = totalKwh;
         }
 
-        // System capacity from plant info (already set above) or calculated
-        if (installation.SystemCapacityKw <= 0 && inverters.Any())
+        // System capacity: update from inverter sum only if the current value
+        // looks like a placeholder (≤ 1 kW) and we have real data
+        if (inverters.Any())
         {
             var totalInvKw = inverters.Sum(i => (i.RatingKw ?? 0) * i.Quantity);
-            if (totalInvKw > 0) installation.SystemCapacityKw = totalInvKw;
+            if (totalInvKw > 0 && (installation.SystemCapacityKw <= 1 || totalInvKw > installation.SystemCapacityKw))
+                installation.SystemCapacityKw = totalInvKw;
         }
 
         installation.UpdatedAt = DateTime.UtcNow;

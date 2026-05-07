@@ -7,7 +7,7 @@ using SolarApp.Models;
 
 namespace SolarApp.Pages.Installations;
 
-[Authorize(Roles = "Admin")]
+[Authorize(Roles = "Admin,Partner")]
 public class DeleteEquipmentModel : PageModel
 {
     private readonly ApplicationDbContext _context;

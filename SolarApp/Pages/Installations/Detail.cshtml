@@ -157,13 +157,29 @@
 
 <!-- Equipment -->
 <div class="card border-0 shadow-sm mb-4">
-    <div class="card-header bg-white d-flex justify-content-between">
-        <h6 class="mb-0">Equipment</h6>
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h6 class="mb-0">Equipment (@inst.Equipment.Count)</h6>
+        @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+        {
+            <div class="d-flex gap-1">
+                <button type="button" class="btn btn-outline-danger btn-sm" id="clearAllEquipBtn" data-id="@inst.Id"
+                        onclick="if(confirm('ลบ Equipment ทั้งหมด (@inst.Equipment.Count รายการ)?')){
+                            fetch('/api/installations/'+this.dataset.id+'/equipment',{method:'DELETE'})
+                            .then(r=>r.json()).then(d=>{alert(d.message);location.reload()})
+                            .catch(e=>alert('Error: '+e.message));}">
+                    <i class="bi bi-trash"></i> Clear All
+                </button>
+                <a asp-page="AddEquipment" asp-route-installationId="@inst.Id" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-plus-lg"></i> Add
+                </a>
+            </div>
+        }
     </div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
+        <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
             <thead class="table-light">
-                <tr><th>Type</th><th>Brand</th><th>Model</th><th>Serial</th><th>Qty</th><th>Rating</th><th>Total</th><th>Warranty</th></tr>
+                <tr><th>Type</th><th>Brand</th><th>Model</th><th>Serial</th><th>Qty</th><th>Rating</th><th>Total</th><th>Warranty</th><th></th></tr>
             </thead>
             <tbody>
                 @foreach (var eq in inst.Equipment)
@@ -182,24 +198,35 @@
                         totalText = $"{(eq.RatingWatts.Value * eq.Quantity) / 1000.0:N2} kW";
                     }
                     <tr>
-                        <td>@eq.EquipmentType</td>
-                        <td>@eq.Brand</td>
-                        <td>@eq.Model</td>
-                        <td><small>@eq.SerialNumber</small></td>
+                        <td><small>@eq.EquipmentType</small></td>
+                        <td><small>@eq.Brand</small></td>
+                        <td><small>@eq.Model</small></td>
+                        <td><small class="text-break">@eq.SerialNumber</small></td>
                         <td>@eq.Quantity</td>
-                        <td>@(string.IsNullOrEmpty(ratingText) ? "-" : ratingText)</td>
-                        <td class="fw-bold">@(string.IsNullOrEmpty(totalText) ? "-" : totalText)</td>
+                        <td><small>@(string.IsNullOrEmpty(ratingText) ? "-" : ratingText)</small></td>
+                        <td class="fw-bold"><small>@(string.IsNullOrEmpty(totalText) ? "-" : totalText)</small></td>
                         <td class="@(eq.IsWarrantyExpired ? "text-danger" : "")">
-                            @(eq.WarrantyExpiryDate?.ToString("dd/MM/yyyy") ?? "-")
+                            <small>@(eq.WarrantyExpiryDate?.ToString("dd/MM/yyyy") ?? "-")</small>
+                        </td>
+                        <td class="text-end">
+                            @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+                            {
+                                <a asp-page="DeleteEquipment" asp-route-id="@eq.Id"
+                                   class="btn btn-sm btn-outline-danger py-0 px-1" title="Delete"
+                                   onclick="return confirm('Delete @eq.Model (@eq.SerialNumber)?')">
+                                    <i class="bi bi-trash"></i>
+                                </a>
+                            }
                         </td>
                     </tr>
                 }
                 @if (!inst.Equipment.Any())
                 {
-                    <tr><td colspan="8" class="text-center text-muted">No equipment recorded</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted">No equipment recorded</td></tr>
                 }
             </tbody>
         </table>
+        </div>
     </div>
 </div>
 

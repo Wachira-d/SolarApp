@@ -939,6 +939,23 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             });
         }).RequireAuthorization();
 
+        // Delete all equipment for an installation (useful before re-importing)
+        app.MapDelete("/api/installations/{id:int}/equipment", async (
+            int id,
+            System.Security.Claims.ClaimsPrincipal user,
+            Services.Authorization.IInstallationAccessHelper access,
+            Data.ApplicationDbContext db) =>
+        {
+            if (!await access.CanAccessAsync(id, user)) return Results.Forbid();
+            var equipment = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .ToListAsync(db.Equipment.Where(e => e.InstallationId == id));
+            if (!equipment.Any())
+                return Results.Json(new { success = true, message = "No equipment to delete", deleted = 0 });
+            db.Equipment.RemoveRange(equipment);
+            await db.SaveChangesAsync();
+            return Results.Json(new { success = true, message = $"Deleted {equipment.Count} equipment record(s)", deleted = equipment.Count });
+        }).RequireAuthorization();
+
         app.MapGet("/api/reports/excel/{installationId:int}", async (
             int installationId, DateTime? from, DateTime? to,
             System.Security.Claims.ClaimsPrincipal user,
