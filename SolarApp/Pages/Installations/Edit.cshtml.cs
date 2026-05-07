@@ -235,14 +235,13 @@ public class EditModel : PageModel
             InverterCount = installation.InverterCount,
             InverterSizeKw = installation.InverterSizeKw,
             SystemType = installation.SystemType,
-            // NEVER echo stored secrets back to the form. The view shows a masked
-            // "configured" badge + empty input with a "(leave blank to keep)"
-            // placeholder. This prevents accidental wipes and doesn't leak
-            // credentials to the HTML source. The has-value flags drive the UI.
+            // SECRETS (ApiKey/Secret/Password): never echo back to form.
+            // NON-SECRETS (Username/PlantId): show value so user can verify.
             CloudApiKey = null,
             CloudApiSecret = null,
-            CloudUsername = null,
+            CloudUsername = _credProtector.Unprotect(installation.CloudUsername),
             CloudPassword = null,
+            PlantId = installation.PlantId,
             PlantId = installation.PlantId,
             SystemCapacityKw = installation.SystemCapacityKw,
             NumberOfPanels = installation.NumberOfPanels,

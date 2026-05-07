@@ -205,6 +205,75 @@ public class DeviceImporter : IDeviceImporter
             }
         }
 
+        // ─── 3. Update Installation summary fields from imported devices ───
+        // Recalculate inverter model/size/count from the Equipment table
+        // (not just newly imported — use ALL equipment for this installation)
+        var allEquipment = await _context.Equipment
+            .Where(e => e.InstallationId == installation.Id)
+            .ToListAsync(ct);
+
+        var inverters = allEquipment
+            .Where(e => e.EquipmentType == EquipmentType.Inverter)
+            .ToList();
+
+        if (inverters.Any())
+        {
+            // Primary inverter model = the one with highest rating (or first)
+            var primary = inverters.OrderByDescending(e => e.RatingKw ?? 0).First();
+            installation.InverterModel = primary.Model;
+            installation.InverterCount = inverters.Count;
+            installation.InverterSizeKw = primary.RatingKw ?? 0;
+
+            // Total inverter capacity (for display "X kW × N = Y kW")
+            // is computed from TotalInverterCapacityKw property using Count × Size
+
+            installationNote = (installationNote ?? "") +
+                $" | Inverters: {inverters.Count}× {primary.Model}" +
+                (primary.RatingKw.HasValue ? $" ({primary.RatingKw.Value} kW each)" : "");
+        }
+
+        // Panel info from solar panel equipment
+        var panels = allEquipment
+            .Where(e => e.EquipmentType == EquipmentType.SolarPanel)
+            .ToList();
+        if (panels.Any())
+        {
+            var totalPanels = panels.Sum(p => p.Quantity);
+            var primaryPanel = panels.OrderByDescending(p => p.RatingWatts ?? 0).First();
+            if (totalPanels > 0) installation.NumberOfPanels = totalPanels;
+            if (primaryPanel.RatingWatts.HasValue && primaryPanel.RatingWatts > 0)
+                installation.PanelWattage = primaryPanel.RatingWatts.Value;
+            if (!string.IsNullOrWhiteSpace(primaryPanel.Brand))
+                installation.PanelBrand = primaryPanel.Brand;
+            if (!string.IsNullOrWhiteSpace(primaryPanel.Model))
+                installation.PanelModel = primaryPanel.Model;
+        }
+
+        // Battery info
+        var batteries = allEquipment
+            .Where(e => e.EquipmentType == EquipmentType.Battery)
+            .ToList();
+        if (batteries.Any())
+        {
+            var primary = batteries.First();
+            installation.BatteryBrand = primary.Brand;
+            installation.BatteryModel = primary.Model;
+            installation.BatteryCount = batteries.Count;
+            var totalKwh = batteries
+                .Where(b => b.RatingKw.HasValue)
+                .Sum(b => b.RatingKw!.Value);
+            if (totalKwh > 0) installation.BatteryCapacityKwh = totalKwh;
+        }
+
+        // System capacity from plant info (already set above) or calculated
+        if (installation.SystemCapacityKw <= 0 && inverters.Any())
+        {
+            var totalInvKw = inverters.Sum(i => (i.RatingKw ?? 0) * i.Quantity);
+            if (totalInvKw > 0) installation.SystemCapacityKw = totalInvKw;
+        }
+
+        installation.UpdatedAt = DateTime.UtcNow;
+
         await _context.SaveChangesAsync(ct);
         return new DeviceImportResult(true,
             $"Imported {created} new + updated {updated} existing + skipped {skipped} (no serial). " +

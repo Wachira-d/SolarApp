@@ -102,12 +102,13 @@
                     <h6 class="text-muted mb-3 mt-4">Cloud API Connection</h6>
                     <div class="row mb-3">
                         <div class="col-md-6">
+                            @* PlantId is NOT a secret — show actual value for verification *@
                             <label asp-for="Input.PlantId" class="form-label">
                                 Plant/Station ID
                                 @if (Model.HasPlantId) { <span class="badge bg-success ms-1">Saved</span> }
                             </label>
                             <input asp-for="Input.PlantId" class="form-control"
-                                   placeholder="@(Model.HasPlantId ? "•••• (saved — leave blank to keep)" : "Enter Plant/Station ID")" />
+                                   placeholder="Enter Plant/Station ID" />
                         </div>
                         <div class="col-md-6">
                             <label asp-for="Input.CloudApiKey" class="form-label">
@@ -124,8 +125,9 @@
                                 Cloud Username
                                 @if (Model.HasUsername) { <span class="badge bg-success ms-1">Saved</span> }
                             </label>
+                            @* Username is NOT a secret — show the actual value for verification *@
                             <input asp-for="Input.CloudUsername" class="form-control"
-                                   placeholder="@(Model.HasUsername ? "•••••••••• (saved — leave blank to keep)" : "Enter username")" />
+                                   placeholder="Enter username (email/phone)" />
                         </div>
                         <div class="col-md-6">
                             <label asp-for="Input.CloudPassword" class="form-label">
