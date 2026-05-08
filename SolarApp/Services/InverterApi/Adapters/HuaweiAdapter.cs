@@ -440,6 +440,127 @@ public class HuaweiAdapter : IInverterApiAdapter
         }
     }
 
+    /// <summary>
+    /// Fetches realtime KPI for MULTIPLE station codes in a single Huawei API call.
+    /// Huawei's getStationRealKpi accepts comma-separated stationCodes, returning
+    /// an array with one entry per station. This drastically reduces API calls when
+    /// multiple installations share the same Northbound account.
+    /// </summary>
+    public async Task<Dictionary<string, RealtimeData?>> GetBatchRealtimeDataAsync(
+        ApiCredentials credentials, List<string> plantIds)
+    {
+        var results = new Dictionary<string, RealtimeData?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pid in plantIds) results[pid] = null;
+
+        if (plantIds.Count == 0) return results;
+
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+        var (defer, wait) = HuaweiRateGate.Decide(accountKey);
+        if (defer)
+        {
+            _logger.LogInformation(
+                "Huawei batch realtime: deferred {Count} stations — rate gate busy ({Wait:0.0}s)",
+                plantIds.Count, wait.TotalSeconds);
+            return results; // all null
+        }
+        if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var (token, loginError) = await LoginWithDetailAsync(client, credentials);
+            if (token == null)
+            {
+                _logger.LogWarning("Huawei batch realtime: login failed: {Err}", loginError);
+                return results;
+            }
+
+            // Normalize all station codes to NE= prefix and join
+            var normalizedCodes = plantIds.Select(p =>
+            {
+                var code = p.Trim();
+                return code.StartsWith("NE=", StringComparison.OrdinalIgnoreCase)
+                    ? code : "NE=" + code;
+            }).ToList();
+            var combinedCodes = string.Join(",", normalizedCodes);
+
+            client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
+            HuaweiRateGate.MarkCalled(accountKey);
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/getStationRealKpi",
+                new { stationCodes = combinedCodes });
+
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Huawei batch realtime HTTP {Code}", (int)response.StatusCode);
+                return results;
+            }
+
+            JsonElement json;
+            try { json = JsonDocument.Parse(body).RootElement; }
+            catch { return results; }
+
+            var failCode = SafeGetInt(json, "failCode");
+            if (failCode.HasValue && failCode.Value != 0)
+            {
+                if (failCode.Value == 407)
+                    HuaweiRateGate.RecordRateLimitResponse(accountKey);
+                if (failCode.Value == 305 || failCode.Value == 401)
+                    InvalidateToken($"{credentials.Username}|{credentials.Password?.Length ?? 0}");
+                _logger.LogWarning("Huawei batch realtime failCode={Code}", failCode.Value);
+                return results;
+            }
+
+            if (!json.TryGetProperty("data", out var dataArr)) return results;
+            if (dataArr.ValueKind == JsonValueKind.Null) return results;
+            if (dataArr.ValueKind != JsonValueKind.Array) return results;
+
+            // Build lookup from normalized code → original PlantId
+            var codeToPlantId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < plantIds.Count; i++)
+                codeToPlantId[normalizedCodes[i]] = plantIds[i];
+
+            foreach (var item in dataArr.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+
+                var stationCode = SafeGetString(item, "stationCode") ?? "";
+                if (!codeToPlantId.TryGetValue(stationCode, out var originalPlantId))
+                {
+                    // Try matching without NE= prefix
+                    var stripped = stationCode.StartsWith("NE=", StringComparison.OrdinalIgnoreCase)
+                        ? stationCode[3..] : stationCode;
+                    originalPlantId = plantIds.FirstOrDefault(p =>
+                        p.Trim().Equals(stripped, StringComparison.OrdinalIgnoreCase)
+                        || p.Trim().Equals(stationCode, StringComparison.OrdinalIgnoreCase));
+                    if (originalPlantId == null) continue;
+                }
+
+                if (!item.TryGetProperty("dataItemMap", out var kpi)
+                    || kpi.ValueKind != JsonValueKind.Object) continue;
+
+                var health = SafeGetDecimal(kpi, "real_health_state");
+                results[originalPlantId] = new RealtimeData
+                {
+                    Timestamp = DateTime.UtcNow,
+                    CurrentPowerKw = 0,
+                    TodayEnergyKwh = SafeGetDecimal(kpi, "day_power"),
+                    TotalEnergyKwh = SafeGetDecimal(kpi, "total_power"),
+                    IsOnline = health >= 1
+                };
+            }
+
+            _logger.LogInformation(
+                "Huawei batch realtime: {Success}/{Total} stations returned data in 1 API call",
+                results.Count(r => r.Value != null), plantIds.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Huawei GetBatchRealtimeData failed");
+        }
+        return results;
+    }
+
     public async Task<List<EnergyRecord>> GetHistoricalDataAsync(
         ApiCredentials credentials, DateTime from, DateTime to)
     {
