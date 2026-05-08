@@ -737,9 +737,18 @@ END");
 
         foreach (var (name, table, cols) in indexUpgrades)
         {
+            // Extract every column name from the column-list (strips brackets, splits on comma).
+            // We need each one to exist before we attempt to CREATE INDEX, otherwise the
+            // CREATE fails and rolls back the entire batch.
+            var bareCols = cols.Replace("[", "").Replace("]", "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var colExistsClauses = string.Join(" AND ", bareCols.Select(c =>
+                $"EXISTS (SELECT 1 FROM sys.columns WHERE Name = N'{c}' AND Object_ID = Object_ID(N'[{table}]'))"));
+
             sb.AppendLine($@"
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}')
     AND EXISTS (SELECT 1 FROM sys.tables WHERE name = '{table}')
+    AND {colExistsClauses}
 BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         }
 

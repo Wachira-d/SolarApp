@@ -441,18 +441,42 @@ public class HuaweiAdapter : IInverterApiAdapter
     }
 
     /// <summary>
+    /// Outcome classification for batch realtime fetch — lets the caller distinguish
+    /// "we deferred to respect rate limit" from "the API actually rejected us".
+    /// </summary>
+    public enum BatchOutcome
+    {
+        Success,          // API returned 0+ stations; check per-station data
+        Deferred,         // Rate gate busy, no call made — retry next cycle
+        AuthFailed,       // 305/401 or login failed — credentials likely stale
+        RateLimitedByServer, // Real 407 from Huawei
+        ServerError,      // 5xx, parse failure, network error
+    }
+
+    public class HuaweiBatchRealtimeResult
+    {
+        public BatchOutcome Outcome { get; set; }
+        public string? ErrorDetail { get; set; }
+        public Dictionary<string, RealtimeData?> Stations { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Fetches realtime KPI for MULTIPLE station codes in a single Huawei API call.
     /// Huawei's getStationRealKpi accepts comma-separated stationCodes, returning
     /// an array with one entry per station. This drastically reduces API calls when
     /// multiple installations share the same Northbound account.
     /// </summary>
-    public async Task<Dictionary<string, RealtimeData?>> GetBatchRealtimeDataAsync(
+    public async Task<HuaweiBatchRealtimeResult> GetBatchRealtimeDataAsync(
         ApiCredentials credentials, List<string> plantIds)
     {
-        var results = new Dictionary<string, RealtimeData?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pid in plantIds) results[pid] = null;
+        var result = new HuaweiBatchRealtimeResult();
+        foreach (var pid in plantIds) result.Stations[pid] = null;
 
-        if (plantIds.Count == 0) return results;
+        if (plantIds.Count == 0)
+        {
+            result.Outcome = BatchOutcome.Success;
+            return result;
+        }
 
         var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
         var (defer, wait) = HuaweiRateGate.Decide(accountKey);
@@ -461,7 +485,9 @@ public class HuaweiAdapter : IInverterApiAdapter
             _logger.LogInformation(
                 "Huawei batch realtime: deferred {Count} stations — rate gate busy ({Wait:0.0}s)",
                 plantIds.Count, wait.TotalSeconds);
-            return results; // all null
+            result.Outcome = BatchOutcome.Deferred;
+            result.ErrorDetail = $"Rate gate busy, retry in {wait.TotalSeconds:0.0}s";
+            return result;
         }
         if (wait > TimeSpan.Zero) await Task.Delay(wait);
 
@@ -472,15 +498,18 @@ public class HuaweiAdapter : IInverterApiAdapter
             if (token == null)
             {
                 _logger.LogWarning("Huawei batch realtime: login failed: {Err}", loginError);
-                return results;
+                result.Outcome = BatchOutcome.AuthFailed;
+                result.ErrorDetail = loginError;
+                return result;
             }
 
-            // Normalize all station codes to NE= prefix and join
+            // Normalize all station codes to NE= prefix (uppercase) and join
             var normalizedCodes = plantIds.Select(p =>
             {
                 var code = p.Trim();
                 return code.StartsWith("NE=", StringComparison.OrdinalIgnoreCase)
-                    ? code : "NE=" + code;
+                    ? "NE=" + code[3..]   // canonicalize prefix to uppercase
+                    : "NE=" + code;
             }).ToList();
             var combinedCodes = string.Join(",", normalizedCodes);
 
@@ -493,27 +522,49 @@ public class HuaweiAdapter : IInverterApiAdapter
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Huawei batch realtime HTTP {Code}", (int)response.StatusCode);
-                return results;
+                result.Outcome = BatchOutcome.ServerError;
+                result.ErrorDetail = $"HTTP {(int)response.StatusCode}";
+                return result;
             }
 
             JsonElement json;
             try { json = JsonDocument.Parse(body).RootElement; }
-            catch { return results; }
+            catch (Exception je)
+            {
+                result.Outcome = BatchOutcome.ServerError;
+                result.ErrorDetail = $"Parse error: {je.Message}";
+                return result;
+            }
 
             var failCode = SafeGetInt(json, "failCode");
             if (failCode.HasValue && failCode.Value != 0)
             {
+                var msg = SafeGetString(json, "message") ?? "";
                 if (failCode.Value == 407)
+                {
                     HuaweiRateGate.RecordRateLimitResponse(accountKey);
-                if (failCode.Value == 305 || failCode.Value == 401)
+                    result.Outcome = BatchOutcome.RateLimitedByServer;
+                }
+                else if (failCode.Value == 305 || failCode.Value == 401)
+                {
                     InvalidateToken($"{credentials.Username}|{credentials.Password?.Length ?? 0}");
-                _logger.LogWarning("Huawei batch realtime failCode={Code}", failCode.Value);
-                return results;
+                    result.Outcome = BatchOutcome.AuthFailed;
+                }
+                else
+                {
+                    result.Outcome = BatchOutcome.ServerError;
+                }
+                result.ErrorDetail = $"failCode={failCode.Value}: {msg}";
+                _logger.LogWarning("Huawei batch realtime failCode={Code} {Msg}", failCode.Value, msg);
+                return result;
             }
 
-            if (!json.TryGetProperty("data", out var dataArr)) return results;
-            if (dataArr.ValueKind == JsonValueKind.Null) return results;
-            if (dataArr.ValueKind != JsonValueKind.Array) return results;
+            // Success path — populate per-station data
+            result.Outcome = BatchOutcome.Success;
+
+            if (!json.TryGetProperty("data", out var dataArr)) return result;
+            if (dataArr.ValueKind == JsonValueKind.Null) return result;
+            if (dataArr.ValueKind != JsonValueKind.Array) return result;
 
             // Build lookup from normalized code → original PlantId
             var codeToPlantId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -527,7 +578,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                 var stationCode = SafeGetString(item, "stationCode") ?? "";
                 if (!codeToPlantId.TryGetValue(stationCode, out var originalPlantId))
                 {
-                    // Try matching without NE= prefix
+                    // Try matching without NE= prefix (case-insensitive)
                     var stripped = stationCode.StartsWith("NE=", StringComparison.OrdinalIgnoreCase)
                         ? stationCode[3..] : stationCode;
                     originalPlantId = plantIds.FirstOrDefault(p =>
@@ -540,7 +591,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                     || kpi.ValueKind != JsonValueKind.Object) continue;
 
                 var health = SafeGetDecimal(kpi, "real_health_state");
-                results[originalPlantId] = new RealtimeData
+                result.Stations[originalPlantId] = new RealtimeData
                 {
                     Timestamp = DateTime.UtcNow,
                     CurrentPowerKw = 0,
@@ -552,13 +603,25 @@ public class HuaweiAdapter : IInverterApiAdapter
 
             _logger.LogInformation(
                 "Huawei batch realtime: {Success}/{Total} stations returned data in 1 API call",
-                results.Count(r => r.Value != null), plantIds.Count);
+                result.Stations.Count(r => r.Value != null), plantIds.Count);
+        }
+        catch (TaskCanceledException)
+        {
+            result.Outcome = BatchOutcome.ServerError;
+            result.ErrorDetail = "Request timed out";
+        }
+        catch (HttpRequestException hre)
+        {
+            result.Outcome = BatchOutcome.ServerError;
+            result.ErrorDetail = $"Network error: {hre.Message}";
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Huawei GetBatchRealtimeData failed");
+            result.Outcome = BatchOutcome.ServerError;
+            result.ErrorDetail = $"{ex.GetType().Name}: {ex.Message}";
         }
-        return results;
+        return result;
     }
 
     public async Task<List<EnergyRecord>> GetHistoricalDataAsync(

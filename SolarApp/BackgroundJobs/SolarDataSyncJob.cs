@@ -58,14 +58,32 @@ public class SolarDataSyncJob
             .Where(i => i.InverterBrand == InverterBrand.Huawei)
             .ToList();
 
-        // Batch results keyed by Installation.Id
-        var huaweiBatchResults = new Dictionary<int, RealtimeData?>();
+        // Per-installation batch info: classified outcome + data (data may be null
+        // even on Success if Huawei didn't return that station).
+        var huaweiBatch = new Dictionary<int, (HuaweiAdapter.BatchOutcome Outcome, RealtimeData? Data, string? Error)>();
 
         if (huaweiInstallations.Count > 0)
         {
-            // Group by account (decrypted username)
-            var groups = huaweiInstallations
-                .GroupBy(i => _credProtector.Unprotect(i.CloudUsername)?.Trim().ToLowerInvariant() ?? "(none)")
+            // Group by (decrypted username + decrypted password fingerprint) so two
+            // installations with the same username but different passwords don't
+            // share a batch call. Drop installations with empty username — they
+            // can't authenticate anyway and would all collide under "(none)".
+            var validHuawei = new List<(Installation inst, string username, string? password)>();
+            foreach (var inst in huaweiInstallations)
+            {
+                var u = _credProtector.Unprotect(inst.CloudUsername)?.Trim();
+                if (string.IsNullOrEmpty(u))
+                {
+                    huaweiBatch[inst.Id] = (HuaweiAdapter.BatchOutcome.AuthFailed, null, "Cloud username is empty");
+                    continue;
+                }
+                validHuawei.Add((inst, u.ToLowerInvariant(), _credProtector.Unprotect(inst.CloudPassword)));
+            }
+
+            // Group by (username + password length) so same-username/different-password
+            // tenants don't collide. Length is a stable proxy without revealing secrets.
+            var groups = validHuawei
+                .GroupBy(x => $"{x.username}|{x.password?.Length ?? 0}")
                 .ToList();
 
             foreach (var group in groups)
@@ -75,28 +93,27 @@ public class SolarDataSyncJob
                     var first = group.First();
                     var credentials = new ApiCredentials
                     {
-                        Username = _credProtector.Unprotect(first.CloudUsername),
-                        Password = _credProtector.Unprotect(first.CloudPassword),
-                        ApiKey = _credProtector.Unprotect(first.CloudApiKey),
-                        ApiSecret = _credProtector.Unprotect(first.CloudApiSecret),
+                        Username = _credProtector.Unprotect(first.inst.CloudUsername),
+                        Password = _credProtector.Unprotect(first.inst.CloudPassword),
+                        ApiKey = _credProtector.Unprotect(first.inst.CloudApiKey),
+                        ApiSecret = _credProtector.Unprotect(first.inst.CloudApiSecret),
                     };
-                    var plantIds = group.Select(i => i.PlantId!).ToList();
+                    var plantIds = group.Select(x => x.inst.PlantId!).ToList();
 
-                    var adapter = (SolarApp.Services.InverterApi.Adapters.HuaweiAdapter)
-                        _adapterFactory.GetAdapter(InverterBrand.Huawei);
+                    var adapter = (HuaweiAdapter)_adapterFactory.GetAdapter(InverterBrand.Huawei);
                     var batchResult = await adapter.GetBatchRealtimeDataAsync(credentials, plantIds);
 
-                    foreach (var inst in group)
+                    foreach (var x in group)
                     {
-                        huaweiBatchResults[inst.Id] = batchResult.TryGetValue(inst.PlantId!, out var data)
-                            ? data : null;
+                        var data = batchResult.Stations.TryGetValue(x.inst.PlantId!, out var d) ? d : null;
+                        huaweiBatch[x.inst.Id] = (batchResult.Outcome, data, batchResult.ErrorDetail);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Huawei batch sync failed for account group ({Count} stations)", group.Count());
-                    foreach (var inst in group)
-                        huaweiBatchResults[inst.Id] = null;
+                    _logger.LogError(ex, "Huawei batch sync threw for account group ({Count} stations)", group.Count());
+                    foreach (var x in group)
+                        huaweiBatch[x.inst.Id] = (HuaweiAdapter.BatchOutcome.ServerError, null, ex.Message);
                 }
             }
         }
@@ -121,26 +138,56 @@ public class SolarDataSyncJob
                 // Other brands: per-installation call as before.
                 ApiResult<RealtimeData> realtimeResult;
                 if (installation.InverterBrand == InverterBrand.Huawei
-                    && huaweiBatchResults.TryGetValue(installation.Id, out var batchData))
+                    && huaweiBatch.TryGetValue(installation.Id, out var batch))
                 {
-                    if (batchData != null)
+                    switch (batch.Outcome)
                     {
-                        realtimeResult = batchData.IsOnline
-                            ? ApiResult<RealtimeData>.Ok(batchData, duration: TimeSpan.Zero)
-                            : ApiResult<RealtimeData>.Offline(batchData, "Device offline (batch)", duration: TimeSpan.Zero);
-                    }
-                    else
-                    {
-                        // Batch call returned null for this station — likely deferred or not found
-                        totalRateLimitDeferred++;
-                        installation.LastOnlineAt = DateTime.UtcNow;
-                        if (installation.Status == InstallationStatus.Offline)
-                            installation.Status = InstallationStatus.Active;
-                        LogApiCall(installation, "GetRealtimeData", 0, true,
-                            "[HUAWEI BATCH] No data in batch response — station may be offline or rate-gate deferred. " +
-                            "Will retry next cycle.");
-                        await _context.SaveChangesAsync();
-                        continue;
+                        case HuaweiAdapter.BatchOutcome.Success when batch.Data != null:
+                            realtimeResult = batch.Data.IsOnline
+                                ? ApiResult<RealtimeData>.Ok(batch.Data, duration: TimeSpan.Zero)
+                                : ApiResult<RealtimeData>.Offline(batch.Data, "Device offline (batch)", duration: TimeSpan.Zero);
+                            break;
+
+                        case HuaweiAdapter.BatchOutcome.Success:
+                            // Call succeeded but Huawei didn't include this station in the
+                            // response. Treat as device offline rather than a sync failure —
+                            // cloud is reachable, just no data for this station.
+                            installation.LastOnlineAt = DateTime.UtcNow;
+                            if (installation.Status == InstallationStatus.Offline)
+                                installation.Status = InstallationStatus.Active;
+                            totalDeviceOffline++;
+                            LogApiCall(installation, "GetRealtimeData", 200, true,
+                                "[HUAWEI BATCH] No row for this stationCode in batch response. " +
+                                "Cloud is healthy; station may be offline or PlantId mis-configured.");
+                            await _context.SaveChangesAsync();
+                            continue;
+
+                        case HuaweiAdapter.BatchOutcome.Deferred:
+                        case HuaweiAdapter.BatchOutcome.RateLimitedByServer:
+                            totalRateLimitDeferred++;
+                            installation.LastOnlineAt = DateTime.UtcNow;
+                            if (installation.Status == InstallationStatus.Offline)
+                                installation.Status = InstallationStatus.Active;
+                            LogApiCall(installation, "GetRealtimeData", 0, true,
+                                $"[RATE LIMIT-DEFERRED] {batch.Error}. Will retry next cycle.");
+                            await _context.SaveChangesAsync();
+                            continue;
+
+                        case HuaweiAdapter.BatchOutcome.AuthFailed:
+                            totalApiFailures++;
+                            LogApiCall(installation, "GetRealtimeData", 401, false,
+                                $"[AUTH FAILED] Huawei batch login rejected: {batch.Error}. " +
+                                "Re-enter Northbound API credentials in Installation settings.");
+                            await _context.SaveChangesAsync();
+                            continue;
+
+                        case HuaweiAdapter.BatchOutcome.ServerError:
+                        default:
+                            totalApiFailures++;
+                            LogApiCall(installation, "GetRealtimeData", 0, false,
+                                $"[API FAILURE] Huawei batch error: {batch.Error}");
+                            await _context.SaveChangesAsync();
+                            continue;
                     }
                 }
                 else

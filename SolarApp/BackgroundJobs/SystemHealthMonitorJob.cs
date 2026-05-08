@@ -469,8 +469,24 @@ public class SystemHealthMonitorJob
             }
         }
 
+        // ── LINE rate limiter ──
+        // LINE Messaging API limits: 1000 push/min and 500 push/sec per channel.
+        // Cap our send rate well below that and cap how many we'll fire in one cycle
+        // to avoid triggering 429s if a flood of alerts comes through.
+        const int maxSendsPerCycle = 200;
+        var sendDelay = TimeSpan.FromMilliseconds(50); // ~20 msg/sec, well under 500/sec
+        var sentInThisCycle = 0;
+
         foreach (var alert in pendingAlerts)
         {
+            if (sentInThisCycle >= maxSendsPerCycle)
+            {
+                _logger.LogInformation(
+                    "LINE notify cap hit ({Cap}). Remaining {Count} alert(s) deferred to next cycle.",
+                    maxSendsPerCycle, pendingAlerts.Count(a => !a.IsNotified));
+                break;
+            }
+
             var severity = alert.Severity.ToString();
 
             // Defensive: Installation should always be present (Included),
@@ -482,40 +498,36 @@ public class SystemHealthMonitorJob
                 continue;
             }
 
-            // 1. Send to Alert Group (if configured)
-            if (!string.IsNullOrWhiteSpace(alertGroupId))
+            int attempted = 0;
+            int succeeded = 0;
+
+            async Task SendOneAsync(string toLineId, string label)
             {
+                if (string.IsNullOrWhiteSpace(toLineId)) return;
+                if (sentInThisCycle >= maxSendsPerCycle) return;
+                attempted++;
                 try
                 {
                     await _lineService.SendFlexAlertAsync(
-                        alertGroupId,
-                        alert.Installation.SiteName,
+                        toLineId,
+                        alert.Installation!.SiteName,
                         alert.Title, alert.Message,
                         severity, alert.RootCauseAnalysis);
+                    succeeded++;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed LINE group notify for alert {Id}", alert.Id);
+                    _logger.LogWarning(ex, "Failed LINE {Label} notify for alert {Id}", label, alert.Id);
                 }
+                sentInThisCycle++;
+                await Task.Delay(sendDelay);
             }
 
+            // 1. Send to Alert Group (if configured)
+            await SendOneAsync(alertGroupId ?? "", "group");
+
             // 2. Notify customer via LINE (Customer + LineUserId must exist)
-            var customerLineId = alert.Installation.Customer?.LineUserId;
-            if (!string.IsNullOrEmpty(customerLineId))
-            {
-                try
-                {
-                    await _lineService.SendFlexAlertAsync(
-                        customerLineId,
-                        alert.Installation.SiteName,
-                        alert.Title, alert.Message,
-                        severity, alert.RootCauseAnalysis);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed LINE customer notify for alert {Id}", alert.Id);
-                }
-            }
+            await SendOneAsync(alert.Installation.Customer?.LineUserId ?? "", "customer");
 
             // 3. Notify partner users via LINE (from preloaded dict, no N+1)
             if (alert.Installation.PartnerId.HasValue
@@ -523,22 +535,23 @@ public class SystemHealthMonitorJob
             {
                 foreach (var lineId in partnerLineIds)
                 {
-                    try
-                    {
-                        await _lineService.SendFlexAlertAsync(
-                            lineId,
-                            alert.Installation.SiteName,
-                            alert.Title, alert.Message,
-                            severity, alert.RootCauseAnalysis);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed LINE partner notify for alert {Id}", alert.Id);
-                    }
+                    await SendOneAsync(lineId, "partner");
                 }
             }
 
-            alert.IsNotified = true;
+            // Only mark as notified if at least one recipient was successfully reached
+            // OR no recipients were configured at all (nobody to notify).
+            // If we ATTEMPTED sends and ALL FAILED, leave IsNotified=false so next cycle retries.
+            if (attempted == 0 || succeeded > 0)
+            {
+                alert.IsNotified = true;
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Alert {Id} ({Title}): all {Count} LINE recipients failed — will retry next cycle",
+                    alert.Id, alert.Title, attempted);
+            }
         }
 
         await _context.SaveChangesAsync();

@@ -39,17 +39,26 @@ public class SelfKeepAliveService : BackgroundService
 
         var interval = TimeSpan.FromMinutes(4); // Well under IIS 20-min default
 
+        // Resolve URL once. Override via SOLARAPP_KEEPALIVE_URL or KeepAlive:Url
+        // for environments behind a reverse proxy where http://localhost:N
+        // doesn't resolve from the worker process.
+        var explicitUrl = Environment.GetEnvironmentVariable("SOLARAPP_KEEPALIVE_URL")
+                       ?? _configuration["KeepAlive:Url"];
+        var configuredUrls = _configuration["urls"]
+                          ?? _configuration["ASPNETCORE_URLS"]
+                          ?? "http://localhost:5000";
+        var baseUrl = (explicitUrl ?? configuredUrls)
+            .Split(';').FirstOrDefault(u => u.StartsWith("http"))
+            ?? "http://localhost:5000";
+
+        _logger.LogInformation("Self-keepalive: pinging {Url}/ping every {Interval}", baseUrl, interval);
+
+        var consecutiveFailures = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // Determine our own URL from server configuration
-                var urls = _configuration["urls"]
-                        ?? _configuration["ASPNETCORE_URLS"]
-                        ?? "http://localhost:5000";
-                var baseUrl = urls.Split(';').FirstOrDefault(u => u.StartsWith("http"))
-                           ?? "http://localhost:5000";
-
                 var client = _httpClientFactory.CreateClient();
                 client.Timeout = TimeSpan.FromSeconds(10);
 
@@ -57,17 +66,40 @@ public class SelfKeepAliveService : BackgroundService
 
                 if (response.IsSuccessStatusCode)
                 {
+                    if (consecutiveFailures > 0)
+                        _logger.LogInformation("Self-keepalive recovered after {Count} failures", consecutiveFailures);
+                    consecutiveFailures = 0;
                     _logger.LogDebug("Self-keepalive ping OK ({Url}/ping)", baseUrl);
                 }
                 else
                 {
-                    _logger.LogWarning("Self-keepalive ping failed: HTTP {Code}", (int)response.StatusCode);
+                    consecutiveFailures++;
+                    var code = (int)response.StatusCode;
+                    if (code == 401 || code == 403)
+                    {
+                        _logger.LogWarning(
+                            "Self-keepalive: /ping returned HTTP {Code}. /ping should be anonymous — " +
+                            "check that authorization isn't applied to it. Consecutive failures: {Count}",
+                            code, consecutiveFailures);
+                    }
+                    else if (consecutiveFailures == 1 || consecutiveFailures % 5 == 0)
+                    {
+                        _logger.LogWarning(
+                            "Self-keepalive ping failed: HTTP {Code} ({Url}/ping). Consecutive failures: {Count}. " +
+                            "If this persists, check IIS bindings or set SOLARAPP_KEEPALIVE_URL.",
+                            code, baseUrl, consecutiveFailures);
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Don't log every single failure — network issues during startup are normal
-                _logger.LogDebug(ex, "Self-keepalive ping error (will retry in {Interval})", interval);
+                consecutiveFailures++;
+                if (consecutiveFailures == 1 || consecutiveFailures % 5 == 0)
+                {
+                    _logger.LogWarning(ex,
+                        "Self-keepalive ping error ({Url}/ping). Consecutive failures: {Count}",
+                        baseUrl, consecutiveFailures);
+                }
             }
 
             await Task.Delay(interval, stoppingToken);
