@@ -90,6 +90,37 @@ public class ScheduleModel : PageModel
     {
         try
         {
+            // Pre-check: if this recurring job is already running, [DisableConcurrentExecution]
+            // means a manual enqueue will sit in the queue waiting up to 30 minutes for the
+            // distributed lock — admin gets no feedback. Detect and warn instead.
+            try
+            {
+                using var conn = JobStorage.Current.GetConnection();
+                var monitoringApi = JobStorage.Current.GetMonitoringApi();
+                var processing = monitoringApi.ProcessingJobs(0, 50);
+                var alreadyRunning = processing.Any(p =>
+                    p.Value.Job?.Type?.Name == jobId switch
+                    {
+                        "sync-production-data" => nameof(SolarDataSyncJob),
+                        "check-system-health" => nameof(SystemHealthMonitorJob),
+                        "workorder-reminders" => nameof(WorkOrderReminderJob),
+                        _ => null
+                    });
+
+                if (alreadyRunning)
+                {
+                    ErrorMessage = $"Job '{jobId}' is already running. Wait for it to finish " +
+                        "(check Hangfire Dashboard → Processing). Manual enqueue while running " +
+                        "would just sit in queue until the current cycle completes.";
+                    return RedirectToPage();
+                }
+            }
+            catch
+            {
+                // If monitoring API isn't available (e.g. Hangfire not yet started),
+                // fall through to the enqueue — best effort.
+            }
+
             if (jobId == "sync-production-data")
                 BackgroundJob.Enqueue<SolarDataSyncJob>(j => j.ExecuteAsync());
             else if (jobId == "check-system-health")

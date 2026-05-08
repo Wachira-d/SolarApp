@@ -46,6 +46,19 @@ public class HuaweiAdapter : IInverterApiAdapter
         if (string.IsNullOrEmpty(credentials.Password))
             return (false, "Password (systemCode) is required");
 
+        // Friendly rate-gate awareness: if a sync just happened, login itself
+        // will burn the budget. Tell the user to wait instead of producing a
+        // confusing "Login failed: rate gate busy" error.
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+        var preWait = HuaweiRateGate.GetRequiredWait(accountKey);
+        if (preWait > TimeSpan.FromSeconds(15))
+        {
+            return (false,
+                $"Huawei rate gate is busy — last sync used the per-account budget. " +
+                $"Wait ~{preWait.TotalSeconds:0}s and retry. " +
+                "(Huawei NBI permits ~1 request/minute per account; this is normal right after a sync cycle.)");
+        }
+
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -706,6 +719,104 @@ public class HuaweiAdapter : IInverterApiAdapter
         return records;
     }
 
+    /// <summary>
+    /// Fetches alarms for MULTIPLE stations in one /getAlarmList call.
+    /// Returns a dictionary keyed by the original PlantId.
+    /// </summary>
+    public async Task<Dictionary<string, List<AlarmRecord>>> GetBatchAlarmsAsync(
+        ApiCredentials credentials, List<string> plantIds, DateTime from, DateTime to)
+    {
+        var byStation = new Dictionary<string, List<AlarmRecord>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pid in plantIds) byStation[pid] = new List<AlarmRecord>();
+
+        if (plantIds.Count == 0) return byStation;
+
+        var accountKey = HuaweiRateGate.AccountKey(credentials.Username);
+        var (defer, wait) = HuaweiRateGate.Decide(accountKey);
+        if (defer) return byStation;
+        if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var token = await LoginAsync(client, credentials);
+            if (token == null) return byStation;
+
+            var normalizedCodes = plantIds.Select(p =>
+            {
+                var code = p.Trim();
+                return code.StartsWith("NE=", StringComparison.OrdinalIgnoreCase)
+                    ? "NE=" + code[3..] : "NE=" + code;
+            }).ToList();
+            var combinedCodes = string.Join(",", normalizedCodes);
+
+            client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
+            var beginTime = new DateTimeOffset(from).ToUnixTimeMilliseconds();
+            var endTime = new DateTimeOffset(to).ToUnixTimeMilliseconds();
+            HuaweiRateGate.MarkCalled(accountKey);
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/getAlarmList",
+                new { stationCodes = combinedCodes, beginTime, endTime, pageNo = 1, pageSize = 200 });
+            if (!response.IsSuccessStatusCode) return byStation;
+
+            var json = await ReadJsonAsync(response);
+            if (json == null) return byStation;
+
+            var failCode = SafeGetInt(json.Value, "failCode");
+            if (failCode.HasValue && failCode.Value == 407)
+            {
+                HuaweiRateGate.RecordRateLimitResponse(accountKey);
+                return byStation;
+            }
+
+            if (!json.Value.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object) return byStation;
+            if (!data.TryGetProperty("list", out var list)
+                || list.ValueKind != JsonValueKind.Array) return byStation;
+
+            // Lookup from station code → original plantId
+            var codeToPlantId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < plantIds.Count; i++)
+                codeToPlantId[normalizedCodes[i]] = plantIds[i];
+
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+
+                var stationCode = SafeGetString(item, "stationCode") ?? "";
+                if (!codeToPlantId.TryGetValue(stationCode, out var originalPlantId))
+                {
+                    var stripped = stationCode.StartsWith("NE=", StringComparison.OrdinalIgnoreCase)
+                        ? stationCode[3..] : stationCode;
+                    originalPlantId = plantIds.FirstOrDefault(p =>
+                        p.Trim().Equals(stripped, StringComparison.OrdinalIgnoreCase)
+                        || p.Trim().Equals(stationCode, StringComparison.OrdinalIgnoreCase));
+                    if (originalPlantId == null) continue;
+                }
+
+                var raiseTime = SafeGetLong(item, "raiseTime");
+                byStation[originalPlantId].Add(new AlarmRecord
+                {
+                    AlarmId = SafeGetString(item, "alarmId") ?? "",
+                    AlarmName = SafeGetString(item, "alarmName") ?? "",
+                    Severity = SafeGetInt(item, "severity") ?? 3,
+                    OccurredAt = raiseTime.HasValue
+                        ? DateTimeOffset.FromUnixTimeMilliseconds(raiseTime.Value).UtcDateTime
+                        : DateTime.UtcNow,
+                    DeviceName = SafeGetString(item, "devName")
+                });
+            }
+
+            _logger.LogInformation(
+                "Huawei batch alarms: {Total} alarms across {Stations} stations in 1 API call",
+                byStation.Sum(x => x.Value.Count), plantIds.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Huawei GetBatchAlarms failed");
+        }
+        return byStation;
+    }
+
     public async Task<List<AlarmRecord>> GetAlarmsAsync(
         ApiCredentials credentials, DateTime from, DateTime to)
     {
@@ -958,6 +1069,19 @@ public class HuaweiAdapter : IInverterApiAdapter
     private static void InvalidateToken(string cacheKey)
     {
         lock (_tokenCacheLock) { _tokenCache.Remove(cacheKey); }
+    }
+
+    /// <summary>
+    /// Public hook so credential edits can purge the cached XSRF token.
+    /// Without this, after a credential rotation the old token sticks for up
+    /// to 15 minutes and gets rejected with 305/401 on every sync until the
+    /// reactive InvalidateToken-on-error path kicks in.
+    /// </summary>
+    public static void InvalidateTokenForCredentials(string? username, string? password)
+    {
+        if (string.IsNullOrEmpty(username)) return;
+        var cacheKey = $"{username}|{password?.Length ?? 0}";
+        InvalidateToken(cacheKey);
     }
 
     private async Task<string?> LoginAsync(HttpClient client, ApiCredentials credentials)

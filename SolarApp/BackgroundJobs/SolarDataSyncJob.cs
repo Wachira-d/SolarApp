@@ -118,6 +118,72 @@ public class SolarDataSyncJob
             }
         }
 
+        // ──────────────────────────────────────────────────────────────────
+        // Huawei batch alarms: same idea — fetch alarms for ALL stations on
+        // each account in 1 /getAlarmList call. Only run if the per-installation
+        // hourly cooldown allows. Skipped entries fall through to per-installation
+        // GetAlarmsAsync (which is gated and likely deferred).
+        // ──────────────────────────────────────────────────────────────────
+        var huaweiBatchAlarms = new Dictionary<int, List<AlarmRecord>>();
+        var huaweiAlarmsHandled = new HashSet<int>();
+        if (huaweiInstallations.Count > 0)
+        {
+            // Find which Huawei installations are eligible for alarm fetch this cycle
+            var alarmCutoff = DateTime.UtcNow.AddMinutes(-55);
+            var lastAlarmTimes = await _context.InverterApiLogs
+                .Where(l => huaweiInstallations.Select(i => i.Id).Contains(l.InstallationId)
+                            && l.Endpoint == "GetAlarms"
+                            && l.IsSuccess)
+                .GroupBy(l => l.InstallationId)
+                .Select(g => new { InstallationId = g.Key, Last = g.Max(l => l.RequestTime) })
+                .ToListAsync();
+            var lastByInst = lastAlarmTimes.ToDictionary(x => x.InstallationId, x => x.Last);
+
+            // Group eligible installations by account (re-use the same key as realtime batch)
+            var eligibleByGroup = huaweiInstallations
+                .Where(i => !lastByInst.TryGetValue(i.Id, out var t) || t < alarmCutoff)
+                .Where(i => !string.IsNullOrEmpty(_credProtector.Unprotect(i.CloudUsername)?.Trim()))
+                .GroupBy(i =>
+                {
+                    var u = _credProtector.Unprotect(i.CloudUsername)!.Trim().ToLowerInvariant();
+                    var p = _credProtector.Unprotect(i.CloudPassword);
+                    return $"{u}|{p?.Length ?? 0}";
+                })
+                .ToList();
+
+            foreach (var group in eligibleByGroup)
+            {
+                try
+                {
+                    var first = group.First();
+                    var credentials = new ApiCredentials
+                    {
+                        Username = _credProtector.Unprotect(first.CloudUsername),
+                        Password = _credProtector.Unprotect(first.CloudPassword),
+                        ApiKey = _credProtector.Unprotect(first.CloudApiKey),
+                        ApiSecret = _credProtector.Unprotect(first.CloudApiSecret),
+                    };
+                    var plantIds = group.Select(i => i.PlantId!).ToList();
+
+                    var hAdapter = (HuaweiAdapter)_adapterFactory.GetAdapter(InverterBrand.Huawei);
+                    var batchAlarms = await hAdapter.GetBatchAlarmsAsync(
+                        credentials, plantIds,
+                        DateTime.UtcNow.AddHours(-24), DateTime.UtcNow);
+
+                    foreach (var inst in group)
+                    {
+                        huaweiAlarmsHandled.Add(inst.Id);
+                        huaweiBatchAlarms[inst.Id] = batchAlarms.TryGetValue(inst.PlantId!, out var list)
+                            ? list : new List<AlarmRecord>();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Huawei batch alarms failed for account group ({Count} stations)", group.Count());
+                }
+            }
+        }
+
         foreach (var installation in installations)
         {
             try
@@ -375,28 +441,53 @@ public class SolarDataSyncJob
                     }
                 }
 
-                // ─── 4. Alarms (last 24 hours) — fetch at most hourly per
-                // installation to stay well within Huawei's 1 req/min budget. ───
-                var lastAlarmFetch = await _context.InverterApiLogs
-                    .Where(l => l.InstallationId == installation.Id
-                                && l.Endpoint == "GetAlarms"
-                                && l.IsSuccess)
-                    .OrderByDescending(l => l.RequestTime)
-                    .Select(l => (DateTime?)l.RequestTime)
-                    .FirstOrDefaultAsync();
-                var skipAlarms = lastAlarmFetch.HasValue
-                    && DateTime.UtcNow - lastAlarmFetch.Value < TimeSpan.FromMinutes(55);
+                // ─── 4. Alarms (last 24 hours) — Huawei uses pre-fetched batch
+                // (1 /getAlarmList call per account). Other brands fetch per-installation
+                // at most hourly to keep within their per-account budget. ───
+                List<AlarmRecord>? alarmsForThisInstallation = null;
 
-                if (!skipAlarms)
+                if (installation.InverterBrand == InverterBrand.Huawei
+                    && huaweiAlarmsHandled.Contains(installation.Id))
+                {
+                    // Already fetched as part of the batch
+                    alarmsForThisInstallation = huaweiBatchAlarms.TryGetValue(installation.Id, out var list)
+                        ? list : new List<AlarmRecord>();
+                    LogApiCall(installation, "GetAlarms", 200, true,
+                        $"[ALARMS-BATCH] {alarmsForThisInstallation.Count} alarm(s) from batch fetch.");
+                }
+                else
+                {
+                    var lastAlarmFetch = await _context.InverterApiLogs
+                        .Where(l => l.InstallationId == installation.Id
+                                    && l.Endpoint == "GetAlarms"
+                                    && l.IsSuccess)
+                        .OrderByDescending(l => l.RequestTime)
+                        .Select(l => (DateTime?)l.RequestTime)
+                        .FirstOrDefaultAsync();
+                    var skipAlarms = lastAlarmFetch.HasValue
+                        && DateTime.UtcNow - lastAlarmFetch.Value < TimeSpan.FromMinutes(55);
+
+                    if (!skipAlarms)
+                    {
+                        try
+                        {
+                            alarmsForThisInstallation = await adapter.GetAlarmsAsync(credentials,
+                                DateTime.UtcNow.AddHours(-24), DateTime.UtcNow);
+                            LogApiCall(installation, "GetAlarms", 200, true,
+                                $"[ALARMS] Fetched {alarmsForThisInstallation.Count} alarm(s).");
+                        }
+                        catch (Exception alarmEx)
+                        {
+                            _logger.LogWarning(alarmEx, "Failed to fetch alarms for installation {Id}", installation.Id);
+                        }
+                    }
+                }
+
+                if (alarmsForThisInstallation != null)
                 {
                     try
                     {
-                        var alarms = await adapter.GetAlarmsAsync(credentials,
-                            DateTime.UtcNow.AddHours(-24), DateTime.UtcNow);
-                        LogApiCall(installation, "GetAlarms", 200, true,
-                            $"[ALARMS] Fetched {alarms.Count} alarm(s).");
-
-                        foreach (var a in alarms)
+                        foreach (var a in alarmsForThisInstallation)
                         {
                             var exists = await _context.SystemAlerts.AnyAsync(x =>
                                 x.InstallationId == installation.Id

@@ -154,10 +154,24 @@ public class EditModel : PageModel
             installation.CloudApiKey = _credProtector.Protect(Input.CloudApiKey.Trim());
         if (!string.IsNullOrWhiteSpace(Input.CloudApiSecret))
             installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret.Trim());
-        if (!string.IsNullOrWhiteSpace(Input.CloudUsername))
-            installation.CloudUsername = _credProtector.Protect(Input.CloudUsername.Trim());
-        if (!string.IsNullOrWhiteSpace(Input.CloudPassword))
-            installation.CloudPassword = _credProtector.Protect(Input.CloudPassword.Trim());
+
+        var usernameChanged = !string.IsNullOrWhiteSpace(Input.CloudUsername);
+        var passwordChanged = !string.IsNullOrWhiteSpace(Input.CloudPassword);
+        if (usernameChanged)
+            installation.CloudUsername = _credProtector.Protect(Input.CloudUsername!.Trim());
+        if (passwordChanged)
+            installation.CloudPassword = _credProtector.Protect(Input.CloudPassword!.Trim());
+
+        // If Huawei credentials changed, purge the static XSRF token cache so the
+        // next sync re-logins instead of using a stale 15-min cached token.
+        if (installation.InverterBrand == SolarApp.Models.Enums.InverterBrand.Huawei
+            && (usernameChanged || passwordChanged))
+        {
+            var newUsername = _credProtector.Unprotect(installation.CloudUsername);
+            var newPassword = _credProtector.Unprotect(installation.CloudPassword);
+            SolarApp.Services.InverterApi.Adapters.HuaweiAdapter
+                .InvalidateTokenForCredentials(newUsername, newPassword);
+        }
         // PlantId is NOT a secret but same keep-existing logic to prevent accidental wipe
         if (!string.IsNullOrWhiteSpace(Input.PlantId))
             installation.PlantId = Input.PlantId.Trim();

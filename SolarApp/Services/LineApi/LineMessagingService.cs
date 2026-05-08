@@ -8,6 +8,15 @@ namespace SolarApp.Services.LineApi;
 
 public class LineMessagingService : ILineMessagingService
 {
+    // Process-wide throttle for outbound LINE pushes.
+    // LINE Messaging API limits: 1000 push/min and 500 push/sec per channel.
+    // We aim well below: ~20 msg/sec via 50ms min spacing. The semaphore
+    // serializes access so concurrent jobs (health monitor + WO reminder)
+    // can't burst together and trip the 500/sec ceiling.
+    private static readonly SemaphoreSlim _sendGate = new(1, 1);
+    private static DateTime _lastSendUtc = DateTime.MinValue;
+    private static readonly TimeSpan _minSpacing = TimeSpan.FromMilliseconds(50);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<LineMessagingService> _logger;
@@ -24,6 +33,39 @@ public class LineMessagingService : ILineMessagingService
         _configuration = configuration;
         _logger = logger;
         _context = context;
+    }
+
+    /// <summary>
+    /// Acquires the process-wide LINE rate gate. Call once immediately before
+    /// each PostAsJsonAsync to PushUrl. Returns an IDisposable that releases
+    /// the gate; callers should `await using` it.
+    /// </summary>
+    private static async Task<IDisposable> AcquireSendSlotAsync(CancellationToken ct = default)
+    {
+        await _sendGate.WaitAsync(ct);
+        try
+        {
+            var elapsed = DateTime.UtcNow - _lastSendUtc;
+            if (elapsed < _minSpacing)
+                await Task.Delay(_minSpacing - elapsed, ct);
+            _lastSendUtc = DateTime.UtcNow;
+        }
+        catch
+        {
+            _sendGate.Release();
+            throw;
+        }
+        return new GateReleaser();
+    }
+
+    private sealed class GateReleaser : IDisposable
+    {
+        private int _released;
+        public void Dispose()
+        {
+            if (System.Threading.Interlocked.Exchange(ref _released, 1) == 0)
+                _sendGate.Release();
+        }
     }
 
     public async Task<(bool Success, string Message)> SendTestMessageAsync(string lineUserId, string? overrideToken = null)
@@ -48,6 +90,7 @@ public class LineMessagingService : ILineMessagingService
                 messages = new[] { new { type = "text", text = testMsg } }
             };
 
+            using var slot = await AcquireSendSlotAsync();
             var response = await client.PostAsJsonAsync(PushUrl, payload);
             var body = await response.Content.ReadAsStringAsync();
 
@@ -119,6 +162,7 @@ public class LineMessagingService : ILineMessagingService
                 };
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                using var slot = await AcquireSendSlotAsync(cts.Token);
                 var response = await client.PostAsJsonAsync(PushUrl, payload, cts.Token);
                 lastStatusCode = (int)response.StatusCode;
 
@@ -268,6 +312,7 @@ public class LineMessagingService : ILineMessagingService
                 }
             };
 
+            using var slot = await AcquireSendSlotAsync();
             var response = await client.PostAsJsonAsync(PushUrl, payload);
             var status = response.IsSuccessStatusCode
                 ? NotificationStatus.Sent : NotificationStatus.Failed;

@@ -469,12 +469,12 @@ public class SystemHealthMonitorJob
             }
         }
 
-        // ── LINE rate limiter ──
-        // LINE Messaging API limits: 1000 push/min and 500 push/sec per channel.
-        // Cap our send rate well below that and cap how many we'll fire in one cycle
-        // to avoid triggering 429s if a flood of alerts comes through.
+        // ── Per-cycle saturation cap ──
+        // Inter-message spacing is enforced inside LineMessagingService itself;
+        // here we just cap how many we'll fire in one health-monitor pass so a
+        // surge of alerts doesn't tie up the cycle for too long. Remaining
+        // alerts stay IsNotified=false and pick up next cycle.
         const int maxSendsPerCycle = 200;
-        var sendDelay = TimeSpan.FromMilliseconds(50); // ~20 msg/sec, well under 500/sec
         var sentInThisCycle = 0;
 
         foreach (var alert in pendingAlerts)
@@ -520,7 +520,6 @@ public class SystemHealthMonitorJob
                     _logger.LogWarning(ex, "Failed LINE {Label} notify for alert {Id}", label, alert.Id);
                 }
                 sentInThisCycle++;
-                await Task.Delay(sendDelay);
             }
 
             // 1. Send to Alert Group (if configured)
