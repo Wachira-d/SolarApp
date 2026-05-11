@@ -21,6 +21,15 @@ public class PlantInfo
     public double? Longitude { get; set; }
 }
 
+public enum HealthState
+{
+    Unknown = 0,
+    Healthy = 1,
+    Faulty = 2,        // operating but reporting a fault (Grid Loss, OverTemp, etc.)
+    Disconnected = 3,  // not communicating with cloud
+    OfflineNight = 4   // expected offline (sundown / sleep mode)
+}
+
 public class RealtimeData
 {
     public DateTime Timestamp { get; set; }
@@ -31,7 +40,15 @@ public class RealtimeData
     public decimal? GridImportKw { get; set; }
     public decimal? BatterySocPercent { get; set; }
     public decimal? BatteryPowerKw { get; set; }
+
+    /// <summary>True when the station is producing or in a normal standby (not faulty / disconnected).</summary>
     public bool IsOnline { get; set; }
+
+    /// <summary>Brand-normalised station health. Faulty stations are still "online" comms-wise but require attention.</summary>
+    public HealthState Health { get; set; } = HealthState.Unknown;
+
+    /// <summary>Free-text reason when Health = Faulty (e.g. "Grid Loss"). Populated from station-level KPI or alarms.</summary>
+    public string? FaultReason { get; set; }
 }
 
 public class EnergyRecord

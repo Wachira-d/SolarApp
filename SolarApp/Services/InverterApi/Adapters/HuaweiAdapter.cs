@@ -39,6 +39,28 @@ public class HuaweiAdapter : IInverterApiAdapter
         _logger = logger;
     }
 
+    /// <summary>
+    /// Maps Huawei NBI station-level real_health_state to our normalised
+    /// HealthState + IsOnline pair.
+    /// Reference: FusionSolar NBI v6 docs.
+    ///   0 = disconnect   (no cloud comm at all → Disconnected / not online)
+    ///   1 = faulty       (Grid Loss / Insulation / OverTemp → Faulty / NOT online)
+    ///   2 = healthy      (Healthy / online)
+    ///   3 = offline      (expected at night / sleep → OfflineNight / not online)
+    /// </summary>
+    private static (HealthState Health, bool IsOnline) MapHuaweiHealth(decimal raw)
+    {
+        var code = (int)Math.Round(raw);
+        return code switch
+        {
+            2 => (HealthState.Healthy,      true),
+            1 => (HealthState.Faulty,       false), // NOT online for KPI purposes — needs attention
+            3 => (HealthState.OfflineNight, false),
+            0 => (HealthState.Disconnected, false),
+            _ => (HealthState.Unknown,      false),
+        };
+    }
+
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
         if (string.IsNullOrEmpty(credentials.Username))
@@ -419,20 +441,29 @@ public class HuaweiAdapter : IInverterApiAdapter
             // Huawei NBI station-level KPI semantics:
             //   day_power   = today's accumulated energy (kWh) — NOT instantaneous power
             //   total_power = lifetime accumulated energy (kWh)
-            //   real_health_state: 0=disconnect, 1=faulty, 2=healthy, 3=offline
+            //   real_health_state:
+            //     0 = disconnect (no cloud comm at all)
+            //     1 = faulty  (Grid Loss / Insulation / OverTemp — STILL needs alert!)
+            //     2 = healthy (the only "good" state)
+            //     3 = offline (expected at night / device sleeping)
             //
             // IMPORTANT: We deliberately SKIP device-level active_power fetch here
             // because Huawei NBI enforces 1-request-per-minute rate limit. Extra
             // calls /getDevList + /getDevRealKpi would exhaust the quota.
             // CurrentPowerKw is left at 0 — Dashboard can derive approximate power
             // from day_power delta between sync cycles.
+            var (mappedHealth, isOnline) = MapHuaweiHealth(health);
             return new RealtimeData
             {
                 Timestamp = DateTime.UtcNow,
                 CurrentPowerKw = 0,
                 TodayEnergyKwh = SafeGetDecimal(kpi, "day_power"),
                 TotalEnergyKwh = SafeGetDecimal(kpi, "total_power"),
-                IsOnline = health >= 1
+                IsOnline = isOnline,
+                Health = mappedHealth,
+                FaultReason = mappedHealth == HealthState.Faulty
+                    ? "Station reported faulty by Huawei (real_health_state=1) — check FusionSolar app for the specific alarm (e.g. Grid Loss, Insulation, OverTemp)"
+                    : null
             };
         }
         catch (TaskCanceledException)
@@ -604,13 +635,18 @@ public class HuaweiAdapter : IInverterApiAdapter
                     || kpi.ValueKind != JsonValueKind.Object) continue;
 
                 var health = SafeGetDecimal(kpi, "real_health_state");
+                var (mappedHealth, isOnline) = MapHuaweiHealth(health);
                 result.Stations[originalPlantId] = new RealtimeData
                 {
                     Timestamp = DateTime.UtcNow,
                     CurrentPowerKw = 0,
                     TodayEnergyKwh = SafeGetDecimal(kpi, "day_power"),
                     TotalEnergyKwh = SafeGetDecimal(kpi, "total_power"),
-                    IsOnline = health >= 1
+                    IsOnline = isOnline,
+                    Health = mappedHealth,
+                    FaultReason = mappedHealth == HealthState.Faulty
+                        ? "Station reported faulty by Huawei (real_health_state=1) — check FusionSolar app for the specific alarm (e.g. Grid Loss, Insulation, OverTemp)"
+                        : null
                 };
             }
 

@@ -328,10 +328,68 @@ public class SolarDataSyncJob
                 if (installation.Status == InstallationStatus.Offline)
                     installation.Status = InstallationStatus.Active;
 
-                if (isDeviceOnline)
+                if (realtime.Health == Services.InverterApi.Models.HealthState.Faulty)
                 {
+                    // Station is in FAULT state (Grid Loss / OverTemp / Insulation / etc.)
+                    // Cloud is reachable, but the inverter is reporting a hard fault.
+                    // Surface this as a Critical alert so LINE notifies + dashboard turns red.
+                    installation.Status = InstallationStatus.Maintenance;
+                    LogApiCall(installation, "GetRealtimeData", 200, true,
+                        $"[FAULTY] {installation.InverterBrand} reports station faulty. " +
+                        $"Reason: {realtime.FaultReason ?? "unknown"}. " +
+                        $"Today={realtime.TodayEnergyKwh:0.0}kWh");
+
+                    // De-dup: only one open Fault alert per installation per day
+                    var faultTitle = $"Station Faulty: {installation.SiteName}";
+                    var today = DateTime.UtcNow.Date;
+                    var existingFault = await _context.SystemAlerts.AnyAsync(a =>
+                        a.InstallationId == installation.Id
+                        && a.AlertType == AlertType.Error
+                        && a.ResolvedAt == null
+                        && a.Title == faultTitle
+                        && a.OccurredAt >= today);
+
+                    if (!existingFault)
+                    {
+                        _context.SystemAlerts.Add(new SystemAlert
+                        {
+                            InstallationId = installation.Id,
+                            AlertType = AlertType.Error,
+                            Severity = AlertSeverity.Critical,
+                            Title = faultTitle,
+                            Message = $"[{installation.InverterBrand}] {installation.SiteName} กำลังรายงานสถานะ FAULTY. " +
+                                $"{realtime.FaultReason ?? "ตรวจสอบรายละเอียดในแอป FusionSolar"} " +
+                                "— กรุณาเข้าตรวจสอบที่หน้างาน",
+                            RootCauseAnalysis = "⚠ STATION-LEVEL FAULT detected via Huawei NBI real_health_state=1.\n" +
+                                "Cloud API ปกติ แต่ inverter รายงานว่ามีปัญหา (Grid Loss / Insulation / OverTemp / ฯลฯ).\n" +
+                                "การตรวจสอบเบื้องต้น:\n" +
+                                "  1. เปิดแอป FusionSolar → ดูรายการ Alarm ของไซต์นี้\n" +
+                                "  2. ตรวจ AC breaker / DC isolator\n" +
+                                "  3. ตรวจหน้าจอ inverter หาเลข error\n" +
+                                "  4. ถ้าเป็น Grid Loss ตรวจไฟฟ้าจากการไฟฟ้าและ MCB หลัก",
+                            OccurredAt = DateTime.UtcNow,
+                            IsNotified = false
+                        });
+                    }
+                }
+                else if (isDeviceOnline)
+                {
+                    if (installation.Status == InstallationStatus.Maintenance)
+                        installation.Status = InstallationStatus.Active; // recovered from fault
                     LogApiCall(installation, "GetRealtimeData", 200, true,
                         $"[ONLINE] Power={realtime.CurrentPowerKw:0.00}kW, Today={realtime.TodayEnergyKwh:0.0}kWh");
+
+                    // Auto-resolve any open station-fault alerts for this installation
+                    var openFaults = await _context.SystemAlerts
+                        .Where(a => a.InstallationId == installation.Id
+                            && a.AlertType == AlertType.Error
+                            && a.ResolvedAt == null
+                            && a.Title.StartsWith("Station Faulty:"))
+                        .ToListAsync();
+                    foreach (var f in openFaults)
+                    {
+                        f.ResolvedAt = DateTime.UtcNow;
+                    }
                 }
                 else
                 {
