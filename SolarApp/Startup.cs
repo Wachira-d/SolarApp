@@ -609,7 +609,19 @@ AND NOT EXISTS (SELECT 1 FROM sys.columns
 BEGIN {sql}; END");
         }
 
-        sb.AppendLine(@"
+        // ── Execute in stages so a single failure doesn't abort the rest ──
+        // Stage 1: ALTER TABLE column additions (idempotent IF EXISTS / NOT EXISTS).
+        // Stage 2: CREATE TABLE for the new tables, each in its own statement so
+        //          we can pinpoint exactly which one failed.
+        // Stage 3: CREATE INDEX for ancillary indexes.
+
+        var stages = new List<(string Name, string Sql)>();
+
+        // Stage 1: column ALTERs (already in sb as IF EXISTS/NOT EXISTS guarded statements)
+        stages.Add(("AlterColumns", sb.ToString()));
+
+        // Stage 2: each table CREATE in its own stage. Failures in one don't block others.
+        stages.Add(("CreateTable:AlertRules", @"
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'AlertRules')
 BEGIN
     CREATE TABLE [AlertRules] (
@@ -638,9 +650,9 @@ BEGIN
     CREATE INDEX IX_AlertRules_IsEnabled ON [AlertRules]([IsEnabled]);
     CREATE INDEX IX_AlertRules_InstallationId ON [AlertRules]([InstallationId]);
     CREATE INDEX IX_AlertRules_Metric ON [AlertRules]([Metric]);
-END");
+END"));
 
-        sb.AppendLine(@"
+        stages.Add(("CreateTable:WorkOrders", @"
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrders')
 BEGIN
     CREATE TABLE [WorkOrders] (
@@ -684,6 +696,7 @@ BEGIN
         [CustomerRating] int NULL,
         [CustomerFeedback] nvarchar(max) NULL,
         [ServiceTicketId] int NULL,
+        [ReminderSentAt] datetime2 NULL,
         [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
         [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
     );
@@ -693,9 +706,11 @@ BEGIN
     CREATE INDEX IX_WorkOrders_AssignedToUserId ON [WorkOrders]([AssignedToUserId]);
     CREATE INDEX IX_WorkOrders_Type ON [WorkOrders]([Type]);
     CREATE INDEX IX_WorkOrders_InstallationId ON [WorkOrders]([InstallationId]);
-END
+END"));
 
+        stages.Add(("CreateTable:WorkOrderItems", @"
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrderItems')
+AND EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrders')
 BEGIN
     CREATE TABLE [WorkOrderItems] (
         [Id] int IDENTITY(1,1) PRIMARY KEY,
@@ -711,9 +726,11 @@ BEGIN
             REFERENCES [WorkOrders]([Id]) ON DELETE CASCADE
     );
     CREATE INDEX IX_WorkOrderItems_WorkOrderId_SortOrder ON [WorkOrderItems]([WorkOrderId], [SortOrder]);
-END
+END"));
 
+        stages.Add(("CreateTable:WorkOrderPhotos", @"
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrderPhotos')
+AND EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrders')
 BEGIN
     CREATE TABLE [WorkOrderPhotos] (
         [Id] int IDENTITY(1,1) PRIMARY KEY,
@@ -733,38 +750,52 @@ BEGIN
             REFERENCES [WorkOrders]([Id]) ON DELETE CASCADE
     );
     CREATE INDEX IX_WorkOrderPhotos_WO_Cat_Timing ON [WorkOrderPhotos]([WorkOrderId], [Category], [Timing]);
-END");
+END"));
 
+        // Stage 3: ancillary indexes (each in its own statement so one failure doesn't block others)
+        var indexSb = new System.Text.StringBuilder();
         foreach (var (name, table, cols) in indexUpgrades)
         {
-            // Extract every column name from the column-list (strips brackets, splits on comma).
-            // We need each one to exist before we attempt to CREATE INDEX, otherwise the
-            // CREATE fails and rolls back the entire batch.
             var bareCols = cols.Replace("[", "").Replace("]", "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var colExistsClauses = string.Join(" AND ", bareCols.Select(c =>
                 $"EXISTS (SELECT 1 FROM sys.columns WHERE Name = N'{c}' AND Object_ID = Object_ID(N'[{table}]'))"));
-
-            sb.AppendLine($@"
+            indexSb.AppendLine($@"
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}')
     AND EXISTS (SELECT 1 FROM sys.tables WHERE name = '{table}')
     AND {colExistsClauses}
 BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         }
+        stages.Add(("Indexes", indexSb.ToString()));
 
-        try
+        // Execute each stage independently and log any failures
+        var totalSw = System.Diagnostics.Stopwatch.StartNew();
+        var failedStages = new List<string>();
+        foreach (var (stageName, stageSql) in stages)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            #pragma warning disable EF1002 // All values are compile-time constants
-            await context.Database.ExecuteSqlRawAsync(sb.ToString());
-            #pragma warning restore EF1002
-            sw.Stop();
-            log($"DB: Schema upgrades + indexes applied in one batch ({sw.ElapsedMilliseconds} ms)");
+            if (string.IsNullOrWhiteSpace(stageSql)) continue;
+            try
+            {
+                #pragma warning disable EF1002
+                await context.Database.ExecuteSqlRawAsync(stageSql);
+                #pragma warning restore EF1002
+            }
+            catch (Exception ex)
+            {
+                failedStages.Add($"{stageName}: {ex.Message}");
+                log($"DB: Schema stage '{stageName}' FAILED: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+        totalSw.Stop();
+
+        if (failedStages.Count == 0)
         {
-            log($"DB: Schema batch failed: {ex.Message}");
-            // Don't throw — app should still start with current schema
+            log($"DB: Schema upgrades applied successfully ({stages.Count} stage(s), {totalSw.ElapsedMilliseconds} ms)");
+        }
+        else
+        {
+            log($"DB: Schema upgrades completed with {failedStages.Count} failure(s) in {totalSw.ElapsedMilliseconds} ms. " +
+                "See Admin → Startup Logs for details.");
         }
     }
 
