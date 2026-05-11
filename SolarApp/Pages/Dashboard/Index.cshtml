@@ -1,7 +1,7 @@
 @page
 @model SolarApp.Pages.Dashboard.IndexModel
 @{
-    ViewData["Title"] = "Operations Dashboard";
+    ViewData["Title"] = "หน้าหลัก — ภาพรวมการทำงาน";
     var d = Model.Dashboard;
 }
 
@@ -9,11 +9,11 @@
 @if (d.Partners.Any())
 {
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-        <h5 class="mb-0">Operations</h5>
+        <h5 class="mb-0">ภาพรวม</h5>
         <form method="get" class="d-flex gap-2 align-items-center flex-grow-1 flex-md-grow-0"
               style="max-width: 350px;">
             <select name="PartnerId" class="form-select form-select-sm" onchange="this.form.submit()">
-                <option value="">All Partners (@d.TotalInstallations sites)</option>
+                <option value="">พาร์ทเนอร์ทั้งหมด (@d.TotalInstallations ไซต์)</option>
                 @foreach (var p in d.Partners)
                 {
                     <option value="@p.Id" selected="@(d.SelectedPartnerId == p.Id)">@p.Name (@p.InstallationCount)</option>
@@ -29,7 +29,7 @@
         <div class="card border-0 shadow-sm text-center h-100">
             <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold">@d.TotalInstallations</div>
-                <small class="text-muted">Total Sites</small>
+                <small class="text-muted">ไซต์ทั้งหมด</small>
             </div>
         </div>
     </div>
@@ -37,7 +37,7 @@
         <div class="card border-0 shadow-sm text-center h-100 @(d.OnlineCount == d.TotalInstallations && d.TotalInstallations > 0 ? "border-success" : "")">
             <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold text-success">@d.OnlineCount</div>
-                <small class="text-muted">Online</small>
+                <small class="text-muted">ใช้งานปกติ</small>
             </div>
         </div>
     </div>
@@ -45,7 +45,7 @@
         <div class="card border-0 shadow-sm text-center h-100 @(d.OfflineCount > 0 ? "border-danger border-2" : "")">
             <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold @(d.OfflineCount > 0 ? "text-danger" : "text-muted")">@d.OfflineCount</div>
-                <small class="text-muted">Offline</small>
+                <small class="text-muted">ออฟไลน์</small>
             </div>
         </div>
     </div>
@@ -53,7 +53,7 @@
         <div class="card border-0 shadow-sm text-center h-100">
             <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold text-warning">@d.MaintenanceCount</div>
-                <small class="text-muted">Maintenance</small>
+                <small class="text-muted">บำรุงรักษา</small>
             </div>
         </div>
     </div>
@@ -61,7 +61,7 @@
         <div class="card border-0 shadow-sm text-center h-100">
             <div class="card-body py-2 py-md-3">
                 <div class="display-6 fw-bold text-info">@d.TotalCapacityKw.ToString("N0")</div>
-                <small class="text-muted">Total kWp</small>
+                <small class="text-muted">กำลังรวม (kWp)</small>
             </div>
         </div>
     </div>
@@ -76,8 +76,8 @@
 {
     <div class="card border-danger border-2 shadow-sm mb-4">
         <div class="card-header bg-danger text-white d-flex justify-content-between">
-            <h6 class="mb-0"><i class="bi bi-exclamation-triangle-fill"></i> Action Required</h6>
-            <span class="badge bg-white text-danger">@hasAction items</span>
+            <h6 class="mb-0"><i class="bi bi-exclamation-triangle-fill"></i> ต้องดำเนินการ</h6>
+            <span class="badge bg-white text-danger">@hasAction รายการ</span>
         </div>
         <div class="card-body p-0">
             <div class="row g-0">
@@ -85,49 +85,49 @@
                 {
                     <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-danger">@d.OfflineCount</div>
-                        <small>Offline</small>
+                        <small>ออฟไลน์</small>
                     </div>
                 }
                 @if (d.CriticalAlertCount > 0)
                 {
                     <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-danger">@d.CriticalAlertCount</div>
-                        <small>Critical</small>
+                        <small>วิกฤต</small>
                     </div>
                 }
                 @if (d.HighAlertCount > 0)
                 {
                     <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-warning">@d.HighAlertCount</div>
-                        <small>High Alerts</small>
+                        <small>เร่งด่วน</small>
                     </div>
                 }
                 @if (d.CleaningDueCount > 0)
                 {
                     <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-info">@d.CleaningDueCount</div>
-                        <small>Cleaning Due</small>
+                        <small>ครบล้างแผง</small>
                     </div>
                 }
                 @if (d.PendingMaintenanceCount > 0)
                 {
                     <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-primary">@d.PendingMaintenanceCount</div>
-                        <small>Pending MA</small>
+                        <small>รอบำรุงรักษา</small>
                     </div>
                 }
                 @if (d.OpenTicketCount > 0)
                 {
                     <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-secondary">@d.OpenTicketCount</div>
-                        <small>Open Tickets</small>
+                        <small>แจ้งซ่อมค้าง</small>
                     </div>
                 }
                 @if (d.WarrantyExpiringCount > 0)
                 {
                     <div class="col-6 col-sm-4 col-md-auto border-bottom p-2 p-md-3 text-center">
                         <div class="fs-3 fw-bold text-info">@d.WarrantyExpiringCount</div>
-                        <small>Warranty &lt;90d</small>
+                        <small>ประกันใกล้หมด</small>
                     </div>
                 }
             </div>
@@ -137,7 +137,7 @@
 else
 {
     <div class="alert alert-success mb-4">
-        <i class="bi bi-check-circle-fill"></i> <strong>All systems normal</strong> — No action required
+        <i class="bi bi-check-circle-fill"></i> <strong>ทุกระบบปกติ</strong> — ไม่มีรายการที่ต้องดำเนินการ
     </div>
 }
 
@@ -147,7 +147,7 @@ else
     {
         <div class="col-md-6 mb-3">
             <div class="card border-0 shadow-sm h-100">
-                <div class="card-header bg-white"><h6 class="mb-0 text-danger"><i class="bi bi-wifi-off"></i> Offline Installations</h6></div>
+                <div class="card-header bg-white"><h6 class="mb-0 text-danger"><i class="bi bi-wifi-off"></i> ไซต์ที่ออฟไลน์</h6></div>
                 <div class="card-body p-0">
                     @foreach (var inst in d.OfflineInstallations)
                     {
@@ -155,9 +155,9 @@ else
                             <div>
                                 <strong>@inst.SiteName</strong>
                                 <br /><small class="text-muted">@inst.CustomerName @(inst.PartnerName != null ? $"• {inst.PartnerName}" : "")</small>
-                                <br /><small class="text-danger">Last online: @inst.OnlineAgo</small>
+                                <br /><small class="text-danger">ออนไลน์ล่าสุด: @inst.OnlineAgo</small>
                             </div>
-                            <a asp-page="/Installations/Detail" asp-route-id="@inst.Id" class="btn btn-sm btn-outline-danger">View</a>
+                            <a asp-page="/Installations/Detail" asp-route-id="@inst.Id" class="btn btn-sm btn-outline-danger">ดู</a>
                         </div>
                     }
                 </div>
@@ -169,10 +169,10 @@ else
     <div class="@(d.OfflineInstallations.Any() ? "col-md-6" : "col-12") mb-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white d-flex justify-content-between">
-                <h6 class="mb-0"><i class="bi bi-bell-fill text-warning"></i> Active Alerts (@d.ActiveAlerts.Count)</h6>
+                <h6 class="mb-0"><i class="bi bi-bell-fill text-warning"></i> แจ้งเตือนที่ยังไม่จัดการ (@d.ActiveAlerts.Count)</h6>
                 @if (User.IsInRole("Admin"))
                 {
-                    <a asp-page="/Admin/Alerts" class="btn btn-sm btn-outline-warning">Manage All</a>
+                    <a asp-page="/Admin/Alerts" class="btn btn-sm btn-outline-warning">ดูทั้งหมด</a>
                 }
             </div>
             <div class="card-body p-0" style="max-height:280px;overflow-y:auto">
@@ -195,7 +195,7 @@ else
                 }
                 @if (!d.ActiveAlerts.Any())
                 {
-                    <p class="text-center text-muted py-3 mb-0">No active alerts</p>
+                    <p class="text-center text-muted py-3 mb-0">ไม่มีแจ้งเตือน</p>
                 }
             </div>
         </div>
@@ -205,14 +205,14 @@ else
 <!-- ═══ ALL INSTALLATIONS TABLE ═══ -->
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <h6 class="mb-0">All Installations</h6>
+        <h6 class="mb-0">ไซต์งานทั้งหมด</h6>
         <div class="d-flex gap-2 align-items-center">
             <input type="text" id="searchInput" class="form-control form-control-sm" style="width:200px"
-                   placeholder="Search site/customer..." />
+                   placeholder="ค้นหาไซต์ / ลูกค้า..." />
             @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
             {
                 <a asp-page="/Installations/Create" class="btn btn-warning btn-sm">
-                    <i class="bi bi-plus"></i> New
+                    <i class="bi bi-plus"></i> เพิ่ม
                 </a>
             }
         </div>
@@ -222,16 +222,16 @@ else
             <table class="table table-hover mb-0" id="installationsTable">
                 <thead class="table-light">
                     <tr>
-                        <th>Status</th>
-                        <th>Site</th>
-                        <th>Customer</th>
-                        @if (User.IsInRole("Admin")) { <th>Partner</th> }
-                        <th>Inverter</th>
-                        <th>Capacity</th>
-                        <th>Last Online</th>
-                        <th>Alerts</th>
-                        <th>Cleaning</th>
-                        <th>Warranty</th>
+                        <th>สถานะ</th>
+                        <th>ไซต์งาน</th>
+                        <th>ลูกค้า</th>
+                        @if (User.IsInRole("Admin")) { <th>พาร์ทเนอร์</th> }
+                        <th>อินเวอร์เตอร์</th>
+                        <th>กำลัง</th>
+                        <th>ออนไลน์ล่าสุด</th>
+                        <th>แจ้งเตือน</th>
+                        <th>ล้างแผง</th>
+                        <th>ประกัน</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -249,7 +249,7 @@ else
                             <td>@inst.CustomerName</td>
                             @if (User.IsInRole("Admin"))
                             {
-                                <td><small>@(inst.PartnerName ?? "Direct")</small></td>
+                                <td><small>@(inst.PartnerName ?? "ตรง")</small></td>
                             }
                             <td>
                                 <small>@inst.InverterBrand</small>
@@ -275,21 +275,21 @@ else
                             <td>
                                 @if (inst.IsCleaningDue)
                                 {
-                                    <span class="badge bg-warning text-dark" title="@inst.NextCleaningDate?.ToString("dd/MM/yyyy")">Due!</span>
+                                    <span class="badge bg-warning text-dark" title="@inst.NextCleaningDate?.ToString("dd/MM/yyyy")">ครบกำหนด!</span>
                                 }
                                 else
                                 {
-                                    <small class="text-muted">@inst.RemainingCleanings left</small>
+                                    <small class="text-muted">เหลือ @inst.RemainingCleanings ครั้ง</small>
                                 }
                             </td>
                             <td>
                                 @if (inst.WarrantyDaysLeft <= 0)
                                 {
-                                    <span class="badge bg-danger">Expired</span>
+                                    <span class="badge bg-danger">หมดประกัน</span>
                                 }
                                 else if (inst.WarrantyDaysLeft <= 90)
                                 {
-                                    <span class="badge bg-warning text-dark">@inst.WarrantyDaysLeft d</span>
+                                    <span class="badge bg-warning text-dark">เหลือ @inst.WarrantyDaysLeft วัน</span>
                                 }
                                 else
                                 {
@@ -305,7 +305,7 @@ else
                     }
                     @if (!d.AllInstallations.Any())
                     {
-                        <tr><td colspan="11" class="text-center text-muted py-4">No installations</td></tr>
+                        <tr><td colspan="11" class="text-center text-muted py-4">ยังไม่มีไซต์งาน</td></tr>
                     }
                 </tbody>
             </table>

@@ -1,25 +1,25 @@
 @page
 @model SolarApp.Pages.Performance.IndexModel
 @{
-    ViewData["Title"] = "Performance";
+    ViewData["Title"] = "ผลการผลิต";
     var f = Model.Fleet;
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-speedometer2"></i> Fleet Performance</h4>
-        <small class="text-muted">@Model.From.ToString("dd MMM yyyy") → @Model.To.ToString("dd MMM yyyy") · @f.InstallationCount site(s)</small>
+        <h4 class="mb-0"><i class="bi bi-speedometer2"></i> ผลการผลิตรวม</h4>
+        <small class="text-muted">@Model.From.ToString("dd MMM yyyy") → @Model.To.ToString("dd MMM yyyy") · @f.InstallationCount ไซต์</small>
     </div>
     <form method="get" class="d-flex flex-wrap gap-2 align-items-end">
         <div>
-            <label class="form-label small mb-0">From</label>
+            <label class="form-label small mb-0">ตั้งแต่</label>
             <input name="From" type="date" value="@Model.From.ToString("yyyy-MM-dd")" class="form-control form-control-sm" />
         </div>
         <div>
-            <label class="form-label small mb-0">To</label>
+            <label class="form-label small mb-0">ถึง</label>
             <input name="To" type="date" value="@Model.To.ToString("yyyy-MM-dd")" class="form-control form-control-sm" />
         </div>
-        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-filter"></i> Apply</button>
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-filter"></i> กรอง</button>
     </form>
 </div>
 
@@ -28,40 +28,40 @@
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
-                <div class="text-muted small">Fleet PR</div>
+                <div class="text-muted small">PR เฉลี่ย</div>
                 <div class="fs-3 fw-bold text-@(f.FleetPerformanceRatio >= 0.85m ? "success" : f.FleetPerformanceRatio >= 0.7m ? "warning" : "danger")">
                     @((f.FleetPerformanceRatio * 100).ToString("0.0"))%
                 </div>
-                <small class="text-muted">Actual / Expected</small>
+                <small class="text-muted">ผลจริง / ที่คาดหวัง</small>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
-                <div class="text-muted small">Fleet Uptime</div>
+                <div class="text-muted small">Uptime เฉลี่ย</div>
                 <div class="fs-3 fw-bold text-@(f.FleetUptimePercent >= 98 ? "success" : f.FleetUptimePercent >= 90 ? "warning" : "danger")">
                     @f.FleetUptimePercent%
                 </div>
-                <small class="text-muted">Average across sites</small>
+                <small class="text-muted">เฉลี่ยทุกไซต์</small>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
-                <div class="text-muted small">Total Production</div>
+                <div class="text-muted small">ผลิตรวม</div>
                 <div class="fs-3 fw-bold">@f.TotalActualKwh.ToString("N0") <small class="fs-6 text-muted">kWh</small></div>
-                <small class="text-muted">Expected @f.TotalExpectedKwh.ToString("N0")</small>
+                <small class="text-muted">คาดหวัง @f.TotalExpectedKwh.ToString("N0")</small>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
-                <div class="text-muted small">Total Capacity</div>
+                <div class="text-muted small">กำลังรวม</div>
                 <div class="fs-3 fw-bold">@f.TotalCapacityKw.ToString("N1") <small class="fs-6 text-muted">kW</small></div>
-                <small class="text-muted">@f.ActiveCount active · @f.OfflineCount offline</small>
+                <small class="text-muted">ใช้งาน @f.ActiveCount · ออฟไลน์ @f.OfflineCount</small>
             </div>
         </div>
     </div>
@@ -72,12 +72,12 @@
     <div class="col-12 col-md-6">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white">
-                <h6 class="mb-0"><i class="bi bi-trophy"></i> Top Performers</h6>
+                <h6 class="mb-0"><i class="bi bi-trophy"></i> ไซต์ที่ผลิตได้ดี</h6>
             </div>
             <div class="list-group list-group-flush">
                 @if (!f.TopPerformers.Any())
                 {
-                    <div class="list-group-item text-muted">No data</div>
+                    <div class="list-group-item text-muted">ยังไม่มีข้อมูล</div>
                 }
                 @foreach (var p in f.TopPerformers)
                 {
@@ -106,12 +106,12 @@
     <div class="col-12 col-md-6">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white">
-                <h6 class="mb-0"><i class="bi bi-exclamation-triangle"></i> Needs Attention</h6>
+                <h6 class="mb-0"><i class="bi bi-exclamation-triangle"></i> ต้องตรวจสอบ</h6>
             </div>
             <div class="list-group list-group-flush">
                 @if (!f.BottomPerformers.Any())
                 {
-                    <div class="list-group-item text-muted">All sites performing well</div>
+                    <div class="list-group-item text-muted">ทุกไซต์ทำงานปกติดี</div>
                 }
                 @foreach (var p in f.BottomPerformers)
                 {
@@ -126,8 +126,8 @@
                                     <strong>@p.Installation.SiteName</strong>
                                 </div>
                                 <small class="text-muted">
-                                    @(p.UnresolvedAlerts > 0 ? $"{p.UnresolvedAlerts} alert(s) · " : "")
-                                    @p.OfflineDays offline day(s)
+                                    @(p.UnresolvedAlerts > 0 ? $"{p.UnresolvedAlerts} แจ้งเตือน · " : "")
+                                    ออฟไลน์ @p.OfflineDays วัน
                                 </small>
                             </div>
                             <div class="text-end">
@@ -147,8 +147,8 @@
     <div class="alert alert-warning d-flex align-items-center gap-2">
         <i class="bi bi-exclamation-circle fs-4"></i>
         <div>
-            <strong>@f.UnderperformingCount installation(s)</strong> are underperforming (PR &lt; 75%).
-            Review the "Needs Attention" list above for action items.
+            มี <strong>@f.UnderperformingCount ไซต์</strong> ที่ผลิตได้ต่ำกว่าเกณฑ์ (PR &lt; 75%).
+            ตรวจสอบในรายการ "ต้องตรวจสอบ" ด้านบน
         </div>
     </div>
 }

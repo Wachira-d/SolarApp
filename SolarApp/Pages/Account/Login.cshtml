@@ -1,7 +1,7 @@
 @page
 @model SolarApp.Pages.Account.LoginModel
 @{
-    ViewData["Title"] = "Login";
+    ViewData["Title"] = "เข้าสู่ระบบ";
     Layout = "_Layout";
 }
 
@@ -12,45 +12,45 @@
                 <div class="text-center mb-4">
                     <i class="bi bi-sun text-warning" style="font-size: 3rem;"></i>
                     <h3 class="mt-2">SolarApp</h3>
-                    <p class="text-muted">Solar Installation Management System</p>
+                    <p class="text-muted">ระบบจัดการพลังงานแสงอาทิตย์</p>
                 </div>
 
                 <form method="post">
                     <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
 
                     <div class="mb-3">
-                        <label asp-for="Input.Email" class="form-label">Email</label>
+                        <label asp-for="Input.Email" class="form-label">อีเมล</label>
                         <input asp-for="Input.Email" class="form-control" placeholder="email@example.com" />
                         <span asp-validation-for="Input.Email" class="text-danger"></span>
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="Input.Password" class="form-label">Password</label>
+                        <label asp-for="Input.Password" class="form-label">รหัสผ่าน</label>
                         <input asp-for="Input.Password" class="form-control" type="password" />
                         <span asp-validation-for="Input.Password" class="text-danger"></span>
                     </div>
 
                     <div class="mb-3 form-check">
                         <input asp-for="Input.RememberMe" class="form-check-input" />
-                        <label asp-for="Input.RememberMe" class="form-check-label">Remember me</label>
+                        <label asp-for="Input.RememberMe" class="form-check-label">จดจำการเข้าสู่ระบบ</label>
                     </div>
 
-                    <button type="submit" class="btn btn-warning w-100 mb-3">Login</button>
+                    <button type="submit" class="btn btn-warning w-100 mb-3">เข้าสู่ระบบ</button>
                 </form>
 
                 @if (Model.ExternalProviders.Any())
                 {
                     <div class="text-center text-muted my-3">
-                        <small>— OR —</small>
+                        <small>— หรือ —</small>
                     </div>
                     <form method="post" asp-page="/Account/ExternalLogin" asp-route-returnUrl="@Model.ReturnUrl">
                         @foreach (var provider in Model.ExternalProviders)
                         {
                             var (label, icon, colour) = provider.Name switch
                             {
-                                "Microsoft" => ("Sign in with Microsoft / Office 365", "bi-microsoft", "btn-outline-primary"),
-                                "LINE"      => ("Sign in with LINE", "bi-chat-dots-fill", "btn-success"),
-                                _           => ($"Sign in with {provider.DisplayName}", "bi-box-arrow-in-right", "btn-outline-secondary")
+                                "Microsoft" => ("เข้าสู่ระบบด้วย Microsoft / Office 365", "bi-microsoft", "btn-outline-primary"),
+                                "LINE"      => ("เข้าสู่ระบบด้วย LINE", "bi-chat-dots-fill", "btn-success"),
+                                _           => ($"เข้าสู่ระบบด้วย {provider.DisplayName}", "bi-box-arrow-in-right", "btn-outline-secondary")
                             };
                             <button type="submit" name="provider" value="@provider.Name"
                                     class="btn @colour w-100 mb-2">
@@ -62,9 +62,9 @@
                     {
                         <div class="small text-muted text-center mt-2">
                             <i class="bi bi-info-circle"></i>
-                            LINE: works only if your account is already linked.
-                            Not linked yet? Sign in with email/password first, then link in
-                            <strong>Account → Manage Logins</strong>.
+                            LINE: ใช้ได้เมื่อบัญชีถูกผูกกับระบบแล้วเท่านั้น
+                            ถ้ายังไม่ได้ผูก ให้เข้าด้วยอีเมล/รหัสผ่านก่อน แล้วผูกที่
+                            <strong>จัดการบัญชี → ผูก LINE</strong>
                         </div>
                     }
                 }
@@ -72,8 +72,8 @@
                 {
                     <div class="alert alert-light small text-muted mb-0">
                         <i class="bi bi-info-circle"></i>
-                        External login (Microsoft/LINE) is not configured. Ask your admin to fill in
-                        <code>Authentication:Microsoft</code> or <code>Authentication:LINE</code> in appsettings.
+                        ยังไม่ได้ตั้งค่าการเข้าสู่ระบบจากภายนอก (Microsoft/LINE) — ขอให้ผู้ดูแลกรอกค่า
+                        <code>Authentication:Microsoft</code> หรือ <code>Authentication:LINE</code> ใน appsettings
                     </div>
                 }
             </div>

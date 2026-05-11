@@ -2,48 +2,48 @@
 @model SolarApp.Pages.ServiceTickets.CreateModel
 @using SolarApp.Models.Enums
 @{
-    ViewData["Title"] = "Create Service Ticket";
+    ViewData["Title"] = "แจ้งซ่อมใหม่";
 }
 
 <div class="row justify-content-center">
     <div class="col-md-8">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white">
-                <h5 class="mb-0">Create Service Ticket</h5>
+                <h5 class="mb-0">แจ้งซ่อมใหม่</h5>
             </div>
             <div class="card-body">
                 <form method="post">
                     <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
 
                     <div class="mb-3">
-                        <label asp-for="InstallationId" class="form-label">Installation *</label>
+                        <label asp-for="InstallationId" class="form-label">ไซต์งาน *</label>
                         <select asp-for="InstallationId" asp-items="Model.Installations" class="form-select">
-                            <option value="">-- Select Installation --</option>
+                            <option value="">-- เลือกไซต์งาน --</option>
                         </select>
                         <span asp-validation-for="InstallationId" class="text-danger"></span>
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="Subject" class="form-label">Subject *</label>
+                        <label asp-for="Subject" class="form-label">หัวข้อ *</label>
                         <input asp-for="Subject" class="form-control" />
                         <span asp-validation-for="Subject" class="text-danger"></span>
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="Description" class="form-label">Description *</label>
+                        <label asp-for="Description" class="form-label">รายละเอียด *</label>
                         <textarea asp-for="Description" class="form-control" rows="5"></textarea>
                         <span asp-validation-for="Description" class="text-danger"></span>
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="Priority" class="form-label">Priority</label>
+                        <label asp-for="Priority" class="form-label">ความสำคัญ</label>
                         <select asp-for="Priority" asp-items="Html.GetEnumSelectList<TicketPriority>()" class="form-select"></select>
                         <span asp-validation-for="Priority" class="text-danger"></span>
                     </div>
 
                     <div class="d-flex justify-content-between">
-                        <a asp-page="Index" class="btn btn-outline-secondary">Cancel</a>
-                        <button type="submit" class="btn btn-warning">Create Ticket</button>
+                        <a asp-page="Index" class="btn btn-outline-secondary">ยกเลิก</a>
+                        <button type="submit" class="btn btn-warning">บันทึก</button>
                     </div>
                 </form>
             </div>

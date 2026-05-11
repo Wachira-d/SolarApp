@@ -224,11 +224,13 @@ public class Startup
             builder.Configuration.GetValue("InverterApis:HuaweiMaxAcceptableWaitSeconds", 30));
 
         // ── Localization ──
+        // Default culture is Thai because the primary users are field technicians
+        // in Thailand. Users can still switch to English via the language menu.
         builder.Services.AddLocalization(opt => opt.ResourcesPath = "Resources");
         builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>(opt =>
         {
-            var supported = new[] { "en", "th" };
-            opt.SetDefaultCulture("en")
+            var supported = new[] { "th", "en" };
+            opt.SetDefaultCulture("th")
                 .AddSupportedCultures(supported)
                 .AddSupportedUICultures(supported);
             opt.FallBackToParentCultures = true;

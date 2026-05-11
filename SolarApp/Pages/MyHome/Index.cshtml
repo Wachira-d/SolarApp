@@ -9,19 +9,19 @@
 {
     <div class="alert alert-warning">
         <i class="bi bi-info-circle"></i>
-        Your account is not linked to a customer profile yet. Please contact your installer.
+        บัญชีของคุณยังไม่ได้ผูกกับโปรไฟล์ลูกค้า กรุณาติดต่อผู้ติดตั้ง
     </div>
 }
 else
 {
     <div class="mb-3">
-        <h4 class="mb-0"><i class="bi bi-sun-fill text-warning"></i> Welcome, @Model.Customer.FirstName</h4>
-        <small class="text-muted">@Model.Sites.Count site(s)</small>
+        <h4 class="mb-0"><i class="bi bi-sun-fill text-warning"></i> สวัสดีคุณ @Model.Customer.FirstName</h4>
+        <small class="text-muted">@Model.Sites.Count ไซต์</small>
     </div>
 
     @if (!Model.Sites.Any())
     {
-        <div class="alert alert-info">No solar sites linked to your account yet.</div>
+        <div class="alert alert-info">ยังไม่มีระบบโซลาร์ที่ผูกกับบัญชีของคุณ</div>
     }
 
     @foreach (var site in Model.Sites)
@@ -48,7 +48,7 @@ else
             <div class="row g-2 text-center mb-3">
                 <div class="col-6 col-md-3">
                     <div class="p-2 bg-body-secondary rounded">
-                        <div class="text-muted small">Right now</div>
+                        <div class="text-muted small">ขณะนี้</div>
                         <div class="fs-3 fw-bold text-success">
                             @((site.CurrentPowerKw ?? 0).ToString("0.00"))
                             <small class="fs-6">kW</small>
@@ -59,19 +59,19 @@ else
                 </div>
                 <div class="col-6 col-md-3">
                     <div class="p-2 bg-body-secondary rounded">
-                        <div class="text-muted small">Today</div>
+                        <div class="text-muted small">วันนี้</div>
                         <div class="fs-3 fw-bold">@site.TodayKwh.ToString("0.0") <small class="fs-6">kWh</small></div>
                     </div>
                 </div>
                 <div class="col-6 col-md-3">
                     <div class="p-2 bg-body-secondary rounded">
-                        <div class="text-muted small">Last 7 days</div>
+                        <div class="text-muted small">7 วันที่ผ่านมา</div>
                         <div class="fs-3 fw-bold">@site.Last7dKwh.ToString("N0") <small class="fs-6">kWh</small></div>
                     </div>
                 </div>
                 <div class="col-6 col-md-3">
                     <div class="p-2 bg-body-secondary rounded">
-                        <div class="text-muted small">Last 30 days</div>
+                        <div class="text-muted small">30 วันที่ผ่านมา</div>
                         <div class="fs-3 fw-bold">@site.Last30dKwh.ToString("N0") <small class="fs-6">kWh</small></div>
                     </div>
                 </div>
@@ -81,7 +81,7 @@ else
             <div class="alert alert-success mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div>
                     <i class="bi bi-piggy-bank fs-4"></i>
-                    <strong>Estimated savings (30 days):</strong>
+                    <strong>ประหยัดประมาณ (30 วัน):</strong>
                 </div>
                 <div class="fs-5 fw-bold">
                     ฿@((site.Performance.EstimatedSavings + site.Performance.EstimatedRevenue).ToString("N0"))
@@ -91,17 +91,17 @@ else
             <!-- Lifetime + alerts -->
             <div class="row g-2 small">
                 <div class="col-6">
-                    <span class="text-muted">Lifetime production:</span>
+                    <span class="text-muted">ผลิตสะสมตลอดอายุ:</span>
                     <strong>@site.LifetimeKwh.ToString("N0") kWh</strong>
                 </div>
                 <div class="col-6 text-end">
                     @if (site.UnresolvedAlerts > 0)
                     {
-                        <span class="badge bg-danger">@site.UnresolvedAlerts alert(s)</span>
+                        <span class="badge bg-danger">@site.UnresolvedAlerts แจ้งเตือน</span>
                     }
                     else
                     {
-                        <span class="text-success"><i class="bi bi-check-circle"></i> All good</span>
+                        <span class="text-success"><i class="bi bi-check-circle"></i> ปกติดี</span>
                     }
                 </div>
             </div>
@@ -110,7 +110,7 @@ else
             {
                 <hr />
                 <div class="small">
-                    <strong>Tips:</strong>
+                    <strong>คำแนะนำ:</strong>
                     <ul class="mb-0">
                         @foreach (var tip in site.Performance.Recommendations)
                         { <li>@tip</li> }
@@ -125,6 +125,6 @@ else
         <a asp-page="/WorkOrders/Index" class="btn btn-outline-primary btn-sm me-3">
             <i class="bi bi-clipboard2-check"></i> ดูใบสั่งงาน / รูปภาพ
         </a>
-        <i class="bi bi-shield-check"></i> Your data is private — only you and your installer can see this.
+        <i class="bi bi-shield-check"></i> ข้อมูลของคุณเป็นส่วนตัว — มีเพียงคุณและผู้ติดตั้งเท่านั้นที่เห็น
     </div>
 }

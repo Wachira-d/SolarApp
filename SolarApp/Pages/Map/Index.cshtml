@@ -1,7 +1,7 @@
 @page
 @model SolarApp.Pages.Map.IndexModel
 @{
-    ViewData["Title"] = "Site Map";
+    ViewData["Title"] = "แผนที่ไซต์งาน";
     var markersJson = System.Text.Json.JsonSerializer.Serialize(Model.Markers);
 }
 
@@ -15,16 +15,16 @@
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-geo-alt"></i> Site Map</h4>
-        <small class="text-muted">@Model.MappedSites mapped / @Model.TotalSites total sites</small>
+        <h4 class="mb-0"><i class="bi bi-geo-alt"></i> แผนที่ไซต์งาน</h4>
+        <small class="text-muted">แสดงบนแผนที่ @Model.MappedSites / ทั้งหมด @Model.TotalSites ไซต์</small>
     </div>
     <div class="d-flex gap-3 align-items-center small flex-wrap">
-        <span><span class="legend-dot" style="background:#198754"></span> Active</span>
-        <span><span class="legend-dot" style="background:#dc3545"></span> Offline</span>
-        <span title="Marked maintenance, cleaning overdue, open maintenance record, or open work order">
-            <span class="legend-dot" style="background:#ffc107"></span> Needs MA
+        <span><span class="legend-dot" style="background:#198754"></span> ใช้งานปกติ</span>
+        <span><span class="legend-dot" style="background:#dc3545"></span> ออฟไลน์</span>
+        <span title="ถูกตั้งเป็นบำรุงรักษา / เลยกำหนดล้างแผง / มี maintenance record / มี work order ที่ค้าง">
+            <span class="legend-dot" style="background:#ffc107"></span> ต้องเข้า MA
         </span>
-        <span><span class="legend-dot" style="background:#6c757d"></span> Inactive</span>
+        <span><span class="legend-dot" style="background:#6c757d"></span> ปิดใช้งาน</span>
     </div>
 </div>
 
@@ -32,7 +32,7 @@
 {
     <div class="alert alert-info">
         <i class="bi bi-info-circle"></i>
-        No installations have GPS coordinates set yet. Edit an installation and fill in Latitude / Longitude to see it here.
+        ยังไม่มีไซต์ที่กรอกพิกัด GPS — ไปที่หน้าไซต์งานแล้วเพิ่ม Latitude / Longitude เพื่อให้แสดงบนแผนที่
     </div>
 }
 else
@@ -72,20 +72,20 @@ else
         });
 
         const alertBadge = m.UnresolvedAlerts > 0
-            ? `<span class="badge bg-danger ms-1">${m.UnresolvedAlerts} alert</span>` : '';
+            ? `<span class="badge bg-danger ms-1">${m.UnresolvedAlerts} แจ้งเตือน</span>` : '';
         const maBadge = m.NeedsMaintenance
-            ? `<span class="badge bg-warning text-dark ms-1"><i class="bi bi-tools"></i> Needs MA</span>` : '';
+            ? `<span class="badge bg-warning text-dark ms-1"><i class="bi bi-tools"></i> ต้องเข้า MA</span>` : '';
 
         const maDetails = [];
         if (m.CleaningOverdue) maDetails.push('🧽 ล้างแผงเลยกำหนด');
-        if (m.OpenMaintenanceCount > 0) maDetails.push(`🔧 ${m.OpenMaintenanceCount} maintenance record(s) open`);
-        if (m.OpenWorkOrderCount > 0) maDetails.push(`📋 ${m.OpenWorkOrderCount} work order(s) open`);
+        if (m.OpenMaintenanceCount > 0) maDetails.push(`🔧 มีรายการบำรุงรักษาค้าง ${m.OpenMaintenanceCount} รายการ`);
+        if (m.OpenWorkOrderCount > 0) maDetails.push(`📋 มีใบสั่งงานค้าง ${m.OpenWorkOrderCount} รายการ`);
         const maHtml = maDetails.length
             ? `<div class="alert alert-warning small mt-2 mb-0 py-1 px-2">${maDetails.join('<br>')}</div>`
             : '';
 
         const tooltipParts = [m.Name];
-        if (m.NeedsMaintenance) tooltipParts.push('⚠ Needs MA');
+        if (m.NeedsMaintenance) tooltipParts.push('⚠ ต้องเข้า MA');
         marker.bindTooltip(tooltipParts.join(' — '), { direction: 'top' });
 
         marker.bindPopup(`
@@ -99,7 +99,7 @@ else
                 <div class="mt-1 small">${m.CapacityKw} kW</div>
                 ${maHtml}
                 <a href="/Installations/Detail/${m.Id}" class="btn btn-sm btn-primary mt-2 w-100">
-                    Open Site
+                    เปิดดูไซต์
                 </a>
             </div>
         `);

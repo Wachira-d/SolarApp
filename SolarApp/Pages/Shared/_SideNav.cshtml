@@ -12,105 +12,105 @@
     <ul class="nav flex-column mb-auto">
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/dashboard")" asp-page="/Dashboard/Index">
-                <i class="bi bi-speedometer2 me-2"></i>Dashboard
+                <i class="bi bi-speedometer2 me-2"></i>หน้าหลัก
             </a>
         </li>
         @if (User.IsInRole("Customer"))
         {
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/myhome")" asp-page="/MyHome/Index">
-                    <i class="bi bi-sun-fill me-2 text-warning"></i>My Solar
+                    <i class="bi bi-sun-fill me-2 text-warning"></i>โซลาร์ของฉัน
                 </a>
             </li>
         }
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/installations")" asp-page="/Installations/Index">
-                <i class="bi bi-house-gear me-2"></i>Installations
+                <i class="bi bi-house-gear me-2"></i>ไซต์งาน
             </a>
         </li>
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/map")" asp-page="/Map/Index">
-                <i class="bi bi-geo-alt me-2"></i>Map
+                <i class="bi bi-geo-alt me-2"></i>แผนที่
             </a>
         </li>
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/workorders")" asp-page="/WorkOrders/Index">
-                <i class="bi bi-clipboard2-check me-2"></i>Work Orders
+                <i class="bi bi-clipboard2-check me-2"></i>ใบสั่งงาน
             </a>
         </li>
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/maintenance")" asp-page="/Maintenance/Index">
-                <i class="bi bi-tools me-2"></i>Maintenance
+                <i class="bi bi-tools me-2"></i>การบำรุงรักษา
             </a>
         </li>
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/servicetickets")" asp-page="/ServiceTickets/Index">
-                <i class="bi bi-ticket-detailed me-2"></i>Service Tickets
+                <i class="bi bi-ticket-detailed me-2"></i>แจ้งซ่อม
             </a>
         </li>
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/performance")" asp-page="/Performance/Index">
-                <i class="bi bi-speedometer me-2"></i>Performance
+                <i class="bi bi-speedometer me-2"></i>ผลการผลิต
             </a>
         </li>
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/reports")" asp-page="/Reports/Index">
-                <i class="bi bi-bar-chart me-2"></i>Reports
+                <i class="bi bi-bar-chart me-2"></i>รายงาน
             </a>
         </li>
         @if (User.IsInRole("Admin"))
         {
             <li class="nav-item mt-3">
-                <small class="text-muted px-3 text-uppercase" style="letter-spacing: 0.1em;">Admin</small>
+                <small class="text-muted px-3 text-uppercase" style="letter-spacing: 0.1em;">ผู้ดูแลระบบ</small>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/users")" asp-page="/Admin/Users">
-                    <i class="bi bi-people me-2"></i>User Management
+                    <i class="bi bi-people me-2"></i>จัดการผู้ใช้
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/importinstallations")" asp-page="/Admin/ImportInstallations">
-                    <i class="bi bi-upload me-2"></i>Bulk Import
+                    <i class="bi bi-upload me-2"></i>นำเข้าข้อมูล
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/alerts")" asp-page="/Admin/Alerts">
-                    <i class="bi bi-bell me-2"></i>All Alerts
+                    <i class="bi bi-bell me-2"></i>แจ้งเตือนทั้งหมด
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/alertrules")" asp-page="/Admin/AlertRules">
-                    <i class="bi bi-shield-exclamation me-2"></i>Alert Rules
+                    <i class="bi bi-shield-exclamation me-2"></i>กฎแจ้งเตือน
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/schedule")" asp-page="/Admin/Schedule">
-                    <i class="bi bi-clock-history me-2"></i>Sync Schedule
+                    <i class="bi bi-clock-history me-2"></i>ตารางงานเบื้องหลัง
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/linesettings")" asp-page="/Admin/LineSettings">
-                    <i class="bi bi-chat-dots me-2"></i>LINE Messaging
+                    <i class="bi bi-chat-dots me-2"></i>ตั้งค่า LINE
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/externalauth")" asp-page="/Admin/ExternalAuth">
-                    <i class="bi bi-shield-lock me-2"></i>External Auth (SSO)
+                    <i class="bi bi-shield-lock me-2"></i>การเข้าสู่ระบบภายนอก
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/startuplogs")" asp-page="/Admin/StartupLogs">
-                    <i class="bi bi-bug me-2"></i>Startup Logs
+                    <i class="bi bi-bug me-2"></i>บันทึกการเริ่มระบบ
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white @ActiveClass("/admin/auditlogs")" asp-page="/Admin/AuditLogs">
-                    <i class="bi bi-journal-text me-2"></i>Audit Logs
+                    <i class="bi bi-journal-text me-2"></i>บันทึกการใช้งาน
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link text-white" href="/hangfire" target="_blank">
-                    <i class="bi bi-gear me-2"></i>Hangfire
+                    <i class="bi bi-gear me-2"></i>Hangfire (งานเบื้องหลัง)
                 </a>
             </li>
         }
@@ -123,11 +123,11 @@
             @UserManager.GetUserName(User)
         </div>
         <a asp-page="/Account/Manage" class="btn btn-outline-light btn-sm w-100 mb-2">
-            <i class="bi bi-shield-lock"></i> Manage Logins / Link LINE
+            <i class="bi bi-shield-lock"></i> จัดการบัญชี / ผูก LINE
         </a>
         <form asp-page="/Account/Logout" method="post" class="d-grid">
             <button type="submit" class="btn btn-outline-light btn-sm">
-                <i class="bi bi-box-arrow-right"></i> Logout
+                <i class="bi bi-box-arrow-right"></i> ออกจากระบบ
             </button>
         </form>
     </div>

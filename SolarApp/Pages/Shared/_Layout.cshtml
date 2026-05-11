@@ -40,7 +40,7 @@
                     <i class="bi bi-sun-fill text-warning"></i> SolarApp
                 </span>
                 <span class="ms-auto text-white-50 small d-none d-sm-inline me-2">@ViewData["Title"]</span>
-                <button type="button" class="btn btn-sm btn-outline-light ms-auto ms-sm-0" onclick="toggleTheme()" title="Toggle theme">
+                <button type="button" class="btn btn-sm btn-outline-light ms-auto ms-sm-0" onclick="toggleTheme()" title="สลับธีมสว่าง/มืด">
                     <i class="bi bi-moon-fill"></i><i class="bi bi-sun-fill"></i>
                 </button>
             </div>
@@ -65,7 +65,7 @@
             <aside class="bg-dark text-white d-none d-lg-flex flex-column" id="sidebar">
                 <div class="p-3 border-bottom border-secondary">
                     <h5 class="mb-0"><i class="bi bi-sun-fill text-warning"></i> SolarApp</h5>
-                    <small class="text-muted">Solar Management</small>
+                    <small class="text-muted">ระบบจัดการพลังงานแสงอาทิตย์</small>
                 </div>
                 @await Html.PartialAsync("_SideNav")
             </aside>
@@ -86,13 +86,13 @@
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end">
                                     <li><a class="dropdown-item" asp-page="/Account/Manage">
-                                        <i class="bi bi-shield-lock me-1"></i> Manage Logins
+                                        <i class="bi bi-shield-lock me-1"></i> จัดการบัญชี
                                     </a></li>
                                     <li><hr class="dropdown-divider"></li>
                                     <li>
                                         <form asp-page="/Account/Logout" method="post" class="px-3">
                                             <button type="submit" class="btn btn-sm btn-outline-secondary w-100">
-                                                <i class="bi bi-box-arrow-right"></i> Logout
+                                                <i class="bi bi-box-arrow-right"></i> ออกจากระบบ
                                             </button>
                                         </form>
                                     </li>
@@ -107,12 +107,12 @@
                                     <li><a class="dropdown-item" href="/Language/Set?culture=th&returnUrl=@Context.Request.Path">ไทย</a></li>
                                 </ul>
                             </div>
-                            <button type="button" class="theme-toggle me-2" onclick="toggleTheme()" title="Toggle theme">
+                            <button type="button" class="theme-toggle me-2" onclick="toggleTheme()" title="สลับธีมสว่าง/มืด">
                                 <i class="bi bi-moon-fill"></i><i class="bi bi-sun-fill"></i>
                             </button>
                             <form asp-page="/Account/Logout" method="post">
                                 <button type="submit" class="btn btn-outline-secondary btn-sm">
-                                    <i class="bi bi-box-arrow-right"></i> Logout
+                                    <i class="bi bi-box-arrow-right"></i> ออกจากระบบ
                                 </button>
                             </form>
                         </div>

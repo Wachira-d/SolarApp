@@ -2,7 +2,7 @@
 @model SolarApp.Pages.WorkOrders.IndexModel
 @using SolarApp.Models.Enums
 @{
-    ViewData["Title"] = "Work Orders";
+    ViewData["Title"] = "ใบสั่งงาน";
 }
 
 @if (!string.IsNullOrEmpty(Model.TableError))
@@ -15,15 +15,15 @@
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-clipboard2-check"></i> Work Orders</h4>
-        <small class="text-muted">Panel cleaning, PM, repair & standalone jobs</small>
+        <h4 class="mb-0"><i class="bi bi-clipboard2-check"></i> ใบสั่งงาน</h4>
+        <small class="text-muted">ล้างแผง, PM, ซ่อม, งานนอกระบบ</small>
     </div>
     <div class="d-flex gap-2">
         <a asp-page="Calendar" class="btn btn-outline-info btn-sm">
-            <i class="bi bi-calendar3"></i> Calendar
+            <i class="bi bi-calendar3"></i> ปฏิทิน
         </a>
         <a asp-page="Create" class="btn btn-warning btn-sm">
-            <i class="bi bi-plus-circle"></i> New Work Order
+            <i class="bi bi-plus-circle"></i> สร้างใบสั่งงาน
         </a>
     </div>
 </div>
@@ -32,22 +32,22 @@
 <div class="row g-2 mb-3">
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm text-center h-100"><div class="card-body py-2">
-            <div class="fs-4 fw-bold">@Model.TotalCount</div><small class="text-muted">Total</small>
+            <div class="fs-4 fw-bold">@Model.TotalCount</div><small class="text-muted">ทั้งหมด</small>
         </div></div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm text-center h-100 @(Model.OverdueCount > 0 ? "border-danger border-2" : "")"><div class="card-body py-2">
-            <div class="fs-4 fw-bold text-danger">@Model.OverdueCount</div><small class="text-muted">Overdue</small>
+            <div class="fs-4 fw-bold text-danger">@Model.OverdueCount</div><small class="text-muted">เลยกำหนด</small>
         </div></div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm text-center h-100"><div class="card-body py-2">
-            <div class="fs-4 fw-bold text-primary">@Model.TodayCount</div><small class="text-muted">Today</small>
+            <div class="fs-4 fw-bold text-primary">@Model.TodayCount</div><small class="text-muted">วันนี้</small>
         </div></div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm text-center h-100"><div class="card-body py-2">
-            <div class="fs-4 fw-bold text-info">@Model.ThisWeekCount</div><small class="text-muted">This Week</small>
+            <div class="fs-4 fw-bold text-info">@Model.ThisWeekCount</div><small class="text-muted">สัปดาห์นี้</small>
         </div></div>
     </div>
 </div>
@@ -58,26 +58,26 @@
         <form method="get" class="row g-2 align-items-end">
             <div class="col-auto">
                 <select asp-for="StatusFilter" class="form-select form-select-sm" asp-items="Html.GetEnumSelectList<WorkOrderStatus>()">
-                    <option value="">All Statuses</option>
+                    <option value="">สถานะทั้งหมด</option>
                 </select>
             </div>
             <div class="col-auto">
                 <select asp-for="TypeFilter" class="form-select form-select-sm" asp-items="Html.GetEnumSelectList<WorkOrderType>()">
-                    <option value="">All Types</option>
+                    <option value="">ประเภททั้งหมด</option>
                 </select>
             </div>
             <div class="col-auto">
-                <input asp-for="FromDate" type="date" class="form-control form-control-sm" placeholder="From" />
+                <input asp-for="FromDate" type="date" class="form-control form-control-sm" placeholder="ตั้งแต่" />
             </div>
             <div class="col-auto">
-                <input asp-for="ToDate" type="date" class="form-control form-control-sm" placeholder="To" />
+                <input asp-for="ToDate" type="date" class="form-control form-control-sm" placeholder="ถึง" />
             </div>
             <div class="col">
-                <input asp-for="Search" class="form-control form-control-sm" placeholder="Search WO#, title, site..." />
+                <input asp-for="Search" class="form-control form-control-sm" placeholder="ค้นหาเลข WO / หัวเรื่อง / ไซต์..." />
             </div>
             <div class="col-auto">
                 <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-filter"></i></button>
-                <a asp-page="Index" class="btn btn-sm btn-outline-secondary">Clear</a>
+                <a asp-page="Index" class="btn btn-sm btn-outline-secondary">ล้าง</a>
             </div>
         </form>
     </div>
@@ -90,12 +90,12 @@
             <table class="table table-hover table-sm mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>WO#</th>
-                        <th>Type</th>
-                        <th>Site</th>
-                        <th>Scheduled</th>
-                        <th>Assigned</th>
-                        <th>Status</th>
+                        <th>เลขที่</th>
+                        <th>ประเภท</th>
+                        <th>ไซต์งาน</th>
+                        <th>วันที่นัด</th>
+                        <th>ช่างที่รับผิดชอบ</th>
+                        <th>สถานะ</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -103,8 +103,8 @@
                     @if (!Model.Orders.Any())
                     {
                         <tr><td colspan="7" class="text-center text-muted py-4">
-                            No work orders found.
-                            <a asp-page="Create" class="ms-2">Create one →</a>
+                            ยังไม่มีใบสั่งงาน
+                            <a asp-page="Create" class="ms-2">สร้างใบใหม่ →</a>
                         </td></tr>
                     }
                     @foreach (var wo in Model.Orders)
@@ -116,7 +116,7 @@
                                 <div class="text-truncate" style="max-width:200px">
                                     @wo.SiteName
                                     @if (wo.IsStandalone)
-                                    { <span class="badge bg-info ms-1">Standalone</span> }
+                                    { <span class="badge bg-info ms-1">อิสระ</span> }
                                 </div>
                             </td>
                             <td>
