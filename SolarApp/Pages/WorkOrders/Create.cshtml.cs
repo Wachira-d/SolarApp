@@ -100,18 +100,9 @@ public class CreateModel : PageModel
         if (Enum.TryParse<WorkOrderType>(type, true, out var woType))
             Input.Type = woType;
 
-        // Set default title based on type
-        if (string.IsNullOrEmpty(Input.Title))
-        {
-            Input.Title = Input.Type switch
-            {
-                WorkOrderType.PanelCleaning => "Panel Cleaning",
-                WorkOrderType.PreventiveMaintenance => "Preventive Maintenance",
-                WorkOrderType.CorrectiveRepair => "Corrective Repair",
-                WorkOrderType.Inspection => "Site Inspection",
-                _ => ""
-            };
-        }
+        // Client-side JS in Create.cshtml fills Title + ChecklistItems from
+        // per-type defaults (and updates them when the type dropdown changes).
+        // We deliberately don't set them here so the client and server agree.
         return Page();
     }
 

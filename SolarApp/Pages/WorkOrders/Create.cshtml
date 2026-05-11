@@ -210,6 +210,142 @@
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
     <script>
+        // ── Per-type defaults for Title + Checklist ──
+        // Keys match SolarApp.Models.Enums.WorkOrderType integer values.
+        const WO_DEFAULTS = {
+            1: { // PanelCleaning
+                title: 'ล้างแผงโซลาร์',
+                checklist: [
+                    'ตรวจ DC isolator ก่อนเริ่มงาน',
+                    'ปิด AC breaker ก่อนล้างแผง',
+                    'ล้างแผงทุกแถวด้วยน้ำสะอาด (ไม่ใช้สารทำความสะอาด)',
+                    'ตรวจรอยรั่ว / น้ำซึมหลังล้าง',
+                    'ตรวจความสะอาด glass หลังแห้ง',
+                    'เปิดระบบกลับ + ตรวจค่ากำลังผลิต',
+                    'ถ่ายรูปก่อน-หลัง ทุกแถวที่ล้าง',
+                    'จดเลขมิเตอร์ก่อน-หลัง'
+                ].join('\n')
+            },
+            2: { // PreventiveMaintenance
+                title: 'บำรุงรักษาเชิงป้องกัน (PM)',
+                checklist: [
+                    'ตรวจสายไฟและ MC4 connectors ทุกจุด',
+                    'ขันแน่นน็อต MC4 + AC terminal',
+                    'วัดความต้านทานฉนวน DC string',
+                    'ตรวจสภาพ inverter (จอ / เสียง / อุณหภูมิ)',
+                    'ตรวจระบบดิน + bonding',
+                    'ทำความสะอาด heatsink / พัดลม inverter',
+                    'ตรวจ AC + DC breakers และ RCBO',
+                    'ตรวจ data logger + WiFi / 4G',
+                    'ตรวจโครงสร้างราง + clamps + รอยสนิม',
+                    'ถ่ายรูปจุดสำคัญ + สรุปรายงาน PM'
+                ].join('\n')
+            },
+            3: { // CorrectiveRepair
+                title: 'งานซ่อมแก้ไข',
+                checklist: [
+                    'บันทึกอาการที่พบเมื่อมาถึงไซต์',
+                    'ตรวจหาสาเหตุ (root cause)',
+                    'ถ่ายรูปจุดเสีย/ก่อนซ่อม',
+                    'ทำการซ่อม / เปลี่ยนอุปกรณ์',
+                    'ทดสอบการทำงานหลังซ่อม',
+                    'ถ่ายรูปจุดซ่อมหลังเสร็จ',
+                    'บันทึกอะไหล่ที่ใช้ + serial number',
+                    'อธิบาย/แจ้งลูกค้าเกี่ยวกับการซ่อม'
+                ].join('\n')
+            },
+            4: { // Inspection
+                title: 'ตรวจสอบประจำงวด',
+                checklist: [
+                    'ตรวจหน้าจอ inverter (ผลิตปกติ?)',
+                    'วัดแรงดัน / กระแส DC ในแต่ละ string',
+                    'วัดแรงดัน / กระแส AC output',
+                    'ตรวจ thermal scan หา hot spot (ถ้ามีกล้อง)',
+                    'ตรวจสภาพสายและ MC4 connectors',
+                    'ตรวจกล่องไฟ / AC breakers',
+                    'ถ่ายรูปจุดสำคัญ',
+                    'เปรียบเทียบกำลังผลิตกับ baseline เดิม'
+                ].join('\n')
+            },
+            5: { // NewInstallation
+                title: 'ติดตั้งโซลาร์ใหม่',
+                checklist: [
+                    'สำรวจหลังคา + วัดมุม + เงา shading',
+                    'ติดตั้งโครงรางและ clamps',
+                    'วางแผง + ขัน clamps + เช็คความตึง',
+                    'ติดตั้ง inverter (ระยะระบายอากาศ)',
+                    'เดินสาย DC ผ่าน conduit + DC isolator',
+                    'ติดตั้ง AC breaker + RCBO + ป้ายเตือน',
+                    'ติดตั้ง data logger / WiFi stick',
+                    'ทดสอบ open-circuit voltage ทุก string',
+                    'ทดสอบฉนวน + ลงทะเบียน cloud',
+                    'ถ่ายรูป before / during / after ทุก stage'
+                ].join('\n')
+            },
+            6: { // Commissioning
+                title: 'Commissioning + ส่งมอบงาน',
+                checklist: [
+                    'ตรวจ open-circuit voltage (Voc) ทุก string',
+                    'ตรวจความต้านทานฉนวน (insulation)',
+                    'เปิดระบบ + รัน inverter ครั้งแรก',
+                    'เช็คกำลังผลิตจริงเทียบสเปก',
+                    'ตั้งค่า + ลงทะเบียน cloud monitoring',
+                    'สอนการใช้งานแอป FusionSolar/SmartPV ให้ลูกค้า',
+                    'ส่งมอบ datasheet + คู่มือ + ใบรับประกัน',
+                    'ลูกค้าเซ็นรับงาน (CustomerSigned)'
+                ].join('\n')
+            },
+            7: { // Decommission
+                title: 'ถอนการติดตั้ง',
+                checklist: [
+                    'ปิด AC + DC ทุกตัวก่อนเริ่มถอน',
+                    'ถอด data logger + แจ้ง cloud ตัดบัญชี',
+                    'ถอด + ติด label แผงเพื่อเก็บ',
+                    'ม้วน + เก็บสาย DC / AC',
+                    'รื้อโครงราง',
+                    'อุดรู screws บนหลังคา + กันรั่ว',
+                    'ทำความสะอาดพื้นที่',
+                    'ถ่ายรูปสภาพหลังถอน + ส่งให้ลูกค้า'
+                ].join('\n')
+            },
+            8: { // Other
+                title: '',
+                checklist: ''
+            }
+        };
+
+        // ── Apply defaults when type changes ──
+        // Only overwrite Title / Checklist if they are EMPTY or still equal to
+        // the previously-applied default — so a tech who has typed custom text
+        // won't lose it.
+        (function () {
+            const titleEl = document.querySelector('[name="Input.Title"]');
+            const checkEl = document.querySelector('[name="Input.ChecklistItems"]');
+            const typeEl  = document.querySelector('[name="Input.Type"]');
+            if (!titleEl || !checkEl || !typeEl) return;
+
+            let lastTitle = titleEl.value;
+            let lastChecklist = checkEl.value;
+
+            function apply() {
+                const t = parseInt(typeEl.value, 10);
+                const d = WO_DEFAULTS[t] || WO_DEFAULTS[8];
+
+                if (titleEl.value.trim() === '' || titleEl.value === lastTitle) {
+                    titleEl.value = d.title;
+                    lastTitle = d.title;
+                }
+                if (checkEl.value.trim() === '' || checkEl.value === lastChecklist) {
+                    checkEl.value = d.checklist;
+                    lastChecklist = d.checklist;
+                }
+            }
+
+            // Apply once on load (for empty fields)
+            apply();
+            typeEl.addEventListener('change', apply);
+        })();
+
         // If the user typed something in the Standalone tab, auto-switch to it
         // when re-rendering after a validation failure.
         (function () {
