@@ -30,7 +30,11 @@ public class IndexModel : PageModel
         string? Brand,
         decimal CapacityKw,
         string? SiteCode,
-        int UnresolvedAlerts);
+        int UnresolvedAlerts,
+        bool NeedsMaintenance,
+        int OpenMaintenanceCount,
+        int OpenWorkOrderCount,
+        bool CleaningOverdue);
 
     public List<MapMarker> Markers { get; set; } = new();
     public int TotalSites { get; set; }
@@ -57,10 +61,52 @@ public class IndexModel : PageModel
                 q = q.Where(i => false);
         }
 
+        var now = DateTime.UtcNow;
+        var today = now.Date;
+
+        // WorkOrders may not exist on first deploy — guard the query
+        var workOrdersTableExists = true;
+        try
+        {
+            #pragma warning disable EF1002
+            await _context.Database.ExecuteSqlRawAsync("SELECT TOP 0 * FROM [WorkOrders]");
+            #pragma warning restore EF1002
+        }
+        catch
+        {
+            workOrdersTableExists = false;
+        }
+
+        var openWoStatuses = new[]
+        {
+            WorkOrderStatus.Scheduled,
+            WorkOrderStatus.Assigned,
+            WorkOrderStatus.Accepted,
+            WorkOrderStatus.InProgress,
+        };
+
         var installs = await q
-            .Select(i => new { i.Id, i.SiteName, i.SiteCode, i.Latitude, i.Longitude,
-                                i.Status, i.InverterBrand, i.SystemCapacityKw,
-                                UnresolvedAlerts = i.Alerts.Count(a => a.ResolvedAt == null) })
+            .Select(i => new
+            {
+                i.Id,
+                i.SiteName,
+                i.SiteCode,
+                i.Latitude,
+                i.Longitude,
+                i.Status,
+                i.InverterBrand,
+                i.SystemCapacityKw,
+                i.NextCleaningDueDate,
+                UnresolvedAlerts = i.Alerts.Count(a => a.ResolvedAt == null),
+                OpenMaintenance = i.MaintenanceRecords.Count(m =>
+                    m.Status == MaintenanceStatus.Scheduled
+                    || m.Status == MaintenanceStatus.InProgress),
+                OpenWorkOrders = workOrdersTableExists
+                    ? _context.WorkOrders.Count(w =>
+                        w.InstallationId == i.Id
+                        && openWoStatuses.Contains(w.Status))
+                    : 0,
+            })
             .ToListAsync();
 
         TotalSites = installs.Count;
@@ -69,10 +115,32 @@ public class IndexModel : PageModel
             .Where(i => i.Latitude.HasValue && i.Longitude.HasValue
                          && Math.Abs(i.Latitude.Value) > 0.0001
                          && Math.Abs(i.Longitude.Value) > 0.0001)
-            .Select(i => new MapMarker(
-                i.Id, i.SiteName, i.Latitude!.Value, i.Longitude!.Value,
-                i.Status.ToString(), i.InverterBrand.ToString(), i.SystemCapacityKw,
-                i.SiteCode, i.UnresolvedAlerts))
+            .Select(i =>
+            {
+                var cleaningOverdue = i.NextCleaningDueDate.HasValue
+                    && i.NextCleaningDueDate.Value <= now;
+                var needsMa = i.Status == InstallationStatus.Maintenance
+                    || cleaningOverdue
+                    || i.OpenMaintenance > 0
+                    || i.OpenWorkOrders > 0;
+
+                // Effective status string used by the front-end colour mapper.
+                // Offline / Inactive take precedence; otherwise, if MA is needed
+                // we report "Maintenance" so the pin turns yellow.
+                var effectiveStatus = i.Status switch
+                {
+                    InstallationStatus.Offline => "Offline",
+                    InstallationStatus.Inactive => "Inactive",
+                    _ when needsMa => "Maintenance",
+                    _ => "Active",
+                };
+
+                return new MapMarker(
+                    i.Id, i.SiteName, i.Latitude!.Value, i.Longitude!.Value,
+                    effectiveStatus, i.InverterBrand.ToString(), i.SystemCapacityKw,
+                    i.SiteCode, i.UnresolvedAlerts, needsMa,
+                    i.OpenMaintenance, i.OpenWorkOrders, cleaningOverdue);
+            })
             .ToList();
 
         MappedSites = Markers.Count;

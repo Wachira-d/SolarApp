@@ -21,7 +21,9 @@
     <div class="d-flex gap-3 align-items-center small flex-wrap">
         <span><span class="legend-dot" style="background:#198754"></span> Active</span>
         <span><span class="legend-dot" style="background:#dc3545"></span> Offline</span>
-        <span><span class="legend-dot" style="background:#ffc107"></span> Maintenance</span>
+        <span title="Marked maintenance, cleaning overdue, open maintenance record, or open work order">
+            <span class="legend-dot" style="background:#ffc107"></span> Needs MA
+        </span>
         <span><span class="legend-dot" style="background:#6c757d"></span> Inactive</span>
     </div>
 </div>
@@ -71,16 +73,31 @@ else
 
         const alertBadge = m.UnresolvedAlerts > 0
             ? `<span class="badge bg-danger ms-1">${m.UnresolvedAlerts} alert</span>` : '';
+        const maBadge = m.NeedsMaintenance
+            ? `<span class="badge bg-warning text-dark ms-1"><i class="bi bi-tools"></i> Needs MA</span>` : '';
+
+        const maDetails = [];
+        if (m.CleaningOverdue) maDetails.push('🧽 ล้างแผงเลยกำหนด');
+        if (m.OpenMaintenanceCount > 0) maDetails.push(`🔧 ${m.OpenMaintenanceCount} maintenance record(s) open`);
+        if (m.OpenWorkOrderCount > 0) maDetails.push(`📋 ${m.OpenWorkOrderCount} work order(s) open`);
+        const maHtml = maDetails.length
+            ? `<div class="alert alert-warning small mt-2 mb-0 py-1 px-2">${maDetails.join('<br>')}</div>`
+            : '';
+
+        const tooltipParts = [m.Name];
+        if (m.NeedsMaintenance) tooltipParts.push('⚠ Needs MA');
+        marker.bindTooltip(tooltipParts.join(' — '), { direction: 'top' });
 
         marker.bindPopup(`
-            <div style="min-width:180px">
-                <strong>${m.Name}</strong>${alertBadge}<br>
+            <div style="min-width:200px">
+                <strong>${m.Name}</strong>${alertBadge}${maBadge}<br>
                 <small class="text-muted">${m.SiteCode || ''}</small><br>
                 <div class="mt-1">
                     <span class="badge" style="background:${colorFor(m.Status)}">${m.Status}</span>
                     <span class="badge bg-info">${m.Brand}</span>
                 </div>
                 <div class="mt-1 small">${m.CapacityKw} kW</div>
+                ${maHtml}
                 <a href="/Installations/Detail/${m.Id}" class="btn btn-sm btn-primary mt-2 w-100">
                     Open Site
                 </a>
