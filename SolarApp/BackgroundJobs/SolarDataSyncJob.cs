@@ -341,13 +341,13 @@ public class SolarDataSyncJob
 
                     // De-dup: only one open Fault alert per installation per day
                     var faultTitle = $"Station Faulty: {installation.SiteName}";
-                    var today = DateTime.UtcNow.Date;
+                    var faultDedupSince = DateTime.UtcNow.Date;
                     var existingFault = await _context.SystemAlerts.AnyAsync(a =>
                         a.InstallationId == installation.Id
                         && a.AlertType == AlertType.Error
                         && a.ResolvedAt == null
                         && a.Title == faultTitle
-                        && a.OccurredAt >= today);
+                        && a.OccurredAt >= faultDedupSince);
 
                     if (!existingFault)
                     {
