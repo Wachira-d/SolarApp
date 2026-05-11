@@ -9,6 +9,7 @@ using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.Authorization;
+using SolarApp.Services.WorkOrderTemplates;
 
 namespace SolarApp.Pages.WorkOrders;
 
@@ -18,15 +19,21 @@ public class CreateModel : PageModel
     private readonly ApplicationDbContext _context;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IInstallationAccessHelper _installAccess;
+    private readonly IWorkOrderTemplateService _templates;
+
+    /// <summary>Per-type defaults injected into the page as JSON for the client-side dropdown handler.</summary>
+    public Dictionary<int, object> TypeDefaults { get; set; } = new();
 
     public CreateModel(
         ApplicationDbContext context,
         UserManager<ApplicationUser> userManager,
-        IInstallationAccessHelper installAccess)
+        IInstallationAccessHelper installAccess,
+        IWorkOrderTemplateService templates)
     {
         _context = context;
         _userManager = userManager;
         _installAccess = installAccess;
+        _templates = templates;
     }
 
     [BindProperty] public WorkOrderInput Input { get; set; } = new();
@@ -88,6 +95,7 @@ public class CreateModel : PageModel
     public async Task<IActionResult> OnGetAsync(int? installationId = null, string? type = null)
     {
         await LoadDropdownsAsync();
+        await LoadTypeDefaultsAsync();
 
         if (installationId.HasValue)
         {
@@ -127,6 +135,7 @@ public class CreateModel : PageModel
         if (!ModelState.IsValid)
         {
             await LoadDropdownsAsync();
+            await LoadTypeDefaultsAsync();
             return Page();
         }
 
@@ -221,5 +230,13 @@ public class CreateModel : PageModel
 
         var allUsers = await _userManager.Users.Where(u => u.IsActive).OrderBy(u => u.FullName).ToListAsync();
         Users = allUsers.Select(u => new SelectListItem(u.FullName ?? u.Email ?? u.Id, u.Id)).ToList();
+    }
+
+    private async Task LoadTypeDefaultsAsync()
+    {
+        var all = await _templates.GetAllAsync();
+        TypeDefaults = all.ToDictionary(
+            kv => (int)kv.Key,
+            kv => (object)new { title = kv.Value.Title, checklist = kv.Value.ChecklistItems });
     }
 }

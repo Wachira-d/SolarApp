@@ -28,6 +28,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<WorkOrder> WorkOrders => Set<WorkOrder>();
     public DbSet<WorkOrderItem> WorkOrderItems => Set<WorkOrderItem>();
     public DbSet<WorkOrderPhoto> WorkOrderPhotos => Set<WorkOrderPhoto>();
+    public DbSet<WorkOrderTypeTemplate> WorkOrderTypeTemplates => Set<WorkOrderTypeTemplate>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

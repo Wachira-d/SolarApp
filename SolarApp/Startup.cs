@@ -199,6 +199,7 @@ public class Startup
         builder.Services.AddScoped<Services.InverterApi.Common.IConnectionHealthChecker, Services.InverterApi.Common.ConnectionHealthChecker>();
         builder.Services.AddScoped<Services.Authorization.IInstallationAccessHelper, Services.Authorization.InstallationAccessHelper>();
         builder.Services.AddScoped<Services.Authorization.IWorkOrderAccessHelper, Services.Authorization.WorkOrderAccessHelper>();
+        builder.Services.AddScoped<Services.WorkOrderTemplates.IWorkOrderTemplateService, Services.WorkOrderTemplates.WorkOrderTemplateService>();
         builder.Services.AddScoped<Services.Performance.IPerformanceMetricsService, Services.Performance.PerformanceMetricsService>();
         builder.Services.AddScoped<Services.AlertRules.IAlertRulesEngine, Services.AlertRules.AlertRulesEngine>();
         builder.Services.AddScoped<Services.LineApi.ILineMessagingService, Services.LineApi.LineMessagingService>();
@@ -752,6 +753,20 @@ BEGIN
             REFERENCES [WorkOrders]([Id]) ON DELETE CASCADE
     );
     CREATE INDEX IX_WorkOrderPhotos_WO_Cat_Timing ON [WorkOrderPhotos]([WorkOrderId], [Category], [Timing]);
+END"));
+
+        stages.Add(("CreateTable:WorkOrderTypeTemplates", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WorkOrderTypeTemplates')
+BEGIN
+    CREATE TABLE [WorkOrderTypeTemplates] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [Type] int NOT NULL,
+        [Title] nvarchar(200) NOT NULL DEFAULT '',
+        [ChecklistItems] nvarchar(max) NOT NULL DEFAULT '',
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [UpdatedByUserId] nvarchar(450) NULL
+    );
+    CREATE UNIQUE INDEX IX_WorkOrderTypeTemplates_Type ON [WorkOrderTypeTemplates]([Type]);
 END"));
 
         // Stage 3: ancillary indexes (each in its own statement so one failure doesn't block others)
