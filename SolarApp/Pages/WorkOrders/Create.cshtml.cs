@@ -37,32 +37,48 @@ public class CreateModel : PageModel
 
     public class WorkOrderInput
     {
-        [Required] public WorkOrderType Type { get; set; } = WorkOrderType.PanelCleaning;
-        [Required, StringLength(200)] public string Title { get; set; } = "";
-        [StringLength(2000)] public string? Description { get; set; }
-        [StringLength(2000)] public string? Scope { get; set; }
-        [StringLength(2000)] public string? SpecialInstructions { get; set; }
+        [Required(ErrorMessage = "กรุณาเลือกประเภทงาน")]
+        public WorkOrderType Type { get; set; } = WorkOrderType.PanelCleaning;
+
+        [Required(ErrorMessage = "กรุณากรอกหัวข้องาน")]
+        [StringLength(200, ErrorMessage = "หัวข้องานต้องไม่เกิน 200 ตัวอักษร")]
+        public string Title { get; set; } = "";
+
+        [StringLength(2000, ErrorMessage = "คำอธิบายต้องไม่เกิน 2000 ตัวอักษร")]
+        public string? Description { get; set; }
+        [StringLength(2000, ErrorMessage = "ขอบเขตงานต้องไม่เกิน 2000 ตัวอักษร")]
+        public string? Scope { get; set; }
+        [StringLength(2000, ErrorMessage = "หมายเหตุพิเศษต้องไม่เกิน 2000 ตัวอักษร")]
+        public string? SpecialInstructions { get; set; }
 
         // Linked installation (optional)
         public int? InstallationId { get; set; }
 
         // Standalone site info
-        [StringLength(200)] public string? ExternalSiteName { get; set; }
-        [StringLength(500)] public string? ExternalSiteAddress { get; set; }
-        [StringLength(200)] public string? ExternalCustomerName { get; set; }
-        [StringLength(50)] public string? ExternalCustomerPhone { get; set; }
+        [StringLength(200, ErrorMessage = "ชื่อไซต์ต้องไม่เกิน 200 ตัวอักษร")]
+        public string? ExternalSiteName { get; set; }
+        [StringLength(500, ErrorMessage = "ที่อยู่ต้องไม่เกิน 500 ตัวอักษร")]
+        public string? ExternalSiteAddress { get; set; }
+        [StringLength(200, ErrorMessage = "ชื่อลูกค้าต้องไม่เกิน 200 ตัวอักษร")]
+        public string? ExternalCustomerName { get; set; }
+        [StringLength(50, ErrorMessage = "เบอร์โทรต้องไม่เกิน 50 ตัวอักษร")]
+        public string? ExternalCustomerPhone { get; set; }
         public double? ExternalLatitude { get; set; }
         public double? ExternalLongitude { get; set; }
 
         public int? CustomerId { get; set; }
 
-        [Required] public DateTime ScheduledDate { get; set; } = DateTime.Today.AddDays(1);
+        [Required(ErrorMessage = "กรุณาเลือกวันที่นัด")]
+        public DateTime ScheduledDate { get; set; } = DateTime.Today.AddDays(1);
         public string? ScheduledTimeStr { get; set; }
-        [Range(15, 24 * 60)] public int EstimatedDurationMinutes { get; set; } = 120;
 
-        [Range(0, 120, ErrorMessage = "Recurrence must be 0-120 months")]
+        [Range(15, 24 * 60, ErrorMessage = "ระยะเวลาต้องอยู่ระหว่าง 15 นาที ถึง 24 ชั่วโมง")]
+        public int EstimatedDurationMinutes { get; set; } = 120;
+
+        [Range(0, 120, ErrorMessage = "การทำซ้ำต้องอยู่ระหว่าง 0-120 เดือน")]
         public int? RecurrenceMonths { get; set; }
-        [StringLength(100)] public string? AssignedTeam { get; set; }
+        [StringLength(100, ErrorMessage = "ชื่อทีมต้องไม่เกิน 100 ตัวอักษร")]
+        public string? AssignedTeam { get; set; }
         public string? AssignedToUserId { get; set; }
 
         // Checklist template
@@ -103,18 +119,19 @@ public class CreateModel : PageModel
     {
         // Custom validation
         if (Input.ScheduledDate.Date < DateTime.UtcNow.Date.AddDays(-30))
-            ModelState.AddModelError("Input.ScheduledDate", "Scheduled date cannot be more than 30 days in the past.");
+            ModelState.AddModelError("Input.ScheduledDate", "วันที่นัดไม่สามารถย้อนหลังเกิน 30 วันได้");
 
         if (Input.ScheduledDate.Date > DateTime.UtcNow.Date.AddYears(5))
-            ModelState.AddModelError("Input.ScheduledDate", "Scheduled date cannot be more than 5 years in the future.");
+            ModelState.AddModelError("Input.ScheduledDate", "วันที่นัดไม่สามารถเกิน 5 ปีในอนาคตได้");
 
         // Either linked installation OR standalone site name must be provided
         if (!Input.InstallationId.HasValue && string.IsNullOrWhiteSpace(Input.ExternalSiteName))
-            ModelState.AddModelError("Input.ExternalSiteName", "Provide either a linked installation or a standalone site name.");
+            ModelState.AddModelError("Input.ExternalSiteName",
+                "กรุณาเลือก \"ไซต์ในระบบ\" หรือกรอก \"ชื่อไซต์\" ใน \"ไซต์นอกระบบ\" อย่างใดอย่างหนึ่ง");
 
         // Validate Partner cannot create against an installation they don't own
         if (Input.InstallationId.HasValue && !await _installAccess.CanAccessAsync(Input.InstallationId.Value, User))
-            ModelState.AddModelError("Input.InstallationId", "You do not have access to that installation.");
+            ModelState.AddModelError("Input.InstallationId", "คุณไม่มีสิทธิ์เข้าถึงไซต์นี้");
 
         if (!ModelState.IsValid)
         {
