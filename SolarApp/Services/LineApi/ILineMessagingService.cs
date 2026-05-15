@@ -16,6 +16,9 @@ public interface ILineMessagingService
     Task SendDailySummaryAsync(string lineUserId, DailySummaryData summary);
     Task SendEscalationAsync(string lineUserId, string siteName, string alertTitle,
         string alertMessage, string severity, TimeSpan openDuration, int escalationLevel);
+    Task SendPredictiveAlertAsync(string lineUserId, string siteName,
+        string prediction, string evidence, string[] checkSteps, string[] fixSteps,
+        string riskLevel, string? knownCaseRef);
 }
 
 public class DailySummaryData

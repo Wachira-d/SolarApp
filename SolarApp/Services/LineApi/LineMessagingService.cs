@@ -578,6 +578,122 @@ public class LineMessagingService : ILineMessagingService
         catch (Exception ex) { _logger.LogError(ex, "Failed to send escalation to {UserId}", lineUserId); }
     }
 
+    public async Task SendPredictiveAlertAsync(string lineUserId, string siteName,
+        string prediction, string evidence, string[] checkSteps, string[] fixSteps,
+        string riskLevel, string? knownCaseRef)
+    {
+        if (string.IsNullOrEmpty(lineUserId)) return;
+        var token = await GetChannelAccessTokenAsync();
+        if (string.IsNullOrEmpty(token)) return;
+
+        var riskColor = riskLevel switch
+        {
+            "High" => "#FF6F00",
+            "Medium" => "#F9A825",
+            _ => "#1565C0"
+        };
+
+        var bodyContents = new List<object>
+        {
+            new { type = "text", text = prediction, weight = "bold", size = "md", wrap = true },
+            new
+            {
+                type = "box", layout = "vertical", spacing = "sm",
+                contents = new object[]
+                {
+                    new
+                    {
+                        type = "box", layout = "horizontal",
+                        contents = new object[] {
+                            new { type = "text", text = "Site", size = "sm", color = "#AAAAAA", flex = 2 },
+                            new { type = "text", text = siteName, size = "sm", flex = 4, wrap = true }
+                        }
+                    },
+                    new
+                    {
+                        type = "box", layout = "horizontal",
+                        contents = new object[] {
+                            new { type = "text", text = "Risk", size = "sm", color = "#AAAAAA", flex = 2 },
+                            new { type = "text", text = riskLevel, size = "sm", color = riskColor, flex = 4 }
+                        }
+                    }
+                }
+            },
+            new { type = "separator" },
+            new { type = "text", text = "หลักฐาน (Evidence)", size = "sm", color = "#FF6F00", weight = "bold" },
+            new { type = "text", text = evidence, size = "xs", color = "#666666", wrap = true }
+        };
+
+        if (checkSteps.Length > 0)
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = "สิ่งที่ต้องตรวจ", size = "sm", color = "#1565C0", weight = "bold" });
+            foreach (var step in checkSteps.Take(5))
+                bodyContents.Add(new { type = "text", text = $"• {step}", size = "xs", color = "#333333", wrap = true });
+        }
+
+        if (fixSteps.Length > 0)
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = "วิธีแก้ไข", size = "sm", color = "#00C853", weight = "bold" });
+            foreach (var step in fixSteps.Take(5))
+                bodyContents.Add(new { type = "text", text = $"• {step}", size = "xs", color = "#333333", wrap = true });
+        }
+
+        if (!string.IsNullOrEmpty(knownCaseRef))
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = $"อ้างอิง: {knownCaseRef}", size = "xs", color = "#9E9E9E", wrap = true });
+        }
+
+        var flexContent = new
+        {
+            type = "bubble",
+            header = new
+            {
+                type = "box", layout = "vertical", backgroundColor = riskColor,
+                contents = new object[]
+                {
+                    new { type = "text", text = "🔍 Predictive Alert", color = "#FFFFFF", weight = "bold", size = "lg" },
+                    new { type = "text", text = "คาดว่าอาจเกิดปัญหา", color = "#FFFFFF", size = "sm" }
+                }
+            },
+            body = new { type = "box", layout = "vertical", spacing = "md", contents = bodyContents.ToArray() },
+            footer = new
+            {
+                type = "box", layout = "vertical",
+                contents = new object[]
+                {
+                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                }
+            }
+        };
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+            var payload = new
+            {
+                to = lineUserId,
+                messages = new object[] { new { type = "flex", altText = $"[PREDICTIVE] {prediction}", contents = flexContent } }
+            };
+            using var slot = await AcquireSendSlotAsync();
+            var response = await client.PostAsJsonAsync(PushUrl, payload);
+            _context.NotificationLogs.Add(new NotificationLog
+            {
+                RecipientLineId = lineUserId, Channel = NotificationChannel.Line,
+                Title = $"[PREDICTIVE] {prediction}", Message = evidence,
+                RelatedEntityType = "PredictiveDiagnostic",
+                Status = response.IsSuccessStatusCode ? NotificationStatus.Sent : NotificationStatus.Failed,
+                ErrorMessage = !response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync() : null,
+                SentAt = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+            });
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to send predictive alert to {UserId}", lineUserId); }
+    }
+
     public async Task SendDailySummaryAsync(string lineUserId, DailySummaryData s)
     {
         if (string.IsNullOrEmpty(lineUserId)) return;

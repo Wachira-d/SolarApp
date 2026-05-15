@@ -7,7 +7,8 @@ public enum AlertType
     Warning = 3,
     MaintenanceDue = 4,
     WarrantyExpiring = 5,
-    LowPerformance = 6
+    LowPerformance = 6,
+    PredictiveDiagnostic = 7,
 }
 
 public enum AlertSeverity
