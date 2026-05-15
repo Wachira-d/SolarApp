@@ -68,29 +68,36 @@ public class HoymilesAdapter : IInverterApiAdapter
 
         try
         {
-            var client = CreateClient();
-
             // ── Step 1: Detect region → get login_url ──
-            var regionBody = new { email = credentials.Username };
-            var regionResp = await client.PostAsJsonAsync($"{RegionApiBase}/iam/pub/0/c/region_c", regionBody);
-            var regionContent = await regionResp.Content.ReadAsStringAsync();
             string loginUrl = RegionApiBase;
             string apiBase = DefaultApiBase;
 
-            if (regionResp.IsSuccessStatusCode)
+            try
             {
-                try
+                var regionClient = CreateClient();
+                var regionBody = new { email = credentials.Username };
+                var regionResp = await regionClient.PostAsJsonAsync($"{RegionApiBase}/iam/pub/0/c/region_c", regionBody);
+                var regionContent = await regionResp.Content.ReadAsStringAsync();
+
+                if (regionResp.IsSuccessStatusCode)
                 {
                     var regionJson = JsonDocument.Parse(regionContent).RootElement;
                     if (regionJson.TryGetProperty("data", out var regionData))
                     {
-                        loginUrl = SafeGetString(regionData, "login_url") ?? loginUrl;
-                        apiBase = SafeGetString(regionData, "api_url")
-                               ?? SafeGetString(regionData, "data_url")
-                               ?? apiBase;
+                        var parsedLoginUrl = SafeGetString(regionData, "login_url");
+                        if (!string.IsNullOrEmpty(parsedLoginUrl) && parsedLoginUrl.StartsWith("http"))
+                            loginUrl = parsedLoginUrl.TrimEnd('/');
+
+                        var parsedApiUrl = SafeGetString(regionData, "api_url")
+                                        ?? SafeGetString(regionData, "data_url");
+                        if (!string.IsNullOrEmpty(parsedApiUrl) && parsedApiUrl.StartsWith("http"))
+                            apiBase = parsedApiUrl.TrimEnd('/');
                     }
                 }
-                catch { /* use defaults */ }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Hoymiles region detection failed, using defaults");
             }
             _logger.LogDebug("Hoymiles region: loginUrl={Url}, apiBase={Base}", loginUrl, apiBase);
 
@@ -106,9 +113,10 @@ public class HoymilesAdapter : IInverterApiAdapter
                 hashedPassword = $"{md5Hash}.{shaHash}";
             }
 
-            // ── Step 3: Login ──
+            // ── Step 3: Login with hashed password ──
+            var loginClient = CreateClient();
             var loginBody = new { user_name = credentials.Username, password = hashedPassword };
-            var loginResp = await client.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", loginBody);
+            var loginResp = await loginClient.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", loginBody);
             var loginContent = await loginResp.Content.ReadAsStringAsync();
 
             if (!loginResp.IsSuccessStatusCode)
@@ -124,8 +132,9 @@ public class HoymilesAdapter : IInverterApiAdapter
             if (status != "0")
             {
                 // Maybe password hashing not needed for this account — try plain
+                var plainClient = CreateClient();
                 var plainBody = new { user_name = credentials.Username, password };
-                var plainResp = await client.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", plainBody);
+                var plainResp = await plainClient.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", plainBody);
                 if (plainResp.IsSuccessStatusCode)
                 {
                     var plainJson = JsonDocument.Parse(await plainResp.Content.ReadAsStringAsync()).RootElement;
@@ -179,8 +188,6 @@ public class HoymilesAdapter : IInverterApiAdapter
         var cacheKey = $"hoymiles|{credentials.Username}|{credentials.Password?.Length ?? 0}";
         try
         {
-            var client = CreateClient();
-
             // Try multiple known base URLs
             var bases = new[]
             {
@@ -193,6 +200,7 @@ public class HoymilesAdapter : IInverterApiAdapter
             {
                 try
                 {
+                    var client = CreateClient();
                     var body = new
                     {
                         body = new { user_name = credentials.Username, password = credentials.Password },
