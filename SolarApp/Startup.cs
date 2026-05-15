@@ -216,6 +216,7 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.DailySummaryJob>();
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
         builder.Services.AddScoped<Services.PredictiveDiagnostics.PredictiveDiagnosticsEngine>();
+        builder.Services.AddScoped<Services.PredictiveDiagnostics.AlertDiagnosticsEnricher>();
 
         // ── Huawei NBI rate gate tunables ──
         // Defaults to 65s spacing, which keeps us safely below Huawei's

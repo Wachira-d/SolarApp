@@ -5,6 +5,7 @@ using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.AlertRules;
 using SolarApp.Services.LineApi;
+using SolarApp.Services.PredictiveDiagnostics;
 
 namespace SolarApp.BackgroundJobs;
 
@@ -20,19 +21,22 @@ public class SystemHealthMonitorJob
     private readonly ILogger<SystemHealthMonitorJob> _logger;
     private readonly IConfiguration _configuration;
     private readonly IAlertRulesEngine _rulesEngine;
+    private readonly AlertDiagnosticsEnricher _diagnosticsEnricher;
 
     public SystemHealthMonitorJob(
         ApplicationDbContext context,
         ILineMessagingService lineService,
         ILogger<SystemHealthMonitorJob> logger,
         IConfiguration configuration,
-        IAlertRulesEngine rulesEngine)
+        IAlertRulesEngine rulesEngine,
+        AlertDiagnosticsEnricher diagnosticsEnricher)
     {
         _context = context;
         _lineService = lineService;
         _logger = logger;
         _configuration = configuration;
         _rulesEngine = rulesEngine;
+        _diagnosticsEnricher = diagnosticsEnricher;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
@@ -500,6 +504,29 @@ public class SystemHealthMonitorJob
                 continue;
             }
 
+            // ── Enrich alert with brand-specific diagnostics ──
+            AlertDiagnostics? diag = null;
+            try
+            {
+                diag = await _diagnosticsEnricher.EnrichAsync(alert, alert.Installation);
+
+                // Append diagnostics to RootCauseAnalysis for dashboard display
+                if (diag.HasDiagnostics)
+                {
+                    var appendix = diag.ToRootCauseAppendix();
+                    if (!string.IsNullOrEmpty(appendix))
+                    {
+                        alert.RootCauseAnalysis = string.IsNullOrEmpty(alert.RootCauseAnalysis)
+                            ? appendix
+                            : alert.RootCauseAnalysis + "\n\n═══ Diagnostics ═══\n" + appendix;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Diagnostics enrichment failed for alert {Id}", alert.Id);
+            }
+
             int attempted = 0;
             int succeeded = 0;
 
@@ -510,11 +537,23 @@ public class SystemHealthMonitorJob
                 attempted++;
                 try
                 {
-                    await _lineService.SendFlexAlertAsync(
-                        toLineId,
-                        alert.Installation!.SiteName,
-                        alert.Title, alert.Message,
-                        severity, alert.RootCauseAnalysis);
+                    if (diag != null && diag.HasDiagnostics)
+                    {
+                        await _lineService.SendDiagnosticAlertAsync(
+                            toLineId, alert.Installation!.SiteName,
+                            alert.Title, alert.Message, severity,
+                            alert.RootCauseAnalysis, diag.PredictedCause,
+                            diag.CheckSteps.ToArray(), diag.FixSteps.ToArray(),
+                            diag.KnownCaseRef, diag.SafetyWarning,
+                            diag.ContextNotes.ToArray());
+                    }
+                    else
+                    {
+                        await _lineService.SendFlexAlertAsync(
+                            toLineId, alert.Installation!.SiteName,
+                            alert.Title, alert.Message,
+                            severity, alert.RootCauseAnalysis);
+                    }
                     succeeded++;
                 }
                 catch (Exception ex)

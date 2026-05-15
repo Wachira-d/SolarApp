@@ -19,6 +19,11 @@ public interface ILineMessagingService
     Task SendPredictiveAlertAsync(string lineUserId, string siteName,
         string prediction, string evidence, string[] checkSteps, string[] fixSteps,
         string riskLevel, string? knownCaseRef);
+    Task SendDiagnosticAlertAsync(string lineUserId, string siteName,
+        string alertTitle, string alertMessage, string severity,
+        string? rootCause, string? predictedCause,
+        string[] checkSteps, string[] fixSteps, string? knownCaseRef,
+        string? safetyWarning, string[]? contextNotes);
 }
 
 public class DailySummaryData

@@ -343,6 +343,147 @@ public class LineMessagingService : ILineMessagingService
         await SendFlexAlertAsync(lineUserId, siteName, alertTitle, alertMessage, "High", rootCause);
     }
 
+    public async Task SendDiagnosticAlertAsync(string lineUserId, string siteName,
+        string alertTitle, string alertMessage, string severity,
+        string? rootCause, string? predictedCause,
+        string[] checkSteps, string[] fixSteps, string? knownCaseRef,
+        string? safetyWarning, string[]? contextNotes)
+    {
+        if (string.IsNullOrEmpty(lineUserId)) return;
+        var token = await GetChannelAccessTokenAsync();
+        if (string.IsNullOrEmpty(token)) return;
+
+        var severityColor = severity switch
+        {
+            "Critical" => "#FF0000",
+            "High" => "#FF8C00",
+            "Medium" => "#FFD700",
+            _ => "#808080"
+        };
+
+        var bodyContents = new List<object>
+        {
+            new { type = "text", text = alertTitle, weight = "bold", size = "md", wrap = true },
+            new
+            {
+                type = "box", layout = "vertical", spacing = "sm",
+                contents = new object[]
+                {
+                    new
+                    {
+                        type = "box", layout = "horizontal",
+                        contents = new object[] {
+                            new { type = "text", text = "Site", size = "sm", color = "#AAAAAA", flex = 2 },
+                            new { type = "text", text = siteName, size = "sm", flex = 4, wrap = true }
+                        }
+                    },
+                    new
+                    {
+                        type = "box", layout = "horizontal",
+                        contents = new object[] {
+                            new { type = "text", text = "Detail", size = "sm", color = "#AAAAAA", flex = 2 },
+                            new { type = "text", text = alertMessage.Length > 200 ? alertMessage[..200] + "..." : alertMessage, size = "sm", flex = 4, wrap = true }
+                        }
+                    }
+                }
+            }
+        };
+
+        // Safety warning — top priority, red background
+        if (!string.IsNullOrEmpty(safetyWarning))
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = $"⚠ {safetyWarning}", size = "xs", color = "#FF0000", weight = "bold", wrap = true });
+        }
+
+        // Predicted cause
+        if (!string.IsNullOrEmpty(predictedCause))
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = "🔍 คาดว่า", size = "sm", color = "#FF6F00", weight = "bold" });
+            bodyContents.Add(new { type = "text", text = predictedCause, size = "xs", color = "#333333", wrap = true });
+        }
+
+        // Context notes (history, patterns)
+        if (contextNotes != null && contextNotes.Length > 0)
+        {
+            foreach (var note in contextNotes.Take(3))
+                bodyContents.Add(new { type = "text", text = $"📊 {note}", size = "xs", color = "#666666", wrap = true });
+        }
+
+        // Check steps
+        if (checkSteps.Length > 0)
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = "ตรวจเช็ค", size = "sm", color = "#1565C0", weight = "bold" });
+            foreach (var step in checkSteps.Take(4))
+                bodyContents.Add(new { type = "text", text = $"☐ {step}", size = "xs", color = "#333333", wrap = true });
+        }
+
+        // Fix steps
+        if (fixSteps.Length > 0)
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = "วิธีแก้ไข", size = "sm", color = "#00C853", weight = "bold" });
+            foreach (var step in fixSteps.Take(4))
+                bodyContents.Add(new { type = "text", text = $"→ {step}", size = "xs", color = "#333333", wrap = true });
+        }
+
+        // Known case reference
+        if (!string.IsNullOrEmpty(knownCaseRef))
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = $"อ้างอิง: {(knownCaseRef.Length > 80 ? knownCaseRef[..80] + "..." : knownCaseRef)}", size = "xs", color = "#9E9E9E", wrap = true });
+        }
+
+        var flexContent = new
+        {
+            type = "bubble",
+            header = new
+            {
+                type = "box", layout = "vertical", backgroundColor = severityColor,
+                contents = new object[]
+                {
+                    new { type = "text", text = "Solar Alert + Diagnostics", color = "#FFFFFF", weight = "bold", size = "lg" },
+                    new { type = "text", text = severity, color = "#FFFFFF", size = "sm" }
+                }
+            },
+            body = new { type = "box", layout = "vertical", spacing = "sm", contents = bodyContents.ToArray() },
+            footer = new
+            {
+                type = "box", layout = "vertical",
+                contents = new object[]
+                {
+                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                }
+            }
+        };
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+            var payload = new
+            {
+                to = lineUserId,
+                messages = new object[] { new { type = "flex", altText = $"[{severity}] {alertTitle}", contents = flexContent } }
+            };
+            using var slot = await AcquireSendSlotAsync();
+            var response = await client.PostAsJsonAsync(PushUrl, payload);
+            _context.NotificationLogs.Add(new NotificationLog
+            {
+                RecipientLineId = lineUserId, Channel = NotificationChannel.Line,
+                Title = alertTitle, Message = alertMessage,
+                RelatedEntityType = "SystemAlert",
+                Status = response.IsSuccessStatusCode ? NotificationStatus.Sent : NotificationStatus.Failed,
+                ErrorMessage = !response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync() : null,
+                SentAt = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+            });
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to send diagnostic alert to {UserId}", lineUserId); }
+    }
+
     public async Task SendMaintenanceReminderAsync(string lineUserId, string siteName,
         string maintenanceType, DateTime dueDate)
     {
