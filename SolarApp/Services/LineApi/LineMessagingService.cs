@@ -365,6 +365,327 @@ public class LineMessagingService : ILineMessagingService
         await SendMessageAsync(lineUserId, message);
     }
 
+    public async Task SendRecoveryNotificationAsync(string lineUserId, string siteName,
+        string alertTitle, string recoveryMessage, TimeSpan downtime)
+    {
+        if (string.IsNullOrEmpty(lineUserId)) return;
+        var token = await GetChannelAccessTokenAsync();
+        if (string.IsNullOrEmpty(token)) return;
+
+        var downtimeStr = downtime.TotalHours >= 1
+            ? $"{downtime.TotalHours:0.0} ชม."
+            : $"{downtime.TotalMinutes:0} นาที";
+
+        var flexContent = new
+        {
+            type = "bubble",
+            header = new
+            {
+                type = "box", layout = "vertical", backgroundColor = "#00C853",
+                contents = new object[]
+                {
+                    new { type = "text", text = "✓ System Recovered", color = "#FFFFFF", weight = "bold", size = "lg" },
+                    new { type = "text", text = "กลับมาปกติแล้ว", color = "#FFFFFF", size = "sm" }
+                }
+            },
+            body = new
+            {
+                type = "box", layout = "vertical", spacing = "md",
+                contents = new object[]
+                {
+                    new { type = "text", text = alertTitle.Replace("Device Offline:", "กลับออนไลน์:").Replace("API Connection Lost:", "API กลับมา:"), weight = "bold", size = "md", wrap = true },
+                    new
+                    {
+                        type = "box", layout = "vertical", spacing = "sm",
+                        contents = new object[]
+                        {
+                            new
+                            {
+                                type = "box", layout = "horizontal",
+                                contents = new object[]
+                                {
+                                    new { type = "text", text = "Site", size = "sm", color = "#AAAAAA", flex = 2 },
+                                    new { type = "text", text = siteName, size = "sm", flex = 4, wrap = true }
+                                }
+                            },
+                            new
+                            {
+                                type = "box", layout = "horizontal",
+                                contents = new object[]
+                                {
+                                    new { type = "text", text = "Downtime", size = "sm", color = "#AAAAAA", flex = 2 },
+                                    new { type = "text", text = downtimeStr, size = "sm", flex = 4, wrap = true }
+                                }
+                            },
+                            new
+                            {
+                                type = "box", layout = "horizontal",
+                                contents = new object[]
+                                {
+                                    new { type = "text", text = "Detail", size = "sm", color = "#AAAAAA", flex = 2 },
+                                    new { type = "text", text = recoveryMessage, size = "sm", flex = 4, wrap = true }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            footer = new
+            {
+                type = "box", layout = "vertical",
+                contents = new object[]
+                {
+                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                }
+            }
+        };
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var payload = new
+            {
+                to = lineUserId,
+                messages = new object[] { new { type = "flex", altText = $"[RECOVERED] {alertTitle}", contents = flexContent } }
+            };
+
+            using var slot = await AcquireSendSlotAsync();
+            var response = await client.PostAsJsonAsync(PushUrl, payload);
+
+            _context.NotificationLogs.Add(new NotificationLog
+            {
+                RecipientLineId = lineUserId, Channel = NotificationChannel.Line,
+                Title = $"[RECOVERED] {alertTitle}", Message = recoveryMessage,
+                RelatedEntityType = "SystemAlert",
+                Status = response.IsSuccessStatusCode ? NotificationStatus.Sent : NotificationStatus.Failed,
+                ErrorMessage = !response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync() : null,
+                SentAt = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+            });
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to send recovery notification to {UserId}", lineUserId); }
+    }
+
+    public async Task SendEscalationAsync(string lineUserId, string siteName, string alertTitle,
+        string alertMessage, string severity, TimeSpan openDuration, int escalationLevel)
+    {
+        if (string.IsNullOrEmpty(lineUserId)) return;
+        var token = await GetChannelAccessTokenAsync();
+        if (string.IsNullOrEmpty(token)) return;
+
+        var durationStr = openDuration.TotalHours >= 24
+            ? $"{openDuration.TotalDays:0.0} วัน"
+            : $"{openDuration.TotalHours:0.0} ชม.";
+
+        var flexContent = new
+        {
+            type = "bubble",
+            header = new
+            {
+                type = "box", layout = "vertical", backgroundColor = "#B71C1C",
+                contents = new object[]
+                {
+                    new { type = "text", text = $"⚠ ESCALATION (Level {escalationLevel})", color = "#FFFFFF", weight = "bold", size = "lg" },
+                    new { type = "text", text = $"ยังไม่ได้แก้ไข {durationStr}", color = "#FFCDD2", size = "sm" }
+                }
+            },
+            body = new
+            {
+                type = "box", layout = "vertical", spacing = "md",
+                contents = new object[]
+                {
+                    new { type = "text", text = alertTitle, weight = "bold", size = "md", wrap = true },
+                    new
+                    {
+                        type = "box", layout = "vertical", spacing = "sm",
+                        contents = new object[]
+                        {
+                            new
+                            {
+                                type = "box", layout = "horizontal",
+                                contents = new object[] {
+                                    new { type = "text", text = "Site", size = "sm", color = "#AAAAAA", flex = 2 },
+                                    new { type = "text", text = siteName, size = "sm", flex = 4, wrap = true }
+                                }
+                            },
+                            new
+                            {
+                                type = "box", layout = "horizontal",
+                                contents = new object[] {
+                                    new { type = "text", text = "Severity", size = "sm", color = "#AAAAAA", flex = 2 },
+                                    new { type = "text", text = severity, size = "sm", color = "#FF0000", flex = 4 }
+                                }
+                            },
+                            new
+                            {
+                                type = "box", layout = "horizontal",
+                                contents = new object[] {
+                                    new { type = "text", text = "Open for", size = "sm", color = "#AAAAAA", flex = 2 },
+                                    new { type = "text", text = durationStr, size = "sm", color = "#FF0000", flex = 4 }
+                                }
+                            },
+                            new
+                            {
+                                type = "box", layout = "horizontal",
+                                contents = new object[] {
+                                    new { type = "text", text = "Detail", size = "sm", color = "#AAAAAA", flex = 2 },
+                                    new { type = "text", text = alertMessage, size = "sm", flex = 4, wrap = true }
+                                }
+                            }
+                        }
+                    },
+                    new { type = "separator" },
+                    new { type = "text", text = "กรุณาดำเนินการแก้ไขโดยด่วน", size = "sm", color = "#B71C1C", weight = "bold" }
+                }
+            },
+            footer = new
+            {
+                type = "box", layout = "vertical",
+                contents = new object[]
+                {
+                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                }
+            }
+        };
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var payload = new
+            {
+                to = lineUserId,
+                messages = new object[] { new { type = "flex", altText = $"[ESCALATION L{escalationLevel}] {alertTitle} — open {durationStr}", contents = flexContent } }
+            };
+
+            using var slot = await AcquireSendSlotAsync();
+            var response = await client.PostAsJsonAsync(PushUrl, payload);
+
+            _context.NotificationLogs.Add(new NotificationLog
+            {
+                RecipientLineId = lineUserId, Channel = NotificationChannel.Line,
+                Title = $"[ESCALATION L{escalationLevel}] {alertTitle}", Message = alertMessage,
+                RelatedEntityType = "SystemAlert",
+                Status = response.IsSuccessStatusCode ? NotificationStatus.Sent : NotificationStatus.Failed,
+                ErrorMessage = !response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync() : null,
+                SentAt = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+            });
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to send escalation to {UserId}", lineUserId); }
+    }
+
+    public async Task SendDailySummaryAsync(string lineUserId, DailySummaryData s)
+    {
+        if (string.IsNullOrEmpty(lineUserId)) return;
+        var token = await GetChannelAccessTokenAsync();
+        if (string.IsNullOrEmpty(token)) return;
+
+        var statusColor = s.OfflineSites == 0 && s.ActiveAlerts == 0 ? "#00C853"
+            : s.ActiveAlerts > 0 && s.OfflineSites > 0 ? "#FF0000" : "#FF8C00";
+        var statusText = s.OfflineSites == 0 && s.ActiveAlerts == 0
+            ? "✓ All Systems Normal" : $"⚠ {s.ActiveAlerts} Active Alert(s)";
+
+        var bodyContents = new List<object>
+        {
+            new { type = "text", text = statusText, weight = "bold", size = "md", color = statusColor, wrap = true },
+            new { type = "separator" },
+            new
+            {
+                type = "box", layout = "vertical", spacing = "sm",
+                contents = new object[]
+                {
+                    MakeSummaryRow("Online / Total", $"{s.OnlineSites}/{s.TotalSites} sites"),
+                    MakeSummaryRow("Offline", $"{s.OfflineSites} site(s)", s.OfflineSites > 0 ? "#FF0000" : null),
+                    MakeSummaryRow("Energy Today", $"{s.TotalEnergyTodayKwh:N1} kWh"),
+                    MakeSummaryRow("New Alerts", $"{s.NewAlertsToday}"),
+                    MakeSummaryRow("Resolved Today", $"{s.ResolvedTodayAlerts}"),
+                    MakeSummaryRow("Active Alerts", $"{s.ActiveAlerts}", s.ActiveAlerts > 0 ? "#FF8C00" : null),
+                    MakeSummaryRow("Work Orders", $"{s.PendingWorkOrders} pending, {s.CompletedWorkOrdersToday} done today"),
+                }
+            }
+        };
+
+        if (s.CriticalSites.Count > 0)
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = "⚠ Critical Sites:", size = "sm", color = "#FF0000", weight = "bold" });
+            foreach (var site in s.CriticalSites.Take(5))
+                bodyContents.Add(new { type = "text", text = $"  • {site}", size = "xs", color = "#FF0000", wrap = true });
+        }
+
+        if (s.RecoveredSites.Count > 0)
+        {
+            bodyContents.Add(new { type = "separator" });
+            bodyContents.Add(new { type = "text", text = "✓ Recovered Today:", size = "sm", color = "#00C853", weight = "bold" });
+            foreach (var site in s.RecoveredSites.Take(5))
+                bodyContents.Add(new { type = "text", text = $"  • {site}", size = "xs", color = "#00C853", wrap = true });
+        }
+
+        var flexContent = new
+        {
+            type = "bubble",
+            header = new
+            {
+                type = "box", layout = "vertical", backgroundColor = "#1565C0",
+                contents = new object[]
+                {
+                    new { type = "text", text = "Daily Summary Report", color = "#FFFFFF", weight = "bold", size = "lg" },
+                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy"), color = "#BBDEFB", size = "sm" }
+                }
+            },
+            body = new { type = "box", layout = "vertical", spacing = "md", contents = bodyContents.ToArray() },
+            footer = new
+            {
+                type = "box", layout = "vertical",
+                contents = new object[]
+                {
+                    new { type = "text", text = $"Report generated {DateTime.Now:HH:mm}", size = "xs", color = "#AAAAAA", align = "center" }
+                }
+            }
+        };
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var payload = new
+            {
+                to = lineUserId,
+                messages = new object[] { new { type = "flex", altText = $"[Daily Summary] {s.OnlineSites}/{s.TotalSites} online, {s.ActiveAlerts} alerts", contents = flexContent } }
+            };
+
+            using var slot = await AcquireSendSlotAsync();
+            var response = await client.PostAsJsonAsync(PushUrl, payload);
+
+            _context.NotificationLogs.Add(new NotificationLog
+            {
+                RecipientLineId = lineUserId, Channel = NotificationChannel.Line,
+                Title = "Daily Summary Report", Message = $"Online: {s.OnlineSites}/{s.TotalSites}, Alerts: {s.ActiveAlerts}",
+                RelatedEntityType = "DailySummary",
+                Status = response.IsSuccessStatusCode ? NotificationStatus.Sent : NotificationStatus.Failed,
+                ErrorMessage = !response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync() : null,
+                SentAt = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+            });
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to send daily summary to {UserId}", lineUserId); }
+    }
+
+    private static object MakeSummaryRow(string label, string value, string? valueColor = null) => new
+    {
+        type = "box", layout = "horizontal",
+        contents = new object[]
+        {
+            new { type = "text", text = label, size = "sm", color = "#AAAAAA", flex = 3 },
+            new { type = "text", text = value, size = "sm", color = valueColor ?? "#333333", flex = 4, wrap = true }
+        }
+    };
+
     private static object[] BuildFlexBody(string siteName, string title, string message, string? rootCause)
     {
         var contents = new List<object>

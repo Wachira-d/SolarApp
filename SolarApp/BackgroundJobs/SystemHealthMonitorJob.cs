@@ -52,6 +52,8 @@ public class SystemHealthMonitorJob
         }
 
         await SendPendingNotificationsAsync();
+        await SendRecoveryNotificationsAsync();
+        await EscalateUnresolvedAlertsAsync();
     }
 
     private async Task CheckSystemHealthAsync()
@@ -554,6 +556,193 @@ public class SystemHealthMonitorJob
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Sends LINE recovery notifications for alerts that were auto-resolved
+    /// since the last check but haven't been notified about recovery yet.
+    /// </summary>
+    private async Task SendRecoveryNotificationsAsync()
+    {
+        // Find alerts resolved in the last 10 minutes that were previously notified as problems
+        var recentWindow = DateTime.UtcNow.AddMinutes(-10);
+        var resolvedAlerts = await _context.SystemAlerts
+            .Include(a => a.Installation)
+                .ThenInclude(i => i.Customer)
+            .Include(a => a.Installation)
+                .ThenInclude(i => i.Partner)
+            .Where(a => a.ResolvedAt != null
+                && a.ResolvedAt >= recentWindow
+                && a.IsNotified
+                && (a.AlertType == AlertType.Offline || a.AlertType == AlertType.Error))
+            .ToListAsync();
+
+        if (resolvedAlerts.Count == 0) return;
+
+        // Check if we already sent a recovery notification for these (de-dup)
+        var alertIds = resolvedAlerts.Select(a => a.Id).ToList();
+        var alreadyNotifiedRecovery = await _context.NotificationLogs
+            .Where(n => n.RelatedEntityType == "SystemAlert"
+                && n.Title != null && n.Title.StartsWith("[RECOVERED]")
+                && n.CreatedAt >= recentWindow)
+            .Select(n => n.Title)
+            .ToListAsync();
+
+        var alertGroupId = await _context.SystemSettings
+            .Where(s => s.Key == "Line.AlertGroupId")
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync();
+
+        var partnerIds = resolvedAlerts
+            .Select(a => a.Installation.PartnerId)
+            .Where(pid => pid.HasValue)
+            .Distinct()
+            .ToList();
+
+        var partnerUsersLookup = new Dictionary<int, List<string>>();
+        if (partnerIds.Count > 0)
+        {
+            var partnerUsers = await _context.Users
+                .Where(u => u.PartnerId != null && partnerIds.Contains(u.PartnerId.Value) && u.LineUserId != null)
+                .Select(u => new { u.PartnerId, u.LineUserId })
+                .ToListAsync();
+            foreach (var pu in partnerUsers)
+            {
+                if (!pu.PartnerId.HasValue || pu.LineUserId == null) continue;
+                if (!partnerUsersLookup.TryGetValue(pu.PartnerId.Value, out var list))
+                    partnerUsersLookup[pu.PartnerId.Value] = list = new();
+                list.Add(pu.LineUserId);
+            }
+        }
+
+        int sent = 0;
+        foreach (var alert in resolvedAlerts)
+        {
+            if (alert.Installation == null) continue;
+
+            var recoveryTitle = $"[RECOVERED] {alert.Title}";
+            if (alreadyNotifiedRecovery.Any(t => t == recoveryTitle)) continue;
+
+            var downtime = alert.ResolvedAt!.Value - alert.OccurredAt;
+            var downtimeStr = downtime.TotalHours >= 1
+                ? $"{downtime.TotalHours:0.0} ชั่วโมง"
+                : $"{downtime.TotalMinutes:0} นาที";
+            var recoveryMsg = $"{alert.Installation.SiteName} กลับมาทำงานปกติแล้ว หลังจาก offline {downtimeStr}";
+
+            async Task SendRecoveryToAsync(string lineId)
+            {
+                if (string.IsNullOrWhiteSpace(lineId) || sent >= 100) return;
+                try
+                {
+                    await _lineService.SendRecoveryNotificationAsync(
+                        lineId, alert.Installation.SiteName, alert.Title, recoveryMsg, downtime);
+                    sent++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed recovery LINE to {Id} for alert {AlertId}", lineId, alert.Id);
+                }
+            }
+
+            await SendRecoveryToAsync(alertGroupId ?? "");
+            await SendRecoveryToAsync(alert.Installation.Customer?.LineUserId ?? "");
+            if (alert.Installation.PartnerId.HasValue
+                && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var pIds))
+            {
+                foreach (var lineId in pIds) await SendRecoveryToAsync(lineId);
+            }
+        }
+
+        if (sent > 0)
+            _logger.LogInformation("Sent {Count} recovery notification(s) for {Alerts} resolved alert(s)",
+                sent, resolvedAlerts.Count);
+    }
+
+    /// <summary>
+    /// Re-notifies for Critical/High alerts that have been open too long without resolution.
+    /// Escalation levels:
+    ///   L1: 2 hours  (Critical) / 6 hours  (High) — re-notify same recipients
+    ///   L2: 6 hours  (Critical) / 24 hours (High) — re-notify with escalation tag
+    ///   L3: 24 hours (Critical) / 72 hours (High) — re-notify with urgent tag
+    /// </summary>
+    private async Task EscalateUnresolvedAlertsAsync()
+    {
+        var unresolvedAlerts = await _context.SystemAlerts
+            .Include(a => a.Installation)
+                .ThenInclude(i => i.Customer)
+            .Include(a => a.Installation)
+                .ThenInclude(i => i.Partner)
+            .Where(a => a.ResolvedAt == null
+                && a.IsNotified
+                && (a.Severity == AlertSeverity.Critical || a.Severity == AlertSeverity.High))
+            .ToListAsync();
+
+        if (unresolvedAlerts.Count == 0) return;
+
+        var alertGroupId = await _context.SystemSettings
+            .Where(s => s.Key == "Line.AlertGroupId")
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync();
+
+        int escalated = 0;
+
+        foreach (var alert in unresolvedAlerts)
+        {
+            if (alert.Installation == null) continue;
+
+            var openDuration = DateTime.UtcNow - alert.OccurredAt;
+
+            // Determine escalation level and whether it's time to escalate
+            int level;
+            TimeSpan escalationInterval;
+            if (alert.Severity == AlertSeverity.Critical)
+            {
+                if (openDuration.TotalHours >= 24) { level = 3; escalationInterval = TimeSpan.FromHours(12); }
+                else if (openDuration.TotalHours >= 6) { level = 2; escalationInterval = TimeSpan.FromHours(6); }
+                else if (openDuration.TotalHours >= 2) { level = 1; escalationInterval = TimeSpan.FromHours(2); }
+                else continue;
+            }
+            else // High
+            {
+                if (openDuration.TotalHours >= 72) { level = 3; escalationInterval = TimeSpan.FromHours(24); }
+                else if (openDuration.TotalHours >= 24) { level = 2; escalationInterval = TimeSpan.FromHours(12); }
+                else if (openDuration.TotalHours >= 6) { level = 1; escalationInterval = TimeSpan.FromHours(6); }
+                else continue;
+            }
+
+            // Check last escalation time — don't spam faster than the interval
+            var escalationPrefix = $"[ESCALATION L";
+            var lastEscalation = await _context.NotificationLogs
+                .Where(n => n.RelatedEntityType == "SystemAlert"
+                    && n.Title != null && n.Title.StartsWith(escalationPrefix)
+                    && n.Title.Contains(alert.Title)
+                    && n.Status == NotificationStatus.Sent)
+                .OrderByDescending(n => n.SentAt)
+                .Select(n => n.SentAt)
+                .FirstOrDefaultAsync();
+
+            if (lastEscalation.HasValue && DateTime.UtcNow - lastEscalation.Value < escalationInterval)
+                continue;
+
+            // Send escalation
+            if (!string.IsNullOrWhiteSpace(alertGroupId))
+            {
+                try
+                {
+                    await _lineService.SendEscalationAsync(
+                        alertGroupId, alert.Installation.SiteName, alert.Title,
+                        alert.Message, alert.Severity.ToString(), openDuration, level);
+                    escalated++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed escalation L{Level} for alert {Id}", level, alert.Id);
+                }
+            }
+        }
+
+        if (escalated > 0)
+            _logger.LogInformation("Escalated {Count} unresolved alert(s)", escalated);
     }
 
     /// <summary>

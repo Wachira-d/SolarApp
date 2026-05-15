@@ -213,6 +213,7 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.SolarDataSyncJob>();
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
         builder.Services.AddScoped<BackgroundJobs.WorkOrderReminderJob>();
+        builder.Services.AddScoped<BackgroundJobs.DailySummaryJob>();
 
         // ── Huawei NBI rate gate tunables ──
         // Defaults to 65s spacing, which keeps us safely below Huawei's
@@ -289,6 +290,10 @@ public class Startup
             "check-system-health", job => job.ExecuteAsync(), healthCron);
         RecurringJob.AddOrUpdate<BackgroundJobs.WorkOrderReminderJob>(
             "workorder-reminders", job => job.ExecuteAsync(), reminderCron);
+
+        var dailySummaryCron = GetSetting(ctx, "Schedule.DailySummary", "0 11 * * *"); // 18:00 Thailand (UTC+7)
+        RecurringJob.AddOrUpdate<BackgroundJobs.DailySummaryJob>(
+            "daily-summary-report", job => job.ExecuteAsync(), dailySummaryCron);
     }
 
     /// <summary>
