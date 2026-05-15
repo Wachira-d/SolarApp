@@ -22,6 +22,7 @@ public class InverterApiAdapterFactory : IInverterApiAdapterFactory
             InverterBrand.GoodWe => _serviceProvider.GetRequiredService<GoodWeAdapter>(),
             InverterBrand.Deye => _serviceProvider.GetRequiredService<DeyeAdapter>(),
             InverterBrand.Hoymiles => _serviceProvider.GetRequiredService<HoymilesAdapter>(),
+            InverterBrand.Sigenergy => _serviceProvider.GetRequiredService<SigenergyAdapter>(),
             _ => throw new NotSupportedException($"Inverter brand '{brand}' is not supported yet.")
         };
     }

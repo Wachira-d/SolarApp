@@ -194,6 +194,7 @@ public class Startup
         builder.Services.AddScoped<Services.InverterApi.Adapters.GoodWeAdapter>();
         builder.Services.AddScoped<Services.InverterApi.Adapters.DeyeAdapter>();
         builder.Services.AddScoped<Services.InverterApi.Adapters.HoymilesAdapter>();
+        builder.Services.AddScoped<Services.InverterApi.Adapters.SigenergyAdapter>();
         builder.Services.AddScoped<Services.InverterApi.IInverterApiAdapterFactory, Services.InverterApi.InverterApiAdapterFactory>();
         builder.Services.AddScoped<Services.InverterApi.Common.IAdapterDiagnostics, Services.InverterApi.Common.AdapterDiagnostics>();
         builder.Services.AddScoped<Services.InverterApi.Common.IConnectionHealthChecker, Services.InverterApi.Common.ConnectionHealthChecker>();

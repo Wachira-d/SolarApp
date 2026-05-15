@@ -7,33 +7,35 @@ using SolarApp.Services.InverterApi.Models;
 namespace SolarApp.Services.InverterApi.Adapters;
 
 /// <summary>
-/// Hoymiles S-Miles Cloud API adapter.
+/// Hoymiles S-Miles Cloud API adapter — V3 (post-Jan 2025).
 ///
-/// Hoymiles microinverters use the S-Miles Cloud monitoring platform.
-/// API base: https://global.hoymiles.com/platform/api/gateway
+/// Hoymiles migrated from global.hoymiles.com/platform/api/gateway to
+/// neapi.hoymiles.com in January 2025. The old URL returns 404.
+///
+/// V3 Authentication flow:
+///   1. POST /iam/pub/0/c/region_c  (detect user's region → get login_url)
+///   2. POST {login_url}/iam/pub/0/c/login_c  (username + hashed password → token)
+///
+/// Password encoding: MD5(password) + "." + Base64(SHA256(password))
 ///
 /// Credentials mapping:
 ///   Username = S-Miles Cloud email / phone
-///   Password = S-Miles Cloud password
-///   PlantId  = Station ID (from S-Miles Cloud URL or station list)
-///   ApiKey   = (not used — leave blank)
-///   ApiSecret = (not used — leave blank)
-///
-/// Authentication: POST /iam/auth_login → returns token in response body.
-/// All subsequent calls include the token in a JSON header structure.
-///
-/// Rate limit: not strictly documented; use 1-second delay between calls.
+///   Password = S-Miles Cloud password (plain text — we hash it)
+///   PlantId  = Station ID (sid)
 /// </summary>
 public class HoymilesAdapter : IInverterApiAdapter
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<HoymilesAdapter> _logger;
-    private const string BaseUrl = "https://global.hoymiles.com/platform/api/gateway";
+
+    // V3 API base — replaced old global.hoymiles.com/platform/api/gateway
+    private const string RegionApiBase = "https://euapi.hoymiles.com";
+    private const string DefaultApiBase = "https://neapi.hoymiles.com";
 
     public InverterBrand Brand => InverterBrand.Hoymiles;
 
-    // Static session cache (same pattern as Huawei/GoodWe)
-    private static readonly Dictionary<string, (string Token, DateTime ExpiresAt)> _tokenCache = new();
+    // Static session cache
+    private static readonly Dictionary<string, (string Token, string ApiBase, DateTime ExpiresAt)> _tokenCache = new();
     private static readonly object _tokenLock = new();
     private static readonly TimeSpan TokenTtl = TimeSpan.FromMinutes(30);
 
@@ -47,97 +49,228 @@ public class HoymilesAdapter : IInverterApiAdapter
     //  Authentication
     // ══════════════════════════════════════════════════════════════
 
-    private async Task<(string? Token, string Error)> LoginAsync(ApiCredentials credentials)
+    /// <summary>
+    /// V3 login flow:
+    ///   1. Detect user's region via /iam/pub/0/c/region_c → get login_url
+    ///   2. Login via {login_url}/iam/pub/0/c/login_c with hashed password → get token
+    ///
+    /// Password encoding (observed from web client):
+    ///   MD5(password).Base64(SHA256(password))
+    /// </summary>
+    private async Task<(string? Token, string? ApiBase, string Error)> LoginAsync(ApiCredentials credentials)
     {
         var cacheKey = $"hoymiles|{credentials.Username}|{credentials.Password?.Length ?? 0}";
         lock (_tokenLock)
         {
             if (_tokenCache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow < cached.ExpiresAt)
-                return (cached.Token, "OK (cached)");
+                return (cached.Token, cached.ApiBase, "OK (cached)");
         }
 
         try
         {
             var client = CreateClient();
-            var body = new
+
+            // ── Step 1: Detect region → get login_url ──
+            var regionBody = new { email = credentials.Username };
+            var regionResp = await client.PostAsJsonAsync($"{RegionApiBase}/iam/pub/0/c/region_c", regionBody);
+            var regionContent = await regionResp.Content.ReadAsStringAsync();
+            string loginUrl = RegionApiBase;
+            string apiBase = DefaultApiBase;
+
+            if (regionResp.IsSuccessStatusCode)
             {
-                body = new
+                try
                 {
-                    user_name = credentials.Username,
-                    password = credentials.Password
-                },
-                header = new { language = "en" }
-            };
+                    var regionJson = JsonDocument.Parse(regionContent).RootElement;
+                    if (regionJson.TryGetProperty("data", out var regionData))
+                    {
+                        loginUrl = SafeGetString(regionData, "login_url") ?? loginUrl;
+                        apiBase = SafeGetString(regionData, "api_url")
+                               ?? SafeGetString(regionData, "data_url")
+                               ?? apiBase;
+                    }
+                }
+                catch { /* use defaults */ }
+            }
+            _logger.LogDebug("Hoymiles region: loginUrl={Url}, apiBase={Base}", loginUrl, apiBase);
 
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/iam/auth_login", body);
-            var content = await response.Content.ReadAsStringAsync();
+            // ── Step 2: Hash password (MD5 + "." + Base64(SHA256)) ──
+            var password = credentials.Password ?? "";
+            string hashedPassword;
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var pwBytes = System.Text.Encoding.UTF8.GetBytes(password);
+                var md5Hash = BitConverter.ToString(md5.ComputeHash(pwBytes)).Replace("-", "").ToLowerInvariant();
+                var shaHash = Convert.ToBase64String(sha.ComputeHash(pwBytes));
+                hashedPassword = $"{md5Hash}.{shaHash}";
+            }
 
-            if (!response.IsSuccessStatusCode)
-                return (null, $"HTTP {(int)response.StatusCode}: {Truncate(content, 300)}");
+            // ── Step 3: Login ──
+            var loginBody = new { user_name = credentials.Username, password = hashedPassword };
+            var loginResp = await client.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", loginBody);
+            var loginContent = await loginResp.Content.ReadAsStringAsync();
 
-            var json = JsonDocument.Parse(content).RootElement;
-            var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
-            var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg");
+            if (!loginResp.IsSuccessStatusCode)
+            {
+                // Fallback: try legacy V0 login (some older accounts)
+                return await LegacyLoginAsync(credentials);
+            }
 
-            if (status != "0" && status != "200" && status != "success")
-                return (null, $"Login failed: status={status}, message={msg}. Check S-Miles Cloud email/password.");
+            var loginJson = JsonDocument.Parse(loginContent).RootElement;
+            var status = SafeGetString(loginJson, "status") ?? SafeGetInt(loginJson, "status")?.ToString();
+            var msg = SafeGetString(loginJson, "message") ?? SafeGetString(loginJson, "msg");
 
-            // Token is typically in data.token or data.access_token
+            if (status != "0")
+            {
+                // Maybe password hashing not needed for this account — try plain
+                var plainBody = new { user_name = credentials.Username, password };
+                var plainResp = await client.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", plainBody);
+                if (plainResp.IsSuccessStatusCode)
+                {
+                    var plainJson = JsonDocument.Parse(await plainResp.Content.ReadAsStringAsync()).RootElement;
+                    if (SafeGetString(plainJson, "status") == "0" || SafeGetInt(plainJson, "status") == 0)
+                    {
+                        loginJson = plainJson;
+                        status = "0";
+                    }
+                }
+
+                if (status != "0")
+                    return await LegacyLoginAsync(credentials);
+            }
+
             string? token = null;
-            if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            if (loginJson.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
             {
                 token = SafeGetString(data, "token")
-                     ?? SafeGetString(data, "access_token")
-                     ?? SafeGetString(data, "sid");
+                     ?? SafeGetString(data, "access_token");
             }
 
             if (string.IsNullOrEmpty(token))
-                return (null, $"Login succeeded but no token found. Response: {Truncate(content, 300)}");
+                return (null, null, $"Login OK but no token found. Response: {Truncate(loginContent, 300)}");
 
             lock (_tokenLock)
             {
-                _tokenCache[cacheKey] = (token, DateTime.UtcNow.Add(TokenTtl));
+                _tokenCache[cacheKey] = (token, apiBase, DateTime.UtcNow.Add(TokenTtl));
             }
-            return (token, "OK");
+            return (token, apiBase, "OK");
         }
         catch (TaskCanceledException)
         {
-            return (null, "Login timeout — S-Miles Cloud did not respond.");
+            return (null, null, "Login timeout — S-Miles Cloud did not respond.");
         }
         catch (HttpRequestException ex)
         {
-            return (null, $"Network error: {ex.Message}");
+            return (null, null, $"Network error: {ex.Message}");
         }
         catch (Exception ex)
         {
-            return (null, $"Login error: {ex.Message}");
+            return (null, null, $"Login error: {ex.Message}");
         }
     }
 
-    private async Task<JsonElement?> CallApiAsync(string token, string path, object requestBody)
+    /// <summary>
+    /// Legacy V0 login for older accounts or regions that haven't migrated to V3.
+    /// Uses the old body/header JSON wrapper pattern on global.hoymiles.com.
+    /// </summary>
+    private async Task<(string? Token, string? ApiBase, string Error)> LegacyLoginAsync(ApiCredentials credentials)
+    {
+        var cacheKey = $"hoymiles|{credentials.Username}|{credentials.Password?.Length ?? 0}";
+        try
+        {
+            var client = CreateClient();
+
+            // Try multiple known base URLs
+            var bases = new[]
+            {
+                "https://neapi.hoymiles.com",
+                "https://global.hoymiles.com/platform/api/gateway",
+                "https://intl.hoymiles.com/platform/api/gateway"
+            };
+
+            foreach (var baseUrl in bases)
+            {
+                try
+                {
+                    var body = new
+                    {
+                        body = new { user_name = credentials.Username, password = credentials.Password },
+                        header = new { language = "en" }
+                    };
+
+                    var response = await client.PostAsJsonAsync(
+                        baseUrl.Contains("neapi") ? $"{baseUrl}/pvm-iam/api/0/iam/auth_login" : $"{baseUrl}/iam/auth_login",
+                        body);
+
+                    if (!response.IsSuccessStatusCode) continue;
+
+                    var content = await response.Content.ReadAsStringAsync();
+                    var json = JsonDocument.Parse(content).RootElement;
+                    var st = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+                    if (st != "0" && st != "200" && st != "success") continue;
+
+                    string? token = null;
+                    if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+                    {
+                        token = SafeGetString(data, "token")
+                             ?? SafeGetString(data, "access_token")
+                             ?? SafeGetString(data, "sid");
+                    }
+                    if (string.IsNullOrEmpty(token)) continue;
+
+                    var apiBase = baseUrl.Contains("neapi") ? baseUrl : DefaultApiBase;
+                    lock (_tokenLock) { _tokenCache[cacheKey] = (token, apiBase, DateTime.UtcNow.Add(TokenTtl)); }
+                    _logger.LogInformation("Hoymiles legacy login OK via {Base}", baseUrl);
+                    return (token, apiBase, $"OK (legacy via {baseUrl})");
+                }
+                catch { continue; }
+            }
+            return (null, null, "All login endpoints failed. Check S-Miles Cloud email/password.");
+        }
+        catch (Exception ex)
+        {
+            return (null, null, $"Legacy login error: {ex.Message}");
+        }
+    }
+
+    private async Task<JsonElement?> CallApiAsync(string token, string apiBase, string path, object requestBody)
     {
         try
         {
             var client = CreateClient();
-            var body = new
-            {
-                body = requestBody,
-                header = new { language = "en", token }
-            };
 
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/{path}", body);
+            // V3 uses Authorization header + flat JSON body
+            // Legacy uses body/header wrapper
+            var url = $"{apiBase}/{path.TrimStart('/')}";
+            client.DefaultRequestHeaders.Remove("Authorization");
+            client.DefaultRequestHeaders.Add("Authorization", token);
+
+            var response = await client.PostAsJsonAsync(url, requestBody);
             var content = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Hoymiles {Path}: HTTP {Code}", path, (int)response.StatusCode);
-                return null;
+                // Fallback: try legacy body/header wrapper format
+                client.DefaultRequestHeaders.Remove("Authorization");
+                var legacyBody = new
+                {
+                    body = requestBody,
+                    header = new { language = "en", token }
+                };
+                response = await client.PostAsJsonAsync(url, legacyBody);
+                content = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Hoymiles {Path}: HTTP {Code}", path, (int)response.StatusCode);
+                    return null;
+                }
             }
 
             var json = JsonDocument.Parse(content).RootElement;
             var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
 
-            // Token expired → invalidate cache
             if (status == "100" || status == "401" || status == "token_expired")
             {
                 lock (_tokenLock) { _tokenCache.Clear(); }
@@ -165,7 +298,8 @@ public class HoymilesAdapter : IInverterApiAdapter
     {
         var client = _httpClientFactory.CreateClient("default");
         client.DefaultRequestHeaders.Add("Accept", "application/json");
-        client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 SolarApp/1.0");
+        client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 SolarApp/2.0");
+        client.Timeout = TimeSpan.FromSeconds(30);
         return client;
     }
 
@@ -180,12 +314,12 @@ public class HoymilesAdapter : IInverterApiAdapter
         if (string.IsNullOrEmpty(credentials.Password))
             return (false, "Password (S-Miles Cloud password) is required.");
 
-        var (token, loginError) = await LoginAsync(credentials);
+        var (token, apiBase, loginError) = await LoginAsync(credentials);
         if (string.IsNullOrEmpty(token))
             return (false, $"Hoymiles login failed: {loginError}");
 
         // Verify by fetching station list
-        var data = await CallApiAsync(token, "pvm/station_select_by_page",
+        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/select_by_page_c",
             new { page = 1, page_size = 10 });
         if (data == null)
             return (false, "Hoymiles: logged in but station list call failed.");
@@ -195,10 +329,10 @@ public class HoymilesAdapter : IInverterApiAdapter
 
     public async Task<PlantInfo?> GetPlantInfoAsync(ApiCredentials credentials)
     {
-        var (token, _) = await LoginAsync(credentials);
+        var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return null;
 
-        var data = await CallApiAsync(token, "pvm/station_select_by_page",
+        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/select_by_page_c",
             new { page = 1, page_size = 50 });
         if (data == null || data.Value.ValueKind != JsonValueKind.Object) return null;
 
@@ -243,16 +377,16 @@ public class HoymilesAdapter : IInverterApiAdapter
     public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
     {
         if (string.IsNullOrEmpty(credentials.PlantId)) return null;
-        var (token, _) = await LoginAsync(credentials);
+        var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return null;
 
         // Try station-level realtime data
-        var data = await CallApiAsync(token, "pvm/station_detail",
+        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/find_c",
             new { sid = long.TryParse(credentials.PlantId, out var sidLong) ? (object)sidLong : credentials.PlantId });
         if (data == null)
         {
             // Alternative endpoint
-            data = await CallApiAsync(token, "pvm/data_count_station_real_data",
+            data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station_data/real_g_c",
                 new { sid = credentials.PlantId });
         }
         if (data == null || data.Value.ValueKind != JsonValueKind.Object) return null;
@@ -293,12 +427,12 @@ public class HoymilesAdapter : IInverterApiAdapter
     {
         var records = new List<EnergyRecord>();
         if (string.IsNullOrEmpty(credentials.PlantId)) return records;
-        var (token, _) = await LoginAsync(credentials);
+        var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return records;
 
         try
         {
-            var data = await CallApiAsync(token, "pvm/data_count_station_history_data",
+            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/data/count_playback_power_by_day",
                 new
                 {
                     sid = credentials.PlantId,
@@ -362,12 +496,12 @@ public class HoymilesAdapter : IInverterApiAdapter
     {
         var alarms = new List<AlarmRecord>();
         if (string.IsNullOrEmpty(credentials.PlantId)) return alarms;
-        var (token, _) = await LoginAsync(credentials);
+        var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return alarms;
 
         try
         {
-            var data = await CallApiAsync(token, "pvm/alarm_select_by_page",
+            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/alarm/select_by_page",
                 new
                 {
                     sid = credentials.PlantId,
@@ -421,12 +555,12 @@ public class HoymilesAdapter : IInverterApiAdapter
     {
         var devices = new List<DeviceInfo>();
         if (string.IsNullOrEmpty(credentials.PlantId)) return devices;
-        var (token, _) = await LoginAsync(credentials);
+        var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return devices;
 
         try
         {
-            var data = await CallApiAsync(token, "pvm/device_select_by_page",
+            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/device/select_by_page",
                 new { sid = credentials.PlantId, page = 1, page_size = 100 });
             if (data == null) return devices;
 
