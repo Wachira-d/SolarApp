@@ -50,256 +50,422 @@ public class HoymilesAdapter : IInverterApiAdapter
     // ══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// V3 login flow:
-    ///   1. Detect user's region via /iam/pub/0/c/region_c → get login_url
-    ///   2. Login via {login_url}/iam/pub/0/c/login_c with hashed password → get token
+    /// Multi-layered login with 6 fallback strategies.
+    /// Tries each in order until one succeeds, accumulates diagnostic log.
     ///
-    /// Password encoding (observed from web client):
-    ///   MD5(password).Base64(SHA256(password))
+    /// Layer 1: Cache hit (instant)
+    /// Layer 2: V3 region-aware login with hashed password (MD5.Base64SHA256)
+    /// Layer 3: V3 login with plain password (same endpoint)
+    /// Layer 4: V3 login with MD5-only password
+    /// Layer 5: Direct V3 login on multiple regional bases (skip region detection)
+    /// Layer 6: Legacy V0 login on multiple bases with body/header wrapper
     /// </summary>
     private async Task<(string? Token, string? ApiBase, string Error)> LoginAsync(ApiCredentials credentials)
     {
         var cacheKey = $"hoymiles|{credentials.Username}|{credentials.Password?.Length ?? 0}";
+
+        // ─── Layer 1: Cache ───
         lock (_tokenLock)
         {
             if (_tokenCache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow < cached.ExpiresAt)
                 return (cached.Token, cached.ApiBase, "OK (cached)");
         }
 
-        try
+        if (string.IsNullOrEmpty(credentials.Username) || string.IsNullOrEmpty(credentials.Password))
+            return (null, null, "Username and password are required.");
+
+        var diag = new List<string>();
+        var password = credentials.Password;
+
+        // Pre-compute password variants (used by multiple layers)
+        var passwordVariants = ComputePasswordVariants(password);
+
+        // ─── Layer 2: V3 region-aware login (HASHED password) ───
+        var (loginUrl, apiBase) = await DetectRegionAsync(credentials.Username, diag);
+
+        var v3Result = await TryV3LoginAsync(credentials.Username, passwordVariants["hashed"], loginUrl, "L2-hashed", diag);
+        if (v3Result.Token != null)
+            return CacheAndReturn(cacheKey, v3Result.Token, apiBase, "OK via L2 (V3 hashed) | " + string.Join(" → ", diag));
+
+        // ─── Layer 3: V3 login with PLAIN password ───
+        var plainResult = await TryV3LoginAsync(credentials.Username, password, loginUrl, "L3-plain", diag);
+        if (plainResult.Token != null)
+            return CacheAndReturn(cacheKey, plainResult.Token, apiBase, "OK via L3 (V3 plain) | " + string.Join(" → ", diag));
+
+        // ─── Layer 4: V3 login with MD5-only password ───
+        var md5Result = await TryV3LoginAsync(credentials.Username, passwordVariants["md5"], loginUrl, "L4-md5", diag);
+        if (md5Result.Token != null)
+            return CacheAndReturn(cacheKey, md5Result.Token, apiBase, "OK via L4 (V3 md5) | " + string.Join(" → ", diag));
+
+        // ─── Layer 5: Try other regional bases directly (skip region detection) ───
+        var regionalBases = new[]
         {
-            // ── Step 1: Detect region → get login_url ──
-            string loginUrl = RegionApiBase;
-            string apiBase = DefaultApiBase;
-
-            try
-            {
-                var regionClient = CreateClient();
-                var regionBody = new { email = credentials.Username };
-                var regionResp = await regionClient.PostAsJsonAsync($"{RegionApiBase}/iam/pub/0/c/region_c", regionBody);
-                var regionContent = await regionResp.Content.ReadAsStringAsync();
-
-                if (regionResp.IsSuccessStatusCode)
-                {
-                    var regionJson = JsonDocument.Parse(regionContent).RootElement;
-                    if (regionJson.TryGetProperty("data", out var regionData))
-                    {
-                        var parsedLoginUrl = SafeGetString(regionData, "login_url");
-                        if (!string.IsNullOrEmpty(parsedLoginUrl) && parsedLoginUrl.StartsWith("http"))
-                            loginUrl = parsedLoginUrl.TrimEnd('/');
-
-                        var parsedApiUrl = SafeGetString(regionData, "api_url")
-                                        ?? SafeGetString(regionData, "data_url");
-                        if (!string.IsNullOrEmpty(parsedApiUrl) && parsedApiUrl.StartsWith("http"))
-                            apiBase = parsedApiUrl.TrimEnd('/');
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Hoymiles region detection failed, using defaults");
-            }
-            _logger.LogDebug("Hoymiles region: loginUrl={Url}, apiBase={Base}", loginUrl, apiBase);
-
-            // ── Step 2: Hash password (MD5 + "." + Base64(SHA256)) ──
-            var password = credentials.Password ?? "";
-            string hashedPassword;
-            using (var md5 = System.Security.Cryptography.MD5.Create())
-            using (var sha = System.Security.Cryptography.SHA256.Create())
-            {
-                var pwBytes = System.Text.Encoding.UTF8.GetBytes(password);
-                var md5Hash = BitConverter.ToString(md5.ComputeHash(pwBytes)).Replace("-", "").ToLowerInvariant();
-                var shaHash = Convert.ToBase64String(sha.ComputeHash(pwBytes));
-                hashedPassword = $"{md5Hash}.{shaHash}";
-            }
-
-            // ── Step 3: Login with hashed password ──
-            var loginClient = CreateClient();
-            var loginBody = new { user_name = credentials.Username, password = hashedPassword };
-            var loginResp = await loginClient.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", loginBody);
-            var loginContent = await loginResp.Content.ReadAsStringAsync();
-
-            if (!loginResp.IsSuccessStatusCode)
-            {
-                // Fallback: try legacy V0 login (some older accounts)
-                return await LegacyLoginAsync(credentials);
-            }
-
-            var loginJson = JsonDocument.Parse(loginContent).RootElement;
-            var status = SafeGetString(loginJson, "status") ?? SafeGetInt(loginJson, "status")?.ToString();
-            var msg = SafeGetString(loginJson, "message") ?? SafeGetString(loginJson, "msg");
-
-            if (status != "0")
-            {
-                // Maybe password hashing not needed for this account — try plain
-                var plainClient = CreateClient();
-                var plainBody = new { user_name = credentials.Username, password };
-                var plainResp = await plainClient.PostAsJsonAsync($"{loginUrl}/iam/pub/0/c/login_c", plainBody);
-                if (plainResp.IsSuccessStatusCode)
-                {
-                    var plainJson = JsonDocument.Parse(await plainResp.Content.ReadAsStringAsync()).RootElement;
-                    if (SafeGetString(plainJson, "status") == "0" || SafeGetInt(plainJson, "status") == 0)
-                    {
-                        loginJson = plainJson;
-                        status = "0";
-                    }
-                }
-
-                if (status != "0")
-                    return await LegacyLoginAsync(credentials);
-            }
-
-            string? token = null;
-            if (loginJson.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
-            {
-                token = SafeGetString(data, "token")
-                     ?? SafeGetString(data, "access_token");
-            }
-
-            if (string.IsNullOrEmpty(token))
-                return (null, null, $"Login OK but no token found. Response: {Truncate(loginContent, 300)}");
-
-            lock (_tokenLock)
-            {
-                _tokenCache[cacheKey] = (token, apiBase, DateTime.UtcNow.Add(TokenTtl));
-            }
-            return (token, apiBase, "OK");
-        }
-        catch (TaskCanceledException)
+            "https://neapi.hoymiles.com", "https://euapi.hoymiles.com",
+            "https://naapi.hoymiles.com", "https://apapi.hoymiles.com",
+        };
+        foreach (var baseUrl in regionalBases)
         {
-            return (null, null, "Login timeout — S-Miles Cloud did not respond.");
+            if (baseUrl == loginUrl) continue; // already tried
+            var r = await TryV3LoginAsync(credentials.Username, passwordVariants["hashed"], baseUrl, $"L5-{ShortName(baseUrl)}", diag);
+            if (r.Token != null)
+                return CacheAndReturn(cacheKey, r.Token, baseUrl, $"OK via L5 ({baseUrl}) | " + string.Join(" → ", diag));
         }
-        catch (HttpRequestException ex)
+
+        // ─── Layer 6: Legacy V0 login ───
+        var legacyResult = await TryLegacyLoginAsync(credentials, diag);
+        if (legacyResult.Token != null)
         {
-            return (null, null, $"Network error: {ex.Message}");
+            return CacheAndReturn(cacheKey, legacyResult.Token, legacyResult.ApiBase ?? DefaultApiBase,
+                $"OK via L6 (legacy) | " + string.Join(" → ", diag));
         }
-        catch (Exception ex)
-        {
-            return (null, null, $"Login error: {ex.Message}");
-        }
+
+        // All layers failed — return aggregated diagnostic
+        var summary = string.Join(" → ", diag);
+        _logger.LogWarning("Hoymiles login failed all 6 layers: {Diag}", summary);
+        return (null, null, $"Login failed (all 6 strategies). Trace: {Truncate(summary, 500)}");
     }
 
     /// <summary>
-    /// Legacy V0 login for older accounts or regions that haven't migrated to V3.
-    /// Uses the old body/header JSON wrapper pattern on global.hoymiles.com.
+    /// Pre-compute all password hash variants once (avoid recomputing).
     /// </summary>
-    private async Task<(string? Token, string? ApiBase, string Error)> LegacyLoginAsync(ApiCredentials credentials)
+    private static Dictionary<string, string> ComputePasswordVariants(string password)
     {
-        var cacheKey = $"hoymiles|{credentials.Username}|{credentials.Password?.Length ?? 0}";
-        try
+        var pwBytes = System.Text.Encoding.UTF8.GetBytes(password);
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var md5Hex = BitConverter.ToString(md5.ComputeHash(pwBytes)).Replace("-", "").ToLowerInvariant();
+        var sha256Base64 = Convert.ToBase64String(sha.ComputeHash(pwBytes));
+        return new Dictionary<string, string>
         {
-            // Try multiple known base URLs
-            var bases = new[]
-            {
-                "https://neapi.hoymiles.com",
-                "https://global.hoymiles.com/platform/api/gateway",
-                "https://intl.hoymiles.com/platform/api/gateway"
-            };
-
-            foreach (var baseUrl in bases)
-            {
-                try
-                {
-                    var client = CreateClient();
-                    var body = new
-                    {
-                        body = new { user_name = credentials.Username, password = credentials.Password },
-                        header = new { language = "en" }
-                    };
-
-                    var response = await client.PostAsJsonAsync(
-                        baseUrl.Contains("neapi") ? $"{baseUrl}/pvm-iam/api/0/iam/auth_login" : $"{baseUrl}/iam/auth_login",
-                        body);
-
-                    if (!response.IsSuccessStatusCode) continue;
-
-                    var content = await response.Content.ReadAsStringAsync();
-                    var json = JsonDocument.Parse(content).RootElement;
-                    var st = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
-                    if (st != "0" && st != "200" && st != "success") continue;
-
-                    string? token = null;
-                    if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
-                    {
-                        token = SafeGetString(data, "token")
-                             ?? SafeGetString(data, "access_token")
-                             ?? SafeGetString(data, "sid");
-                    }
-                    if (string.IsNullOrEmpty(token)) continue;
-
-                    var apiBase = baseUrl.Contains("neapi") ? baseUrl : DefaultApiBase;
-                    lock (_tokenLock) { _tokenCache[cacheKey] = (token, apiBase, DateTime.UtcNow.Add(TokenTtl)); }
-                    _logger.LogInformation("Hoymiles legacy login OK via {Base}", baseUrl);
-                    return (token, apiBase, $"OK (legacy via {baseUrl})");
-                }
-                catch { continue; }
-            }
-            return (null, null, "All login endpoints failed. Check S-Miles Cloud email/password.");
-        }
-        catch (Exception ex)
-        {
-            return (null, null, $"Legacy login error: {ex.Message}");
-        }
+            ["plain"] = password,
+            ["md5"] = md5Hex,
+            ["sha256"] = sha256Base64,
+            ["hashed"] = $"{md5Hex}.{sha256Base64}", // observed V3 format
+        };
     }
 
-    private async Task<JsonElement?> CallApiAsync(string token, string apiBase, string path, object requestBody)
+    /// <summary>
+    /// Layer 2 prep: detect user's region via /iam/pub/0/c/region_c.
+    /// Returns (loginUrl, apiBase) — falls back to defaults on any error.
+    /// </summary>
+    private async Task<(string LoginUrl, string ApiBase)> DetectRegionAsync(string username, List<string> diag)
     {
         try
         {
             var client = CreateClient();
+            var resp = await client.PostAsJsonAsync($"{RegionApiBase}/iam/pub/0/c/region_c",
+                new { email = username });
 
-            // V3 uses Authorization header + flat JSON body
-            // Legacy uses body/header wrapper
-            var url = $"{apiBase}/{path.TrimStart('/')}";
-            client.DefaultRequestHeaders.Remove("Authorization");
-            client.DefaultRequestHeaders.Add("Authorization", token);
-
-            var response = await client.PostAsJsonAsync(url, requestBody);
-            var content = await response.Content.ReadAsStringAsync();
-
-            if (!response.IsSuccessStatusCode)
+            if (!resp.IsSuccessStatusCode)
             {
-                // Fallback: try legacy body/header wrapper format
-                client.DefaultRequestHeaders.Remove("Authorization");
-                var legacyBody = new
-                {
-                    body = requestBody,
-                    header = new { language = "en", token }
-                };
-                response = await client.PostAsJsonAsync(url, legacyBody);
-                content = await response.Content.ReadAsStringAsync();
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning("Hoymiles {Path}: HTTP {Code}", path, (int)response.StatusCode);
-                    return null;
-                }
+                diag.Add($"region:HTTP{(int)resp.StatusCode}");
+                return (RegionApiBase, DefaultApiBase);
             }
 
+            var content = await resp.Content.ReadAsStringAsync();
             var json = JsonDocument.Parse(content).RootElement;
-            var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
-
-            if (status == "100" || status == "401" || status == "token_expired")
+            if (!json.TryGetProperty("data", out var data))
             {
-                lock (_tokenLock) { _tokenCache.Clear(); }
-                _logger.LogWarning("Hoymiles {Path}: token expired, cache cleared", path);
-                return null;
+                diag.Add("region:no-data");
+                return (RegionApiBase, DefaultApiBase);
             }
 
-            if (status != "0" && status != "200" && status != "success")
-            {
-                _logger.LogWarning("Hoymiles {Path}: status={Status} msg={Msg}",
-                    path, status, SafeGetString(json, "message"));
-                return null;
-            }
-
-            return json.TryGetProperty("data", out var data) ? data : json;
+            var loginUrl = ExtractAbsoluteUrl(data, "login_url", "loginUrl", "server_url") ?? RegionApiBase;
+            var apiBase = ExtractAbsoluteUrl(data, "api_url", "apiUrl", "data_url") ?? DefaultApiBase;
+            diag.Add($"region:OK→{ShortName(loginUrl)}");
+            return (loginUrl, apiBase);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Hoymiles {Path} failed", path);
-            return null;
+            diag.Add($"region:err({ex.GetType().Name})");
+            return (RegionApiBase, DefaultApiBase);
         }
+    }
+
+    /// <summary>
+    /// Try V3 login at given URL with given password variant.
+    /// Records diagnostic in diag list. Always returns — never throws.
+    /// </summary>
+    private async Task<(string? Token, int StatusCode)> TryV3LoginAsync(
+        string username, string password, string baseUrl, string label, List<string> diag)
+    {
+        try
+        {
+            var client = CreateClient();
+            var body = new { user_name = username, password };
+            var url = $"{baseUrl.TrimEnd('/')}/iam/pub/0/c/login_c";
+            var resp = await client.PostAsJsonAsync(url, body);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                diag.Add($"{label}:HTTP{(int)resp.StatusCode}");
+                return (null, (int)resp.StatusCode);
+            }
+
+            var content = await resp.Content.ReadAsStringAsync();
+            var json = JsonDocument.Parse(content).RootElement;
+            var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+
+            if (status != "0" && status != "200" && status != "success")
+            {
+                var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
+                diag.Add($"{label}:status={status}({Truncate(msg, 30)})");
+                return (null, (int)resp.StatusCode);
+            }
+
+            var token = ExtractToken(json);
+            if (string.IsNullOrEmpty(token))
+            {
+                diag.Add($"{label}:no-token-in-resp");
+                return (null, (int)resp.StatusCode);
+            }
+
+            diag.Add($"{label}:OK");
+            return (token, (int)resp.StatusCode);
+        }
+        catch (TaskCanceledException) { diag.Add($"{label}:timeout"); return (null, 0); }
+        catch (HttpRequestException ex) { diag.Add($"{label}:net({Truncate(ex.Message, 30)})"); return (null, 0); }
+        catch (Exception ex) { diag.Add($"{label}:err({ex.GetType().Name})"); return (null, 0); }
+    }
+
+    /// <summary>
+    /// Layer 6: Legacy V0 login. Tries 3 base URLs with old body/header wrapper.
+    /// </summary>
+    private async Task<(string? Token, string? ApiBase)> TryLegacyLoginAsync(ApiCredentials credentials, List<string> diag)
+    {
+        var attempts = new[]
+        {
+            ("https://neapi.hoymiles.com", "/pvm-iam/api/0/iam/auth_login"),
+            ("https://global.hoymiles.com/platform/api/gateway", "/iam/auth_login"),
+            ("https://intl.hoymiles.com/platform/api/gateway", "/iam/auth_login"),
+        };
+
+        foreach (var (baseUrl, path) in attempts)
+        {
+            try
+            {
+                var client = CreateClient();
+                var body = new
+                {
+                    body = new { user_name = credentials.Username, password = credentials.Password },
+                    header = new { language = "en" }
+                };
+                var resp = await client.PostAsJsonAsync($"{baseUrl}{path}", body);
+
+                if (!resp.IsSuccessStatusCode)
+                {
+                    diag.Add($"L6-{ShortName(baseUrl)}:HTTP{(int)resp.StatusCode}");
+                    continue;
+                }
+
+                var content = await resp.Content.ReadAsStringAsync();
+                var json = JsonDocument.Parse(content).RootElement;
+                var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+                if (status != "0" && status != "200" && status != "success")
+                {
+                    diag.Add($"L6-{ShortName(baseUrl)}:status={status}");
+                    continue;
+                }
+
+                var token = ExtractToken(json);
+                if (string.IsNullOrEmpty(token))
+                {
+                    diag.Add($"L6-{ShortName(baseUrl)}:no-token");
+                    continue;
+                }
+
+                diag.Add($"L6-{ShortName(baseUrl)}:OK");
+                var apiBase = baseUrl.Contains("neapi") ? baseUrl : DefaultApiBase;
+                return (token, apiBase);
+            }
+            catch (Exception ex) { diag.Add($"L6-{ShortName(baseUrl)}:err({ex.GetType().Name})"); }
+        }
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Extract token from response JSON — handles multiple known field names.
+    /// </summary>
+    private static string? ExtractToken(JsonElement json)
+    {
+        // Try root-level first
+        var token = SafeGetString(json, "token") ?? SafeGetString(json, "access_token")
+                 ?? SafeGetString(json, "sid") ?? SafeGetString(json, "jwt");
+        if (!string.IsNullOrEmpty(token)) return token;
+
+        // Try data.* nesting
+        if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+        {
+            token = SafeGetString(data, "token") ?? SafeGetString(data, "access_token")
+                 ?? SafeGetString(data, "sid") ?? SafeGetString(data, "jwt");
+            if (!string.IsNullOrEmpty(token)) return token;
+
+            // Try data.data.* (double-nested observed in some legacy responses)
+            if (data.TryGetProperty("data", out var innerData) && innerData.ValueKind == JsonValueKind.Object)
+            {
+                token = SafeGetString(innerData, "token") ?? SafeGetString(innerData, "access_token");
+                if (!string.IsNullOrEmpty(token)) return token;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Extract an absolute http(s) URL from any of the given JSON properties.
+    /// Returns null if none are absolute URLs.
+    /// </summary>
+    private static string? ExtractAbsoluteUrl(JsonElement el, params string[] props)
+    {
+        foreach (var prop in props)
+        {
+            var v = SafeGetString(el, prop);
+            if (!string.IsNullOrEmpty(v) && (v.StartsWith("http://") || v.StartsWith("https://")))
+                return v.TrimEnd('/');
+        }
+        return null;
+    }
+
+    /// <summary>Short label for diagnostic logging.</summary>
+    private static string ShortName(string url) =>
+        url.Replace("https://", "").Replace("http://", "").Split('/')[0].Split('.')[0];
+
+    /// <summary>Cache token and return success tuple.</summary>
+    private (string Token, string ApiBase, string Message) CacheAndReturn(string cacheKey, string token, string apiBase, string message)
+    {
+        lock (_tokenLock) { _tokenCache[cacheKey] = (token, apiBase, DateTime.UtcNow.Add(TokenTtl)); }
+        _logger.LogInformation("Hoymiles login: {Msg}", message);
+        return (token, apiBase, message);
+    }
+
+    /// <summary>
+    /// Multi-layer API call with format fallbacks + network retry.
+    ///
+    /// Layer 1: Flat body + Authorization header (V3 standard)
+    /// Layer 2: Body/header wrapper + token in header (legacy)
+    /// Layer 3: Flat body + Bearer prefix on Authorization
+    /// Layer 4: Network retry with exponential backoff (1s, 2s, 4s)
+    /// </summary>
+    private async Task<JsonElement?> CallApiAsync(string token, string apiBase, string path, object requestBody)
+    {
+        var url = $"{apiBase.TrimEnd('/')}/{path.TrimStart('/')}";
+        var attemptDiag = new List<string>();
+
+        // Strategy 1: Flat body + Authorization: {token}
+        var r1 = await TryCallAsync(url, requestBody, ("Authorization", token), attemptDiag, "v3-flat");
+        if (r1.HasValue && IsSuccessStatus(r1.Value)) return ExtractData(r1.Value);
+
+        // Strategy 2: Legacy body/header wrapper
+        var legacyBody = new { body = requestBody, header = new { language = "en", token } };
+        var r2 = await TryCallAsync(url, legacyBody, null, attemptDiag, "legacy-wrap");
+        if (r2.HasValue && IsSuccessStatus(r2.Value)) return ExtractData(r2.Value);
+
+        // Strategy 3: Authorization: Bearer {token}
+        var r3 = await TryCallAsync(url, requestBody, ("Authorization", $"Bearer {token}"), attemptDiag, "bearer");
+        if (r3.HasValue && IsSuccessStatus(r3.Value)) return ExtractData(r3.Value);
+
+        // All strategies failed — check if it's a token issue
+        var lastResp = r1 ?? r2 ?? r3;
+        if (lastResp.HasValue)
+        {
+            var status = SafeGetString(lastResp.Value, "status") ?? SafeGetInt(lastResp.Value, "status")?.ToString();
+            if (status is "100" or "401" or "token_expired")
+            {
+                lock (_tokenLock) { _tokenCache.Clear(); }
+                _logger.LogWarning("Hoymiles {Path}: token expired (status={Status}), cache cleared", path, status);
+                return null;
+            }
+        }
+
+        _logger.LogWarning("Hoymiles {Path} all strategies failed: {Diag}", path, string.Join(" → ", attemptDiag));
+        return null;
+    }
+
+    /// <summary>
+    /// Single API call attempt with network retry (3 attempts, exponential backoff).
+    /// Returns null only on terminal network failure; returns JSON even for non-2xx for caller to inspect.
+    /// </summary>
+    private async Task<JsonElement?> TryCallAsync(string url, object body, (string Name, string Value)? authHeader,
+        List<string> diag, string label)
+    {
+        const int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                var client = CreateClient();
+                if (authHeader.HasValue)
+                {
+                    client.DefaultRequestHeaders.Remove(authHeader.Value.Name);
+                    client.DefaultRequestHeaders.Add(authHeader.Value.Name, authHeader.Value.Value);
+                }
+
+                var resp = await client.PostAsJsonAsync(url, body);
+                var content = await resp.Content.ReadAsStringAsync();
+
+                // 5xx → retry; 4xx/2xx → return immediately
+                if ((int)resp.StatusCode >= 500 && (int)resp.StatusCode < 600 && attempt < maxAttempts)
+                {
+                    var backoff = (int)Math.Pow(2, attempt - 1) * 1000;
+                    diag.Add($"{label}:HTTP{(int)resp.StatusCode}→retry{attempt}");
+                    await Task.Delay(backoff);
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(content)) { diag.Add($"{label}:empty"); return null; }
+
+                try
+                {
+                    var json = JsonDocument.Parse(content).RootElement;
+                    diag.Add($"{label}:HTTP{(int)resp.StatusCode}");
+                    return json;
+                }
+                catch
+                {
+                    diag.Add($"{label}:invalid-json");
+                    return null;
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                if (attempt < maxAttempts)
+                {
+                    diag.Add($"{label}:timeout-retry{attempt}");
+                    await Task.Delay((int)Math.Pow(2, attempt - 1) * 1000);
+                    continue;
+                }
+                diag.Add($"{label}:timeout");
+                return null;
+            }
+            catch (HttpRequestException ex)
+            {
+                if (attempt < maxAttempts)
+                {
+                    diag.Add($"{label}:net-retry{attempt}");
+                    await Task.Delay((int)Math.Pow(2, attempt - 1) * 1000);
+                    continue;
+                }
+                diag.Add($"{label}:net({ex.Message.Substring(0, Math.Min(30, ex.Message.Length))})");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                diag.Add($"{label}:err({ex.GetType().Name})");
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static bool IsSuccessStatus(JsonElement json)
+    {
+        var s = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+        return s is "0" or "200" or "success";
+    }
+
+    private static JsonElement? ExtractData(JsonElement json)
+    {
+        if (json.TryGetProperty("data", out var data)) return data;
+        return json;
     }
 
     private HttpClient CreateClient()
