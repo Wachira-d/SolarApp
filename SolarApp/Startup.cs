@@ -1009,6 +1009,16 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         // Minimal liveness probe — no DB, no auth. For load balancers.
         app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
 
+        // Customer lookup by ID (used by Installation Edit page to populate inline edit fields)
+        app.MapGet("/api/customers/{id:int}", async (int id, ApplicationDbContext db) =>
+        {
+            var c = await db.Customers
+                .Where(c => c.Id == id && c.IsActive)
+                .Select(c => new { c.Id, c.FirstName, c.LastName, c.Phone, c.Email, c.Address })
+                .FirstOrDefaultAsync();
+            return c == null ? Results.NotFound() : Results.Json(c);
+        }).RequireAuthorization();
+
         // Reverse-geocode lat/lng → address (Nominatim/OSM)
         app.MapGet("/api/geocode/reverse", async (double lat, double lng, string? lang,
             Services.Geocoding.IGeocodingService geocoder) =>

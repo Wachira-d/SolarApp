@@ -46,6 +46,7 @@ public class EditModel : PageModel
     public bool HasPlantId { get; set; }
     public string CredentialStorageNote { get; set; } = "";
     public List<SelectListItem> Partners { get; set; } = new();
+    public List<SelectListItem> Customers { get; set; } = new();
 
     public class InstallationInput
     {
@@ -60,6 +61,10 @@ public class EditModel : PageModel
         public double? Longitude { get; set; }
 
         public int CustomerId { get; set; }
+        public string? CustomerFirstName { get; set; }
+        public string? CustomerLastName { get; set; }
+        public string? CustomerPhone { get; set; }
+        public string? CustomerEmail { get; set; }
         public int? PartnerId { get; set; }
 
         [Required] public InverterBrand InverterBrand { get; set; }
@@ -109,6 +114,7 @@ public class EditModel : PageModel
         MapToInput(installation);
         await LoadCustomerDisplayNameAsync(installation.CustomerId);
         await LoadPartnersAsync();
+        await LoadCustomersAsync();
         return Page();
     }
 
@@ -129,10 +135,37 @@ public class EditModel : PageModel
         {
             await LoadCustomerDisplayNameAsync(installation.CustomerId);
             await LoadPartnersAsync();
+            await LoadCustomersAsync();
             return Page();
         }
 
-        // Update fields from input (CustomerId is NOT changed)
+        // Update customer — allow changing to a different customer
+        if (Input.CustomerId > 0 && Input.CustomerId != installation.CustomerId)
+        {
+            var customerExists = await _context.Customers.AnyAsync(c => c.Id == Input.CustomerId && c.IsActive);
+            if (customerExists)
+                installation.CustomerId = Input.CustomerId;
+        }
+
+        // Inline edit customer name (if provided)
+        if (!string.IsNullOrWhiteSpace(Input.CustomerFirstName) || !string.IsNullOrWhiteSpace(Input.CustomerLastName))
+        {
+            var customer = await _context.Customers.FindAsync(installation.CustomerId);
+            if (customer != null)
+            {
+                if (!string.IsNullOrWhiteSpace(Input.CustomerFirstName))
+                    customer.FirstName = Input.CustomerFirstName.Trim();
+                if (!string.IsNullOrWhiteSpace(Input.CustomerLastName))
+                    customer.LastName = Input.CustomerLastName.Trim();
+                if (!string.IsNullOrWhiteSpace(Input.CustomerPhone))
+                    customer.Phone = Input.CustomerPhone.Trim();
+                if (Input.CustomerEmail != null)
+                    customer.Email = Input.CustomerEmail.Trim();
+                customer.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
+        // Update fields from input
         installation.SiteName = Input.SiteName;
         installation.Address = Input.Address;
         installation.City = Input.City;
@@ -299,12 +332,21 @@ public class EditModel : PageModel
     {
         var customer = await _context.Customers
             .Where(c => c.Id == customerId)
-            .Select(c => new { c.FirstName, c.LastName, c.Email })
+            .Select(c => new { c.FirstName, c.LastName, c.Email, c.Phone })
             .FirstOrDefaultAsync();
 
-        CustomerDisplayName = customer != null
-            ? $"{customer.FirstName} {customer.LastName} ({customer.Email})"
-            : "Unknown Customer";
+        if (customer != null)
+        {
+            CustomerDisplayName = $"{customer.FirstName} {customer.LastName} ({customer.Email})";
+            Input.CustomerFirstName = customer.FirstName;
+            Input.CustomerLastName = customer.LastName;
+            Input.CustomerPhone = customer.Phone;
+            Input.CustomerEmail = customer.Email;
+        }
+        else
+        {
+            CustomerDisplayName = "Unknown Customer";
+        }
     }
 
     private async Task LoadPartnersAsync()
@@ -312,6 +354,17 @@ public class EditModel : PageModel
         Partners = await _context.Partners
             .Where(p => p.IsActive)
             .Select(p => new SelectListItem(p.CompanyName, p.Id.ToString()))
+            .ToListAsync();
+    }
+
+    private async Task LoadCustomersAsync()
+    {
+        Customers = await _context.Customers
+            .Where(c => c.IsActive)
+            .OrderBy(c => c.FirstName).ThenBy(c => c.LastName)
+            .Select(c => new SelectListItem(
+                $"{c.FirstName} {c.LastName} ({c.Phone})",
+                c.Id.ToString()))
             .ToListAsync();
     }
 }

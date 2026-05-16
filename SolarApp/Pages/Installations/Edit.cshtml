@@ -52,14 +52,45 @@
                     <h6 class="text-muted mb-3 mt-4">Customer & Partner</h6>
                     <div class="row mb-3">
                         <div class="col-md-6">
-                            <label class="form-label">Customer</label>
-                            <input type="text" class="form-control" value="@Model.CustomerDisplayName" disabled />
+                            <label asp-for="Input.CustomerId" class="form-label">Customer</label>
+                            <select asp-for="Input.CustomerId" asp-items="Model.Customers" class="form-select" id="customerSelect">
+                            </select>
                         </div>
                         <div class="col-md-6">
                             <label asp-for="Input.PartnerId" class="form-label">Partner</label>
                             <select asp-for="Input.PartnerId" asp-items="Model.Partners" class="form-select">
                                 <option value="">-- No Partner (Direct Sale) --</option>
                             </select>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#customerEditSection">
+                                <i class="bi bi-pencil"></i> แก้ไขข้อมูลลูกค้า
+                            </button>
+                        </div>
+                    </div>
+                    <div class="collapse" id="customerEditSection">
+                        <div class="card card-body bg-light mb-3">
+                            <div class="row mb-2">
+                                <div class="col-md-3">
+                                    <label asp-for="Input.CustomerFirstName" class="form-label">ชื่อ</label>
+                                    <input asp-for="Input.CustomerFirstName" class="form-control" />
+                                </div>
+                                <div class="col-md-3">
+                                    <label asp-for="Input.CustomerLastName" class="form-label">นามสกุล</label>
+                                    <input asp-for="Input.CustomerLastName" class="form-control" />
+                                </div>
+                                <div class="col-md-3">
+                                    <label asp-for="Input.CustomerPhone" class="form-label">เบอร์โทร</label>
+                                    <input asp-for="Input.CustomerPhone" class="form-control" />
+                                </div>
+                                <div class="col-md-3">
+                                    <label asp-for="Input.CustomerEmail" class="form-label">Email</label>
+                                    <input asp-for="Input.CustomerEmail" class="form-control" type="email" />
+                                </div>
+                            </div>
+                            <small class="text-muted">การแก้ไขจะเปลี่ยนข้อมูลลูกค้าที่เลือกอยู่ (ไม่ใช่แค่ไซต์นี้)</small>
                         </div>
                     </div>
 
@@ -309,6 +340,26 @@
             } finally {
                 btn.disabled = false;
             }
+        });
+
+        // When customer dropdown changes, fetch customer info to populate edit fields
+        document.getElementById('customerSelect')?.addEventListener('change', async (e) => {
+            const cid = e.target.value;
+            if (!cid) return;
+            try {
+                const r = await fetch(`/api/customers/${cid}`);
+                if (r.ok) {
+                    const c = await r.json();
+                    const fn = document.querySelector('[name="Input.CustomerFirstName"]');
+                    const ln = document.querySelector('[name="Input.CustomerLastName"]');
+                    const ph = document.querySelector('[name="Input.CustomerPhone"]');
+                    const em = document.querySelector('[name="Input.CustomerEmail"]');
+                    if (fn) fn.value = c.firstName || '';
+                    if (ln) ln.value = c.lastName || '';
+                    if (ph) ph.value = c.phone || '';
+                    if (em) em.value = c.email || '';
+                }
+            } catch { /* ignore — fields stay as-is */ }
         });
     </script>
 }
