@@ -102,9 +102,13 @@
                 <tbody>
                     @if (!Model.Orders.Any())
                     {
-                        <tr><td colspan="7" class="text-center text-muted py-4">
-                            ยังไม่มีใบสั่งงาน
-                            <a asp-page="Create" class="ms-2">สร้างใบใหม่ →</a>
+                        <tr><td colspan="7" class="text-center py-5">
+                            <i class="bi bi-clipboard-check text-muted d-block mb-2" style="font-size:3rem"></i>
+                            <h6 class="mb-1">ยังไม่มีใบสั่งงาน</h6>
+                            <p class="text-muted small mb-3">สร้างใบสั่งงานเพื่อมอบหมายภารกิจ Maintenance หรือ Inspection ให้ทีมงาน</p>
+                            <a asp-page="Create" class="btn btn-sm btn-primary">
+                                <i class="bi bi-plus-lg"></i> สร้างใบสั่งงาน
+                            </a>
                         </td></tr>
                     }
                     @foreach (var wo in Model.Orders)

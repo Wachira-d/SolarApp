@@ -248,7 +248,7 @@
             const btn = document.getElementById('btnReverseGeocode');
             const lat = parseFloat(document.getElementById('edtLat').value);
             const lng = parseFloat(document.getElementById('edtLng').value);
-            if (isNaN(lat) || isNaN(lng)) { alert('Please fill both Latitude and Longitude first'); return; }
+            if (isNaN(lat) || isNaN(lng)) { window.toast.warning('Please fill both Latitude and Longitude first'); return; }
 
             const orig = btn.innerHTML;
             btn.disabled = true;
@@ -260,12 +260,13 @@
                     if (!document.getElementById('edtAddress').value
                         || confirm(`Replace current address with:\n${data.address}`)) {
                         document.getElementById('edtAddress').value = data.address;
+                        window.toast.success('Address resolved');
                     }
                 } else {
-                    alert('Could not resolve address: ' + (data.message || 'unknown'));
+                    window.toast.error('Could not resolve address: ' + (data.message || 'unknown'));
                 }
             } catch (e) {
-                alert('Geocoding failed: ' + e.message);
+                window.toast.error('Geocoding failed: ' + e.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = orig;

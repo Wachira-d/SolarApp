@@ -148,6 +148,51 @@
                 off?.hide();
             });
         });
+
+        // ──────────────────────────────────────────────────────────────
+        // Global Toast notification system — replacement for alert()
+        // Usage:  window.toast.success('Saved')
+        //         window.toast.error('Failed: ' + err.message)
+        //         window.toast.info('Syncing...')
+        //         window.toast.warning('Connection slow')
+        // ──────────────────────────────────────────────────────────────
+        (function () {
+            // Create container if absent
+            let container = document.getElementById('toastContainer');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'toastContainer';
+                container.className = 'toast-container position-fixed top-0 end-0 p-3';
+                container.style.zIndex = '1090';
+                document.body.appendChild(container);
+            }
+
+            function show(message, variant, icon, delay) {
+                const id = 'toast_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+                const html =
+                    '<div id="' + id + '" class="toast align-items-center text-white bg-' + variant +
+                    ' border-0" role="alert" aria-live="assertive" aria-atomic="true">' +
+                    '  <div class="d-flex">' +
+                    '    <div class="toast-body"><i class="bi bi-' + icon + ' me-2"></i>' +
+                    String(message).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) +
+                    '    </div>' +
+                    '    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>' +
+                    '  </div>' +
+                    '</div>';
+                container.insertAdjacentHTML('beforeend', html);
+                const el = document.getElementById(id);
+                const t = new bootstrap.Toast(el, { delay: delay || 4000 });
+                el.addEventListener('hidden.bs.toast', () => el.remove());
+                t.show();
+            }
+
+            window.toast = {
+                success: (msg) => show(msg, 'success', 'check-circle-fill', 3500),
+                error:   (msg) => show(msg, 'danger',  'exclamation-triangle-fill', 6000),
+                info:    (msg) => show(msg, 'info',    'info-circle-fill', 4000),
+                warning: (msg) => show(msg, 'warning', 'exclamation-circle-fill', 5000)
+            };
+        })();
     </script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

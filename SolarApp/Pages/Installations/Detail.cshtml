@@ -165,8 +165,8 @@
                 <button type="button" class="btn btn-outline-danger btn-sm" id="clearAllEquipBtn" data-id="@inst.Id"
                         onclick="if(confirm('ลบ Equipment ทั้งหมด (@inst.Equipment.Count รายการ)?')){
                             fetch('/api/installations/'+this.dataset.id+'/equipment',{method:'DELETE'})
-                            .then(r=>r.json()).then(d=>{alert(d.message);location.reload()})
-                            .catch(e=>alert('Error: '+e.message));}">
+                            .then(r=>r.json()).then(d=>{window.toast.success(d.message);setTimeout(()=>location.reload(),800)})
+                            .catch(e=>window.toast.error('Error: '+e.message));}">
                     <i class="bi bi-trash"></i> Clear All
                 </button>
                 <a asp-page="AddEquipment" asp-route-installationId="@inst.Id" class="btn btn-outline-info btn-sm">
@@ -322,17 +322,19 @@
             try {
                 const r = await fetch(`/api/installations/${id}/refresh-devices`, { method: 'POST' });
                 const data = await r.json();
-                const tone = data.success ? 'success' : 'danger';
                 const lines = [
                     data.message,
-                    `Devices fetched: ${data.devicesFetched}`,
-                    `Equipment created: ${data.equipmentCreated}, updated: ${data.equipmentUpdated}`,
+                    `Devices: ${data.devicesFetched} | Created: ${data.equipmentCreated} | Updated: ${data.equipmentUpdated}`,
                     data.installationNote || ''
-                ].filter(x => x).join('\n');
-                alert(`[${tone.toUpperCase()}]\n${lines}`);
-                if (data.success) setTimeout(() => location.reload(), 500);
+                ].filter(x => x).join(' — ');
+                if (data.success) {
+                    window.toast.success(lines);
+                    setTimeout(() => location.reload(), 1200);
+                } else {
+                    window.toast.error(lines);
+                }
             } catch (e) {
-                alert('Refresh failed: ' + e.message);
+                window.toast.error('Refresh failed: ' + e.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = orig;
