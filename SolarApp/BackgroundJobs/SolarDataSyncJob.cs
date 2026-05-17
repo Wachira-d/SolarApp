@@ -540,34 +540,50 @@ public class SolarDataSyncJob
                 {
                     try
                     {
+                        // Batch dedup: pull all existing (title, occurredAt) tuples for
+                        // this installation in ONE query, then check in-memory.
+                        // Before: N AnyAsync calls per installation (100 alarms = 100 round-trips).
+                        // After:  1 query + N HashSet lookups.
+                        var alarmKeys = alarmsForThisInstallation
+                            .Select(a => new { a.AlarmName, a.OccurredAt })
+                            .ToList();
+                        var titles = alarmKeys.Select(k => k.AlarmName).Distinct().ToList();
+                        var earliest = alarmKeys.Min(k => k.OccurredAt);
+
+                        var existingKeys = await _context.SystemAlerts
+                            .Where(x => x.InstallationId == installation.Id
+                                && x.OccurredAt >= earliest
+                                && titles.Contains(x.Title))
+                            .Select(x => new { x.Title, x.OccurredAt })
+                            .ToListAsync();
+
+                        var existingSet = new HashSet<(string, DateTime)>(
+                            existingKeys.Select(k => (k.Title, k.OccurredAt)));
+
                         foreach (var a in alarmsForThisInstallation)
                         {
-                            var exists = await _context.SystemAlerts.AnyAsync(x =>
-                                x.InstallationId == installation.Id
-                                && x.Title == a.AlarmName
-                                && x.OccurredAt == a.OccurredAt);
+                            if (existingSet.Contains((a.AlarmName, a.OccurredAt))) continue;
 
-                            if (!exists)
+                            _context.SystemAlerts.Add(new SystemAlert
                             {
-                                _context.SystemAlerts.Add(new SystemAlert
+                                InstallationId = installation.Id,
+                                AlertType = AlertType.Error,
+                                Severity = a.Severity switch
                                 {
-                                    InstallationId = installation.Id,
-                                    AlertType = AlertType.Error,
-                                    Severity = a.Severity switch
-                                    {
-                                        1 => AlertSeverity.Critical,
-                                        2 => AlertSeverity.High,
-                                        3 => AlertSeverity.Medium,
-                                        _ => AlertSeverity.Low
-                                    },
-                                    Title = a.AlarmName,
-                                    Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
-                                    OccurredAt = a.OccurredAt,
-                                    ResolvedAt = a.ClearedAt,
-                                    IsNotified = false
-                                });
-                                totalAlarms++;
-                            }
+                                    1 => AlertSeverity.Critical,
+                                    2 => AlertSeverity.High,
+                                    3 => AlertSeverity.Medium,
+                                    _ => AlertSeverity.Low
+                                },
+                                Title = a.AlarmName,
+                                Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
+                                OccurredAt = a.OccurredAt,
+                                ResolvedAt = a.ClearedAt,
+                                IsNotified = false
+                            });
+                            // Prevent dup-add within same batch (same alarm appearing twice in source)
+                            existingSet.Add((a.AlarmName, a.OccurredAt));
+                            totalAlarms++;
                         }
                     }
                     catch (Exception alarmEx)

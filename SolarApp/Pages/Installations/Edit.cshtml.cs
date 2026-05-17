@@ -139,9 +139,20 @@ public class EditModel : PageModel
             return Page();
         }
 
-        // Update customer — allow changing to a different customer
+        // Reassigning an installation to a different Customer or Partner is an
+        // ownership-changing operation. Only Admins may do this; Partner users
+        // (who can otherwise edit their own installations) can only update fields,
+        // not move installations to a different tenant.
+        var isAdmin = User.IsInRole("Admin");
+
         if (Input.CustomerId > 0 && Input.CustomerId != installation.CustomerId)
         {
+            if (!isAdmin)
+            {
+                ModelState.AddModelError(string.Empty, "Only admins may reassign an installation to a different customer.");
+                await LoadCustomersAsync();
+                return Page();
+            }
             var customerExists = await _context.Customers.AnyAsync(c => c.Id == Input.CustomerId && c.IsActive);
             if (customerExists)
                 installation.CustomerId = Input.CustomerId;
@@ -173,7 +184,17 @@ public class EditModel : PageModel
         installation.PostalCode = Input.PostalCode;
         installation.Latitude = Input.Latitude;
         installation.Longitude = Input.Longitude;
-        installation.PartnerId = Input.PartnerId;
+        // Only admins may move installation to a different Partner
+        if (Input.PartnerId != installation.PartnerId)
+        {
+            if (!isAdmin)
+            {
+                ModelState.AddModelError(string.Empty, "Only admins may reassign an installation to a different partner.");
+                await LoadCustomersAsync();
+                return Page();
+            }
+            installation.PartnerId = Input.PartnerId;
+        }
         installation.InverterBrand = Input.InverterBrand;
         installation.InverterModel = Input.InverterModel;
         installation.InverterCount = Input.InverterCount;

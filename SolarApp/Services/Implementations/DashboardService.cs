@@ -50,6 +50,7 @@ public class DashboardService : IDashboardService
 
         // ── Active alerts ──
         var activeAlerts = await _context.SystemAlerts
+            .AsNoTracking()
             .Where(a => installationIds.Contains(a.InstallationId) && a.ResolvedAt == null)
             .OrderByDescending(a => a.Severity)
             .ThenByDescending(a => a.OccurredAt)
@@ -57,12 +58,27 @@ public class DashboardService : IDashboardService
             .Include(a => a.Installation)
             .ToListAsync();
 
+        // Pre-compute active alert counts per installation (was: O(installations)
+        // .Count() calls each scanning activeAlerts in inner loop below).
+        var alertCountByInstall = await _context.SystemAlerts
+            .AsNoTracking()
+            .Where(a => installationIds.Contains(a.InstallationId) && a.ResolvedAt == null)
+            .GroupBy(a => a.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Count);
+
         // ── Today's energy ──
         var todayData = await _context.EnergyData
+            .AsNoTracking()
             .Where(e => installationIds.Contains(e.InstallationId)
                 && e.Granularity == DataGranularity.Daily
                 && e.Timestamp.Date == today)
             .ToListAsync();
+
+        // Index today's energy by installation for O(1) lookup in the per-install loop
+        var todayDataByInstall = todayData
+            .GroupBy(e => e.InstallationId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         // ── Pending maintenance ──
         var pendingMaintenance = await _context.MaintenanceRecords
@@ -78,8 +94,8 @@ public class DashboardService : IDashboardService
         var items = new List<InstallationStatusItem>();
         foreach (var inst in installations)
         {
-            var instAlerts = activeAlerts.Count(a => a.InstallationId == inst.Id);
-            var instToday = todayData.FirstOrDefault(e => e.InstallationId == inst.Id);
+            var instAlerts = alertCountByInstall.TryGetValue(inst.Id, out var ac) ? ac : 0;
+            var instToday = todayDataByInstall.TryGetValue(inst.Id, out var td) ? td : null;
 
             items.Add(new InstallationStatusItem
             {

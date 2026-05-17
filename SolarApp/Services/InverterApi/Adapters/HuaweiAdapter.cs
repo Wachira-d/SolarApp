@@ -30,6 +30,21 @@ public class HuaweiAdapter : IInverterApiAdapter
     private static readonly Dictionary<string, (DateTime Expiry, string RawBody)> _stationListCache = new();
     private static readonly object _cacheLock = new();
     private static readonly TimeSpan StationListTtl = TimeSpan.FromSeconds(90);
+    private static DateTime _lastStationCacheSweepUtc = DateTime.MinValue;
+
+    // Opportunistic cleanup so the static dict doesn't grow unbounded when
+    // credentials rotate. Called whenever the cache lock is already held.
+    private static void EvictExpired_NoLock()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastStationCacheSweepUtc < TimeSpan.FromMinutes(5)) return;
+        _lastStationCacheSweepUtc = now;
+        var stale = _stationListCache
+            .Where(kv => kv.Value.Expiry <= now)
+            .Select(kv => kv.Key)
+            .ToList();
+        foreach (var k in stale) _stationListCache.Remove(k);
+    }
 
     public InverterBrand Brand => InverterBrand.Huawei;
 
@@ -161,6 +176,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                         lock (_cacheLock)
                         {
                             _stationListCache[cacheKey] = (DateTime.UtcNow.Add(StationListTtl), body);
+                            EvictExpired_NoLock();
                         }
                     }
                 }
@@ -1101,6 +1117,19 @@ public class HuaweiAdapter : IInverterApiAdapter
     private static readonly Dictionary<string, (string Token, DateTime ExpiresAt)> _tokenCache = new();
     private static readonly object _tokenCacheLock = new();
     private static readonly TimeSpan TokenTtl = TimeSpan.FromMinutes(15);
+    private static DateTime _lastTokenCacheSweepUtc = DateTime.MinValue;
+
+    private static void EvictExpiredTokens_NoLock()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastTokenCacheSweepUtc < TimeSpan.FromMinutes(5)) return;
+        _lastTokenCacheSweepUtc = now;
+        var stale = _tokenCache
+            .Where(kv => kv.Value.ExpiresAt <= now)
+            .Select(kv => kv.Key)
+            .ToList();
+        foreach (var k in stale) _tokenCache.Remove(k);
+    }
 
     private static void InvalidateToken(string cacheKey)
     {
@@ -1168,6 +1197,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                     lock (_tokenCacheLock)
                     {
                         _tokenCache[cacheKey] = (token, DateTime.UtcNow.Add(TokenTtl));
+                        EvictExpiredTokens_NoLock();
                     }
                     return (token, "OK");
                 }

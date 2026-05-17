@@ -75,6 +75,7 @@ public class MaintenanceService : IMaintenanceService
     public async Task<List<ServiceTicket>> GetTicketsByInstallationAsync(int installationId)
     {
         return await _context.ServiceTickets
+            .AsNoTracking()
             .Include(t => t.ReportedByUser)
             .Include(t => t.AssignedToUser)
             .Where(t => t.InstallationId == installationId)

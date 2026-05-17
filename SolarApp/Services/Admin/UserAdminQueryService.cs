@@ -86,13 +86,18 @@ public class UserAdminQueryService : IUserAdminQueryService
             u.LastLoginAt
         )).ToList();
 
-        // 3) Customers + Partners (each one query with Include)
+        // 3) Customers + Partners — read-only, no tracking
+        // Include(Installations) is still needed because the Razor view reads
+        // @c.Installations.Count / @p.Installations.Count. A future refactor
+        // could project to {Customer, InstallCount} DTOs and drop the Include.
         var customers = await _context.Customers
+            .AsNoTracking()
             .Include(c => c.Installations)
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync(ct);
 
         var partners = await _context.Partners
+            .AsNoTracking()
             .Include(p => p.Installations)
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync(ct);

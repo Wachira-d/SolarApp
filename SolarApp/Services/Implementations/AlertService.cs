@@ -18,6 +18,7 @@ public class AlertService : IAlertService
     public async Task<List<SystemAlert>> GetActiveAlertsAsync(int? installationId = null)
     {
         var query = _context.SystemAlerts
+            .AsNoTracking()                    // read-only path; tracking overhead wasted
             .Include(a => a.Installation)
             .Where(a => a.ResolvedAt == null);
 
@@ -33,6 +34,7 @@ public class AlertService : IAlertService
     public async Task<List<SystemAlert>> GetAlertsByInstallationAsync(int installationId)
     {
         return await _context.SystemAlerts
+            .AsNoTracking()
             .Where(a => a.InstallationId == installationId)
             .OrderByDescending(a => a.OccurredAt)
             .Take(50)

@@ -51,10 +51,27 @@ public class AlertRulesModel : PageModel
         }
         if (Input.CooldownMinutes < 1) Input.CooldownMinutes = 60;
 
+        // Validate scoped installation actually exists (defense against
+        // crafted form posting non-existent / cross-tenant InstallationId)
+        if (Input.InstallationId.HasValue)
+        {
+            var installExists = await _context.Installations
+                .AnyAsync(i => i.Id == Input.InstallationId.Value);
+            if (!installExists)
+            {
+                ErrorMessage = "Selected installation does not exist";
+                return RedirectToPage();
+            }
+        }
+
+        // Strip server-controlled fields that could arrive via form binding —
+        // never trust the client for these.
         var user = await _userManager.GetUserAsync(User);
+        Input.Id = 0;                         // force INSERT, not overwrite
         Input.CreatedByUserId = user?.Id;
         Input.CreatedAt = DateTime.UtcNow;
         Input.UpdatedAt = DateTime.UtcNow;
+        Input.LastFiredAt = null;             // never user-settable
 
         _context.AlertRules.Add(Input);
         await _context.SaveChangesAsync();

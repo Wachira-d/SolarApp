@@ -411,10 +411,10 @@ public class UserAdminCommandService : IUserAdminCommandService
         if (partner.Installations.Any())
             return CommandResult.Fail($"Cannot delete: partner has {partner.Installations.Count} installation(s)");
 
+        // Nullify users + remove partner in a single SaveChanges round-trip.
+        // EF tracks both as pending; the SQL is two statements in one transaction.
         foreach (var u in partner.Users)
             u.PartnerId = null;
-        await _context.SaveChangesAsync();
-
         _context.Partners.Remove(partner);
         await _context.SaveChangesAsync();
         return CommandResult.Ok($"Partner '{partner.CompanyName}' deleted");

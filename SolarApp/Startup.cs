@@ -1011,9 +1011,39 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         // Minimal liveness probe — no DB, no auth. For load balancers.
         app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
 
-        // Customer lookup by ID (used by Installation Edit page to populate inline edit fields)
-        app.MapGet("/api/customers/{id:int}", async (int id, ApplicationDbContext db) =>
+        // Customer lookup by ID (used by Installation Edit page to populate inline edit fields).
+        // Access control: Admin sees any; Partner sees only customers they have an installation
+        // with; everyone else (incl. Customer role on someone else's data) is denied.
+        app.MapGet("/api/customers/{id:int}", async (
+            int id,
+            ApplicationDbContext db,
+            UserManager<Models.ApplicationUser> userManager,
+            System.Security.Claims.ClaimsPrincipal principal) =>
         {
+            var user = await userManager.GetUserAsync(principal);
+            if (user == null) return Results.Unauthorized();
+
+            var isAdmin = await userManager.IsInRoleAsync(user, "Admin");
+            if (!isAdmin)
+            {
+                // Partner: must share at least one installation with this customer
+                if (user.PartnerId.HasValue)
+                {
+                    var partnerSharesCustomer = await db.Installations.AnyAsync(i =>
+                        i.CustomerId == id && i.PartnerId == user.PartnerId);
+                    if (!partnerSharesCustomer) return Results.Forbid();
+                }
+                else
+                {
+                    // Customer can only see themselves
+                    var ownCustomerId = await db.Customers
+                        .Where(c => c.UserId == user.Id)
+                        .Select(c => (int?)c.Id)
+                        .FirstOrDefaultAsync();
+                    if (ownCustomerId != id) return Results.Forbid();
+                }
+            }
+
             var c = await db.Customers
                 .Where(c => c.Id == id && c.IsActive)
                 .Select(c => new { c.Id, c.FirstName, c.LastName, c.Phone, c.Email, c.Address })
