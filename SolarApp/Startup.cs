@@ -183,6 +183,7 @@ public class Startup
         builder.Services.AddScoped<Services.ReportExport.IReportExportService, Services.ReportExport.ReportExportService>();
         builder.Services.AddScoped<Services.FileUpload.IFileUploadService, Services.FileUpload.FileUploadService>();
         builder.Services.AddScoped<Services.Admin.IUserAdminQueryService, Services.Admin.UserAdminQueryService>();
+        builder.Services.AddScoped<Services.Admin.IUserAdminCommandService, Services.Admin.UserAdminCommandService>();
 
         builder.Services.AddHttpClient("default", c =>
         {
@@ -1041,7 +1042,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 return Results.BadRequest(new { error = "Query must be at least 3 characters" });
             var result = await geocoder.SearchAsync(q);
             return result == null
-                ? Results.Json(new { success = false, message = "No results" })
+                ? Results.Json(Services.Api.ApiResponse.NotFound("No results"))
                 : Results.Json(new { success = true, lat = result.Value.Lat, lng = result.Value.Lng, displayName = result.Value.DisplayName });
         }).RequireAuthorization();
 
@@ -1125,10 +1126,10 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             var installation = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
                 .FirstOrDefaultAsync(db.Installations, i => i.Id == id);
             if (installation == null)
-                return Results.Json(new { success = false, message = "Installation not found" });
+                return Results.Json(Services.Api.ApiResponse.NotFound("Installation not found"));
 
             if (string.IsNullOrEmpty(installation.PlantId))
-                return Results.Json(new { success = false, message = "No Plant/Station ID configured" });
+                return Results.Json(Services.Api.ApiResponse.ValidationError("No Plant/Station ID configured"));
 
             try
             {
@@ -1294,7 +1295,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             }
             catch (Exception ex)
             {
-                return Results.Json(new { success = false, message = $"Sync error: {ex.Message}" });
+                return Results.Json(Services.Api.ApiResponse.Fail($"Sync error: {ex.Message}", "SYNC_ERROR"));
             }
         }).RequireAuthorization();
 
@@ -1432,7 +1433,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             }
             catch (Exception ex)
             {
-                return Results.Json(new { success = false, message = $"Error: {ex.Message}" });
+                return Results.Json(Services.Api.ApiResponse.Fail($"Error: {ex.Message}", "INTERNAL_ERROR"));
             }
         }).RequireAuthorization();
     }
