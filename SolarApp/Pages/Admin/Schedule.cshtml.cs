@@ -78,12 +78,12 @@ public class ScheduleModel : PageModel
         return RedirectToPage();
     }
 
-    public IActionResult OnPostApplyRecommended()
+    public async Task<IActionResult> OnPostApplyRecommendedAsync()
     {
         DataSyncCron = "*/15 * * * *";
         HealthMonitorCron = "*/5 * * * *";
         WorkOrderRemindersCron = "*/30 * * * *";
-        return OnPostSaveAsync().Result;
+        return await OnPostSaveAsync();
     }
 
     public IActionResult OnPostRunNow(string jobId)

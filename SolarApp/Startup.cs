@@ -1327,6 +1327,16 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                         .FirstOrDefaultAsync(db.Installations, i => i.Id == installId);
                     if (inst != null)
                     {
+                        // Access control: verify caller can access this installation
+                        var userManager = req.HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Models.ApplicationUser>>();
+                        var currentUser = await userManager.GetUserAsync(req.HttpContext.User);
+                        if (currentUser != null)
+                        {
+                            var isAdmin = await userManager.IsInRoleAsync(currentUser, "Admin");
+                            var isPartnerMatch = currentUser.PartnerId.HasValue && inst.PartnerId == currentUser.PartnerId;
+                            if (!isAdmin && !isPartnerMatch)
+                                return Results.Json(new { success = false, message = "Access denied to this installation" });
+                        }
                         if (string.IsNullOrEmpty(apiKey))
                             apiKey = credProtector.Unprotect(inst.CloudApiKey) ?? "";
                         if (string.IsNullOrEmpty(apiSecret))
@@ -1493,7 +1503,7 @@ pre {{ background: #0d1117; padding: 15px; border-radius: 6px; overflow-x: auto;
 <p><span class='label'>Log file:</span> {logFile}</p>
 </div>
 </body></html>", "text/html");
-        });
+        }).RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute { Roles = "Admin" });
     }
 
     private static string MaskConnectionString(string? cs)

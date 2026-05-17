@@ -184,6 +184,7 @@ public class SolarDataSyncJob
             }
         }
 
+        int processedSinceLastSave = 0;
         foreach (var installation in installations)
         {
             try
@@ -225,7 +226,6 @@ public class SolarDataSyncJob
                             LogApiCall(installation, "GetRealtimeData", 200, true,
                                 "[HUAWEI BATCH] No row for this stationCode in batch response. " +
                                 "Cloud is healthy; station may be offline or PlantId mis-configured.");
-                            await _context.SaveChangesAsync();
                             continue;
 
                         case HuaweiAdapter.BatchOutcome.Deferred:
@@ -236,7 +236,6 @@ public class SolarDataSyncJob
                                 installation.Status = InstallationStatus.Active;
                             LogApiCall(installation, "GetRealtimeData", 0, true,
                                 $"[RATE LIMIT-DEFERRED] {batch.Error}. Will retry next cycle.");
-                            await _context.SaveChangesAsync();
                             continue;
 
                         case HuaweiAdapter.BatchOutcome.AuthFailed:
@@ -244,7 +243,6 @@ public class SolarDataSyncJob
                             LogApiCall(installation, "GetRealtimeData", 401, false,
                                 $"[AUTH FAILED] Huawei batch login rejected: {batch.Error}. " +
                                 "Re-enter Northbound API credentials in Installation settings.");
-                            await _context.SaveChangesAsync();
                             continue;
 
                         case HuaweiAdapter.BatchOutcome.ServerError:
@@ -252,7 +250,6 @@ public class SolarDataSyncJob
                             totalApiFailures++;
                             LogApiCall(installation, "GetRealtimeData", 0, false,
                                 $"[API FAILURE] Huawei batch error: {batch.Error}");
-                            await _context.SaveChangesAsync();
                             continue;
                     }
                 }
@@ -275,10 +272,9 @@ public class SolarDataSyncJob
                             installation.Status = InstallationStatus.Active;
 
                         LogApiCall(installation, "GetRealtimeData",
-                            realtimeResult.HttpStatusCode ?? 0, true,  // success=true to keep out of failure stats
+                            realtimeResult.HttpStatusCode ?? 0, true,
                             $"[RATE LIMIT-DEFERRED] {realtimeResult.Message}. " +
                             "Skipped this cycle to respect Huawei NBI 1-req/min budget. Will retry next cycle.");
-                        await _context.SaveChangesAsync();
                         continue;
                     }
 
@@ -298,7 +294,6 @@ public class SolarDataSyncJob
                         $"{kindTag} {realtimeResult.Message}" +
                         (realtimeResult.TechnicalDetail != null ? $" | {realtimeResult.TechnicalDetail}" : "") +
                         $" | Duration: {realtimeResult.Duration.TotalMilliseconds:0}ms");
-                    await _context.SaveChangesAsync();
                     continue;
                 }
 
@@ -582,7 +577,6 @@ public class SolarDataSyncJob
                     }
                 }
 
-                await _context.SaveChangesAsync();
             }
             catch (TaskCanceledException)
             {
@@ -592,7 +586,6 @@ public class SolarDataSyncJob
                     $"[TIMEOUT] Sync timed out for {installation.SiteName}. " +
                     $"The {installation.InverterBrand} cloud server is too slow or unreachable. " +
                     "This is an API CONNECTION issue, NOT an inverter offline issue.");
-                await _context.SaveChangesAsync();
             }
             catch (HttpRequestException hre)
             {
@@ -602,7 +595,6 @@ public class SolarDataSyncJob
                     $"[NETWORK ERROR] Cannot reach {installation.InverterBrand} cloud: {hre.Message}. " +
                     "Check SolarApp server's internet connection and DNS. " +
                     "This is an API CONNECTION issue, NOT an inverter offline issue.");
-                await _context.SaveChangesAsync();
             }
             catch (Exception ex)
             {
@@ -610,9 +602,21 @@ public class SolarDataSyncJob
                 _logger.LogError(ex, "Sync failed for {Id} ({Brand})", installation.Id, installation.InverterBrand);
                 LogApiCall(installation, "Sync", 500, false,
                     $"[UNEXPECTED ERROR] {ex.GetType().Name}: {ex.Message}");
+            }
+
+            // Batch save every 10 installations to reduce DB round-trips
+            // (was: SaveChangesAsync per installation = 100+ round-trips per sync)
+            processedSinceLastSave++;
+            if (processedSinceLastSave >= 10)
+            {
                 await _context.SaveChangesAsync();
+                processedSinceLastSave = 0;
             }
         }
+
+        // Final save for remaining items
+        if (processedSinceLastSave > 0)
+            await _context.SaveChangesAsync();
 
         _logger.LogInformation(
             "Sync complete: {Total} installations | {Realtime} realtime OK | {Daily} daily records | {Alarms} alarms | " +

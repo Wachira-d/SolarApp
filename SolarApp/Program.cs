@@ -105,14 +105,29 @@ try
 
     // ── Middleware ──
     Log("Configuring middleware...");
-    app.UseDeveloperExceptionPage();
-    Log("  • UseDeveloperExceptionPage");
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseDeveloperExceptionPage();
+        Log("  • UseDeveloperExceptionPage (dev only)");
+    }
+    else
+    {
+        app.UseExceptionHandler("/Error");
+        Log("  • UseExceptionHandler (production)");
+    }
 
-    if (app.Configuration.GetValue("EnforceHttps", false))
+    // Always enforce HTTPS in production (previously opt-in, now default ON)
+    if (!app.Environment.IsDevelopment())
     {
         app.UseHttpsRedirection();
         app.UseHsts();
-        Log("  • UseHttpsRedirection + UseHsts");
+        Log("  • UseHttpsRedirection + UseHsts (production)");
+    }
+    else if (app.Configuration.GetValue("EnforceHttps", false))
+    {
+        app.UseHttpsRedirection();
+        app.UseHsts();
+        Log("  • UseHttpsRedirection + UseHsts (config override)");
     }
 
     app.UseStaticFiles();
