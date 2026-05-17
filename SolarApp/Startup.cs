@@ -182,6 +182,7 @@ public class Startup
         builder.Services.AddScoped<Services.Interfaces.IAlertService, Services.Implementations.AlertService>();
         builder.Services.AddScoped<Services.ReportExport.IReportExportService, Services.ReportExport.ReportExportService>();
         builder.Services.AddScoped<Services.FileUpload.IFileUploadService, Services.FileUpload.FileUploadService>();
+        builder.Services.AddScoped<Services.Admin.IUserAdminQueryService, Services.Admin.UserAdminQueryService>();
 
         builder.Services.AddHttpClient("default", c =>
         {
@@ -1311,7 +1312,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             {
                 var form = await req.ReadFormAsync();
                 if (!Enum.TryParse<Models.Enums.InverterBrand>(form["brand"].ToString(), out var brand))
-                    return Results.Json(new { success = false, message = "Invalid brand" });
+                    return Results.Json(Services.Api.ApiResponse.ValidationError("Invalid brand"));
 
                 var apiKey    = form["apiKey"].ToString();
                 var apiSecret = form["apiSecret"].ToString();
@@ -1335,7 +1336,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                             var isAdmin = await userManager.IsInRoleAsync(currentUser, "Admin");
                             var isPartnerMatch = currentUser.PartnerId.HasValue && inst.PartnerId == currentUser.PartnerId;
                             if (!isAdmin && !isPartnerMatch)
-                                return Results.Json(new { success = false, message = "Access denied to this installation" });
+                                return Results.Json(Services.Api.ApiResponse.AccessDenied("Access denied to this installation"));
                         }
                         if (string.IsNullOrEmpty(apiKey))
                             apiKey = credProtector.Unprotect(inst.CloudApiKey) ?? "";

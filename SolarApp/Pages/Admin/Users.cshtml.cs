@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Admin;
 
 namespace SolarApp.Pages.Admin;
 
@@ -14,11 +15,16 @@ public class UsersModel : PageModel
 {
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ApplicationDbContext _context;
+    private readonly IUserAdminQueryService _queryService;
 
-    public UsersModel(UserManager<ApplicationUser> userManager, ApplicationDbContext context)
+    public UsersModel(
+        UserManager<ApplicationUser> userManager,
+        ApplicationDbContext context,
+        IUserAdminQueryService queryService)
     {
         _userManager = userManager;
         _context = context;
+        _queryService = queryService;
     }
 
     public List<UserViewModel> Users { get; set; } = new();
@@ -705,39 +711,28 @@ public class UsersModel : PageModel
 
     private async Task LoadDataAsync()
     {
-        var users = await _userManager.Users
-            .Include(u => u.Partner)
-            .OrderByDescending(u => u.CreatedAt)
-            .ToListAsync();
+        // Delegates to UserAdminQueryService which uses a single batched
+        // JOIN for roles (eliminates the previous N+1 query that ran
+        // GetRolesAsync once per user).
+        var data = await _queryService.LoadPageDataAsync();
 
-        foreach (var u in users)
+        Users = data.Users.Select(r => new UserViewModel
         {
-            var roles = await _userManager.GetRolesAsync(u);
-            Users.Add(new UserViewModel
-            {
-                Id = u.Id,
-                FullName = u.FullName,
-                Email = u.Email ?? "",
-                CompanyName = u.CompanyName,
-                PhoneNumber = u.PhoneNumber,
-                LineUserId = u.LineUserId,
-                PartnerId = u.PartnerId,
-                PartnerName = u.Partner?.CompanyName,
-                Role = roles.FirstOrDefault() ?? "-",
-                IsActive = u.IsActive,
-                CreatedAt = u.CreatedAt,
-                LastLoginAt = u.LastLoginAt
-            });
-        }
+            Id = r.Id,
+            FullName = r.FullName,
+            Email = r.Email,
+            CompanyName = r.CompanyName,
+            PhoneNumber = r.PhoneNumber,
+            LineUserId = r.LineUserId,
+            PartnerId = r.PartnerId,
+            PartnerName = r.PartnerName,
+            Role = r.Role,
+            IsActive = r.IsActive,
+            CreatedAt = r.CreatedAt,
+            LastLoginAt = r.LastLoginAt
+        }).ToList();
 
-        CustomerList = await _context.Customers
-            .Include(c => c.Installations)
-            .OrderByDescending(c => c.CreatedAt)
-            .ToListAsync();
-
-        PartnerList = await _context.Partners
-            .Include(p => p.Installations)
-            .OrderByDescending(p => p.CreatedAt)
-            .ToListAsync();
+        CustomerList = data.Customers;
+        PartnerList = data.Partners;
     }
 }
