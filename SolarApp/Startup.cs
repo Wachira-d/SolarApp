@@ -330,6 +330,7 @@ public class Startup
             "SolarApp", "dp-keys"));
         candidates.Add(Path.Combine(Path.GetTempPath(), "SolarApp-keys"));
 
+        var attemptErrors = new List<string>();
         foreach (var path in candidates)
         {
             try
@@ -342,17 +343,19 @@ public class Startup
                 File.Delete(testFile);
                 return dir;
             }
-            catch
+            catch (Exception ex)
             {
-                // Try next candidate
+                // Record per-candidate failure so the final error message can
+                // tell the admin exactly which paths failed and why.
+                attemptErrors.Add($"{path}: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
         // All failed — throw a helpful error so the admin knows what to fix
         throw new InvalidOperationException(
-            "Could not find a writable directory for DataProtection keys. Tried: " +
-            string.Join(", ", candidates) +
-            ". Grant the IIS app-pool identity modify permission on one of these paths, " +
+            "Could not find a writable directory for DataProtection keys. Tried:\n  - " +
+            string.Join("\n  - ", attemptErrors) +
+            "\nGrant the IIS app-pool identity modify permission on one of these paths, " +
             "or set environment variable SOLARAPP_KEYS_PATH to a writable folder.");
     }
 

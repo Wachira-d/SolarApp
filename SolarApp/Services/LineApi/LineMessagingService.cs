@@ -333,7 +333,9 @@ public class LineMessagingService : ILineMessagingService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send LINE flex message to {UserId}", lineUserId);
+            _logger.LogError(ex,
+                "Failed to send LINE flex message UserId={UserId} Site={SiteName} Title={AlertTitle} Severity={Severity}",
+                lineUserId, siteName, alertTitle, severity);
         }
     }
 
