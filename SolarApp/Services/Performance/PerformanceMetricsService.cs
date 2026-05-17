@@ -60,16 +60,25 @@ public class PerformanceMetricsService : IPerformanceMetricsService
     private readonly ApplicationDbContext _context;
     private readonly Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> _userManager;
     private readonly IWeatherService _weather;
+    private readonly IConfiguration _configuration;
 
     public PerformanceMetricsService(
         ApplicationDbContext context,
         Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> userManager,
-        IWeatherService weather)
+        IWeatherService weather,
+        IConfiguration configuration)
     {
         _context = context;
         _userManager = userManager;
         _weather = weather;
+        _configuration = configuration;
     }
+
+    private decimal PrThresholdLow => _configuration.GetValue("Performance:PerformanceRatioLowThreshold", 0.7m);
+    private decimal UptimeThresholdLow => _configuration.GetValue("Performance:UptimeLowThreshold", 95m);
+    private int OfflineDaysThreshold => _configuration.GetValue("Performance:OfflineDaysThreshold", 3);
+    private decimal PrThresholdExcellent => _configuration.GetValue("Performance:PerformanceRatioExcellent", 0.9m);
+    private decimal UptimeThresholdExcellent => _configuration.GetValue("Performance:UptimeExcellent", 98m);
 
     public async Task<InstallationPerformance> GetPerformanceAsync(int installationId, DateTime from, DateTime to)
     {
@@ -290,16 +299,16 @@ public class PerformanceMetricsService : IPerformanceMetricsService
             _ => ("F", "danger")
         };
 
-        // Auto recommendations
-        if (p.PerformanceRatio < 0.7m)
-            p.Recommendations.Add("Performance Ratio below 70% — check for shading, soiling, or string faults.");
-        if (p.UptimePercent < 95)
+        // Auto recommendations — thresholds configurable via Performance:* config section
+        if (p.PerformanceRatio < PrThresholdLow)
+            p.Recommendations.Add($"Performance Ratio below {PrThresholdLow * 100:0}% — check for shading, soiling, or string faults.");
+        if (p.UptimePercent < UptimeThresholdLow)
             p.Recommendations.Add($"Uptime {p.UptimePercent}% — investigate connectivity / inverter health.");
         if (p.UnresolvedAlerts > 0)
             p.Recommendations.Add($"{p.UnresolvedAlerts} unresolved alert(s) — review on Alerts page.");
-        if (p.OfflineDays > 3)
+        if (p.OfflineDays > OfflineDaysThreshold)
             p.Recommendations.Add($"{p.OfflineDays} day(s) with zero production in period — potential inverter outage.");
-        if (p.PerformanceRatio > 0.9m && p.UptimePercent > 98)
+        if (p.PerformanceRatio > PrThresholdExcellent && p.UptimePercent > UptimeThresholdExcellent)
             p.Recommendations.Add("Excellent performance — system operating near ideal.");
     }
 

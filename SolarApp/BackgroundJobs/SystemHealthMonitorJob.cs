@@ -246,8 +246,10 @@ public class SystemHealthMonitorJob
     /// </summary>
     private async Task CheckDeviceOfflineDuringDaytimeAsync()
     {
-        const int OfflineHoursThreshold = 3;
-        var windowStart = DateTime.UtcNow.AddHours(-OfflineHoursThreshold);
+        // Configurable: set Monitoring:DeviceOfflineHoursThreshold in appsettings.json
+        // Default 3h matches typical inverter cloud reporting frequency
+        var offlineHoursThreshold = _configuration.GetValue("Monitoring:DeviceOfflineHoursThreshold", 3);
+        var windowStart = DateTime.UtcNow.AddHours(-offlineHoursThreshold);
 
         var candidates = await _context.Installations
             .Where(i => i.Status == InstallationStatus.Active)
@@ -731,21 +733,28 @@ public class SystemHealthMonitorJob
 
             var openDuration = DateTime.UtcNow - alert.OccurredAt;
 
-            // Determine escalation level and whether it's time to escalate
+            // Escalation thresholds configurable via Monitoring:Escalation:{Critical|High}:LevelN
+            // Defaults preserve original behavior
             int level;
             TimeSpan escalationInterval;
             if (alert.Severity == AlertSeverity.Critical)
             {
-                if (openDuration.TotalHours >= 24) { level = 3; escalationInterval = TimeSpan.FromHours(12); }
-                else if (openDuration.TotalHours >= 6) { level = 2; escalationInterval = TimeSpan.FromHours(6); }
-                else if (openDuration.TotalHours >= 2) { level = 1; escalationInterval = TimeSpan.FromHours(2); }
+                var l3 = _configuration.GetValue("Monitoring:Escalation:Critical:Level3Hours", 24);
+                var l2 = _configuration.GetValue("Monitoring:Escalation:Critical:Level2Hours", 6);
+                var l1 = _configuration.GetValue("Monitoring:Escalation:Critical:Level1Hours", 2);
+                if (openDuration.TotalHours >= l3) { level = 3; escalationInterval = TimeSpan.FromHours(12); }
+                else if (openDuration.TotalHours >= l2) { level = 2; escalationInterval = TimeSpan.FromHours(6); }
+                else if (openDuration.TotalHours >= l1) { level = 1; escalationInterval = TimeSpan.FromHours(2); }
                 else continue;
             }
             else // High
             {
-                if (openDuration.TotalHours >= 72) { level = 3; escalationInterval = TimeSpan.FromHours(24); }
-                else if (openDuration.TotalHours >= 24) { level = 2; escalationInterval = TimeSpan.FromHours(12); }
-                else if (openDuration.TotalHours >= 6) { level = 1; escalationInterval = TimeSpan.FromHours(6); }
+                var l3 = _configuration.GetValue("Monitoring:Escalation:High:Level3Hours", 72);
+                var l2 = _configuration.GetValue("Monitoring:Escalation:High:Level2Hours", 24);
+                var l1 = _configuration.GetValue("Monitoring:Escalation:High:Level1Hours", 6);
+                if (openDuration.TotalHours >= l3) { level = 3; escalationInterval = TimeSpan.FromHours(24); }
+                else if (openDuration.TotalHours >= l2) { level = 2; escalationInterval = TimeSpan.FromHours(12); }
+                else if (openDuration.TotalHours >= l1) { level = 1; escalationInterval = TimeSpan.FromHours(6); }
                 else continue;
             }
 
