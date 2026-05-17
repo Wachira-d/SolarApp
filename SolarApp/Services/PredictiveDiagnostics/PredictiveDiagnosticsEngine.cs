@@ -312,10 +312,14 @@ public class PredictiveDiagnosticsEngine
         var thMonth = (nowUtc.AddHours(7)).Month; // Thailand local month
 
         // Monsoon season: May-October → lightning + water damage risk
-        if (thMonth is >= 5 and <= 6)
+        // Skip sites < 90 days old — nothing to inspect yet on a fresh install
+        var daysSinceInstall = (DateTime.UtcNow - inst.InstallationDate).TotalDays;
+        if (thMonth is >= 5 and <= 6 && daysSinceInstall >= 90)
         {
-            var daysSinceLastCleaning = inst.LastCleaningDate.HasValue
-                ? (DateTime.UtcNow - inst.LastCleaningDate.Value).TotalDays : 999;
+            // Use install date as fallback if never cleaned (not a 999 sentinel)
+            var referenceDate = inst.LastCleaningDate ?? inst.InstallationDate;
+            var daysSinceLastCleaning = (DateTime.UtcNow - referenceDate).TotalDays;
+            var refLabel = inst.LastCleaningDate.HasValue ? "ล้างแผงครั้งสุดท้าย" : "ตั้งแต่ติดตั้ง (ยังไม่เคยล้าง)";
 
             if (daysSinceLastCleaning > 120)
             {
@@ -324,7 +328,7 @@ public class PredictiveDiagnosticsEngine
                     InstallationId = inst.Id,
                     SiteName = inst.SiteName,
                     Prediction = "เข้าฤดูฝน — ควรตรวจสอบก่อนมรสุม",
-                    Evidence = $"เดือน {thMonth} (ต้นฤดูฝน), ล้างแผงครั้งสุดท้าย {daysSinceLastCleaning:0} วันก่อน\n" +
+                    Evidence = $"เดือน {thMonth} (ต้นฤดูฝน), {refLabel} {daysSinceLastCleaning:0} วันก่อน\n" +
                                "ก่อนมรสุมควรตรวจ: สายดิน, surge protection, ระบบ drainage หลังคา, " +
                                "แผงโซลาร์ยึดแน่น (ลมแรง), และ conduit ป้องกันน้ำเข้า",
                     CheckSteps = new[]
