@@ -114,14 +114,22 @@ public class CreateModel : PageModel
         return Page();
     }
 
+    // Date-window bounds for the ScheduledDate field. Surfaced as named
+    // constants so a reviewer doesn't have to grep raw numbers. Range
+    // attributes on the input class use compile-time constants for the
+    // same values (15..1440 minutes, 0..120 months recurrence).
+    private const int MaxBackdateDays = 30;
+    private const int MaxFutureYears = 5;
+
     public async Task<IActionResult> OnPostAsync()
     {
-        // Custom validation
-        if (Input.ScheduledDate.Date < DateTime.UtcNow.Date.AddDays(-30))
-            ModelState.AddModelError("Input.ScheduledDate", "วันที่นัดไม่สามารถย้อนหลังเกิน 30 วันได้");
+        if (Input.ScheduledDate.Date < DateTime.UtcNow.Date.AddDays(-MaxBackdateDays))
+            ModelState.AddModelError("Input.ScheduledDate",
+                $"วันที่นัดไม่สามารถย้อนหลังเกิน {MaxBackdateDays} วันได้");
 
-        if (Input.ScheduledDate.Date > DateTime.UtcNow.Date.AddYears(5))
-            ModelState.AddModelError("Input.ScheduledDate", "วันที่นัดไม่สามารถเกิน 5 ปีในอนาคตได้");
+        if (Input.ScheduledDate.Date > DateTime.UtcNow.Date.AddYears(MaxFutureYears))
+            ModelState.AddModelError("Input.ScheduledDate",
+                $"วันที่นัดไม่สามารถเกิน {MaxFutureYears} ปีในอนาคตได้");
 
         // Either linked installation OR standalone site name must be provided
         if (!Input.InstallationId.HasValue && string.IsNullOrWhiteSpace(Input.ExternalSiteName))

@@ -19,25 +19,30 @@ public class PredictiveDiagnosticsEngine
     public async Task<List<PredictiveAlert>> AnalyzeAllInstallationsAsync()
     {
         var alerts = new List<PredictiveAlert>();
-        // Engine is pure read — no entity mutations. AsNoTracking eliminates
-        // EF change-tracker overhead which was costing ~30% on each query.
         var installations = await _context.Installations
             .AsNoTracking()
             .Where(i => i.Status != InstallationStatus.Inactive)
             .ToListAsync();
 
+        if (installations.Count == 0) return alerts;
+
+        // Pre-compute all aggregations in a fixed number of queries (was 5–11
+        // queries × N installations). For 100 installations: 800+ queries → ~10.
+        var installationIds = installations.Select(i => i.Id).ToList();
+        var metrics = await BuildBatchMetricsAsync(installationIds);
+
         foreach (var inst in installations)
         {
             try
             {
-                alerts.AddRange(await AnalyzeEnergyDeclineAsync(inst));
-                alerts.AddRange(await AnalyzeIntermittentOfflineAsync(inst));
-                alerts.AddRange(await AnalyzeApiErrorTrendAsync(inst));
+                alerts.AddRange(AnalyzeEnergyDecline(inst, metrics));
+                alerts.AddRange(AnalyzeIntermittentOffline(inst, metrics));
+                alerts.AddRange(AnalyzeApiErrorTrend(inst, metrics));
                 alerts.AddRange(AnalyzeAgeBasedRisks(inst));
                 alerts.AddRange(AnalyzeEnvironmentalRisks(inst));
-                alerts.AddRange(await AnalyzeRepeatingFaultsAsync(inst));
+                alerts.AddRange(AnalyzeRepeatingFaults(inst, metrics));
                 alerts.AddRange(AnalyzeSafetyRecalls(inst));
-                alerts.AddRange(await AnalyzeFaultCodePatternsAsync(inst));
+                alerts.AddRange(AnalyzeFaultCodePatterns(inst, metrics));
             }
             catch (Exception ex)
             {
@@ -49,26 +54,167 @@ public class PredictiveDiagnosticsEngine
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  Pattern 1: Energy Production Decline
+    //  Batch metrics loader — single set of queries for all installations
     // ══════════════════════════════════════════════════════════════
 
-    private async Task<List<PredictiveAlert>> AnalyzeEnergyDeclineAsync(Installation inst)
+    private async Task<DiagnosticsBatchMetrics> BuildBatchMetricsAsync(List<int> installationIds)
     {
-        var alerts = new List<PredictiveAlert>();
         var now = DateTime.UtcNow;
-
-        // Compare last 7 days vs same 7 days previous month
+        var weekAgo = now.AddDays(-7);
+        var monthAgo = now.AddDays(-30);
         var recentStart = now.AddDays(-7);
         var previousStart = now.AddDays(-37);
         var previousEnd = now.AddDays(-30);
+        var recentWindow = now.AddDays(-3);
+        var previousWindow = now.AddDays(-10);
 
-        var recentEnergy = await _context.EnergyData.AsNoTracking()
-            .Where(e => e.InstallationId == inst.Id && e.Timestamp >= recentStart && e.EnergyGenerationKwh > 0)
-            .AverageAsync(e => (decimal?)e.EnergyGenerationKwh) ?? 0;
+        // 1) Energy decline windows (Pattern 1) — 2 queries
+        var recentEnergyByInst = await _context.EnergyData.AsNoTracking()
+            .Where(e => installationIds.Contains(e.InstallationId)
+                && e.Timestamp >= recentStart && e.EnergyGenerationKwh > 0)
+            .GroupBy(e => e.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Avg = g.Average(e => (decimal?)e.EnergyGenerationKwh) ?? 0m })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Avg);
 
-        var previousEnergy = await _context.EnergyData.AsNoTracking()
-            .Where(e => e.InstallationId == inst.Id && e.Timestamp >= previousStart && e.Timestamp <= previousEnd && e.EnergyGenerationKwh > 0)
-            .AverageAsync(e => (decimal?)e.EnergyGenerationKwh) ?? 0;
+        var previousEnergyByInst = await _context.EnergyData.AsNoTracking()
+            .Where(e => installationIds.Contains(e.InstallationId)
+                && e.Timestamp >= previousStart && e.Timestamp <= previousEnd
+                && e.EnergyGenerationKwh > 0)
+            .GroupBy(e => e.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Avg = g.Average(e => (decimal?)e.EnergyGenerationKwh) ?? 0m })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Avg);
+
+        // 2) Intermittent offline (Pattern 2) — 2 queries
+        var offlineCountByInst = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId) && l.RequestTime >= weekAgo
+                && l.IsSuccess && l.ErrorMessage != null && l.ErrorMessage.Contains("[DEVICE OFFLINE]"))
+            .GroupBy(l => l.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Count);
+
+        var successCountByInst = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId) && l.RequestTime >= weekAgo && l.IsSuccess)
+            .GroupBy(l => l.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Count);
+
+        // 3) API error trend (Pattern 3) — 4 count queries + 1 top-errors query
+        var recentErrorByInst = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId)
+                && l.RequestTime >= recentWindow && !l.IsSuccess)
+            .GroupBy(l => l.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Count);
+
+        var recentTotalByInst = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId) && l.RequestTime >= recentWindow)
+            .GroupBy(l => l.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Count);
+
+        var prevErrorByInst = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId)
+                && l.RequestTime >= previousWindow && l.RequestTime < recentWindow && !l.IsSuccess)
+            .GroupBy(l => l.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Count);
+
+        var prevTotalByInst = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId)
+                && l.RequestTime >= previousWindow && l.RequestTime < recentWindow)
+            .GroupBy(l => l.InstallationId)
+            .Select(g => new { InstallationId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.InstallationId, x => x.Count);
+
+        // Top errors per installation (last 3d) — load grouped error message + counts;
+        // engine takes top 3 per installation in-memory.
+        var topErrorsRaw = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId)
+                && l.RequestTime >= recentWindow && !l.IsSuccess && l.ErrorMessage != null)
+            .GroupBy(l => new
+            {
+                l.InstallationId,
+                Snippet = l.ErrorMessage!.Substring(0, Math.Min(l.ErrorMessage!.Length, 50))
+            })
+            .Select(g => new { g.Key.InstallationId, g.Key.Snippet, Count = g.Count() })
+            .ToListAsync();
+
+        var topErrorsByInst = topErrorsRaw
+            .GroupBy(x => x.InstallationId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.Count).Take(3).Select(x => (x.Snippet, x.Count)).ToList());
+
+        // 4) Repeating fault titles (Pattern 6) — 1 query
+        var recurringRaw = await _context.SystemAlerts.AsNoTracking()
+            .Where(a => installationIds.Contains(a.InstallationId) && a.OccurredAt >= monthAgo)
+            .GroupBy(a => new { a.InstallationId, a.Title })
+            .Select(g => new
+            {
+                g.Key.InstallationId,
+                g.Key.Title,
+                Count = g.Count(),
+                Latest = g.Max(a => a.OccurredAt)
+            })
+            .Where(x => x.Count >= 3)
+            .ToListAsync();
+
+        var recurringByInst = recurringRaw
+            .GroupBy(x => x.InstallationId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.Count).Take(3)
+                      .Select(x => (x.Title, x.Count, x.Latest)).ToList());
+
+        // 5) Recent distinct error messages (Pattern 8) — 1 query
+        var distinctErrorsRaw = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => installationIds.Contains(l.InstallationId) && l.RequestTime >= weekAgo
+                && !l.IsSuccess && l.ErrorMessage != null)
+            .Select(l => new { l.InstallationId, l.ErrorMessage })
+            .Distinct()
+            .ToListAsync();
+
+        var distinctErrorsByInst = distinctErrorsRaw
+            .GroupBy(x => x.InstallationId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.ErrorMessage!).Take(20).ToList());
+
+        // 6) Recent alarm strings (Pattern 8) — 1 query
+        var alarmStringsRaw = await _context.SystemAlerts.AsNoTracking()
+            .Where(a => installationIds.Contains(a.InstallationId) && a.OccurredAt >= weekAgo
+                && (a.AlertType == AlertType.Error || a.AlertType == AlertType.Warning))
+            .Select(a => new { a.InstallationId, Combined = a.Title + " " + a.Message })
+            .ToListAsync();
+
+        var alarmStringsByInst = alarmStringsRaw
+            .GroupBy(x => x.InstallationId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.Combined).Take(10).ToList());
+
+        return new DiagnosticsBatchMetrics
+        {
+            RecentEnergyAvg = recentEnergyByInst,
+            PreviousEnergyAvg = previousEnergyByInst,
+            OfflineMarkedCount = offlineCountByInst,
+            SuccessfulSyncCount = successCountByInst,
+            RecentErrorCount = recentErrorByInst,
+            RecentTotalCount = recentTotalByInst,
+            PreviousErrorCount = prevErrorByInst,
+            PreviousTotalCount = prevTotalByInst,
+            TopRecentErrors = topErrorsByInst,
+            RecurringAlerts = recurringByInst,
+            RecentDistinctErrors = distinctErrorsByInst,
+            RecentAlarmStrings = alarmStringsByInst,
+        };
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  Pattern 1: Energy Production Decline
+    // ══════════════════════════════════════════════════════════════
+
+    private static List<PredictiveAlert> AnalyzeEnergyDecline(Installation inst, DiagnosticsBatchMetrics m)
+    {
+        var alerts = new List<PredictiveAlert>();
+        var recentEnergy = m.RecentEnergyAvg.TryGetValue(inst.Id, out var r) ? r : 0m;
+        var previousEnergy = m.PreviousEnergyAvg.TryGetValue(inst.Id, out var p) ? p : 0m;
 
         if (previousEnergy <= 0 || recentEnergy <= 0) return alerts;
 
@@ -116,19 +262,11 @@ public class PredictiveDiagnosticsEngine
     //  Pattern 2: Intermittent Offline (precursor to total failure)
     // ══════════════════════════════════════════════════════════════
 
-    private async Task<List<PredictiveAlert>> AnalyzeIntermittentOfflineAsync(Installation inst)
+    private static List<PredictiveAlert> AnalyzeIntermittentOffline(Installation inst, DiagnosticsBatchMetrics m)
     {
         var alerts = new List<PredictiveAlert>();
-        var weekAgo = DateTime.UtcNow.AddDays(-7);
-
-        var offlineCount = await _context.InverterApiLogs.AsNoTracking()
-            .Where(l => l.InstallationId == inst.Id && l.RequestTime >= weekAgo
-                && l.IsSuccess && l.ErrorMessage != null && l.ErrorMessage.Contains("[DEVICE OFFLINE]"))
-            .CountAsync();
-
-        var totalCount = await _context.InverterApiLogs.AsNoTracking()
-            .Where(l => l.InstallationId == inst.Id && l.RequestTime >= weekAgo && l.IsSuccess)
-            .CountAsync();
+        var offlineCount = m.OfflineMarkedCount.TryGetValue(inst.Id, out var o) ? o : 0;
+        var totalCount = m.SuccessfulSyncCount.TryGetValue(inst.Id, out var t) ? t : 0;
 
         if (totalCount < 10) return alerts;
 
@@ -160,44 +298,22 @@ public class PredictiveDiagnosticsEngine
     //  Pattern 3: API Error Rate Trending Up
     // ══════════════════════════════════════════════════════════════
 
-    private async Task<List<PredictiveAlert>> AnalyzeApiErrorTrendAsync(Installation inst)
+    private static List<PredictiveAlert> AnalyzeApiErrorTrend(Installation inst, DiagnosticsBatchMetrics m)
     {
         var alerts = new List<PredictiveAlert>();
-        var now = DateTime.UtcNow;
-        var recentWindow = now.AddDays(-3);
-        var previousWindow = now.AddDays(-10);
-
-        var recentErrors = await _context.InverterApiLogs.AsNoTracking()
-            .Where(l => l.InstallationId == inst.Id && l.RequestTime >= recentWindow && !l.IsSuccess)
-            .CountAsync();
-        var recentTotal = await _context.InverterApiLogs.AsNoTracking()
-            .Where(l => l.InstallationId == inst.Id && l.RequestTime >= recentWindow)
-            .CountAsync();
-
-        var prevErrors = await _context.InverterApiLogs.AsNoTracking()
-            .Where(l => l.InstallationId == inst.Id && l.RequestTime >= previousWindow && l.RequestTime < recentWindow && !l.IsSuccess)
-            .CountAsync();
-        var prevTotal = await _context.InverterApiLogs.AsNoTracking()
-            .Where(l => l.InstallationId == inst.Id && l.RequestTime >= previousWindow && l.RequestTime < recentWindow)
-            .CountAsync();
+        var recentErrors = m.RecentErrorCount.TryGetValue(inst.Id, out var re) ? re : 0;
+        var recentTotal = m.RecentTotalCount.TryGetValue(inst.Id, out var rt) ? rt : 0;
+        var prevErrors = m.PreviousErrorCount.TryGetValue(inst.Id, out var pe) ? pe : 0;
+        var prevTotal = m.PreviousTotalCount.TryGetValue(inst.Id, out var pt) ? pt : 0;
 
         if (recentTotal < 5 || prevTotal < 5) return alerts;
 
         var recentRate = (double)recentErrors / recentTotal * 100;
         var prevRate = (double)prevErrors / prevTotal * 100;
 
-        // Error rate doubled and now above 20%
         if (recentRate >= 20 && recentRate >= prevRate * 1.8)
         {
-            // Check what type of errors
-            var topErrors = await _context.InverterApiLogs.AsNoTracking()
-                .Where(l => l.InstallationId == inst.Id && l.RequestTime >= recentWindow && !l.IsSuccess && l.ErrorMessage != null)
-                .GroupBy(l => l.ErrorMessage!.Substring(0, Math.Min(l.ErrorMessage!.Length, 50)))
-                .Select(g => new { Error = g.Key, Count = g.Count() })
-                .OrderByDescending(g => g.Count)
-                .Take(3)
-                .ToListAsync();
-
+            var topErrors = m.TopRecentErrors.TryGetValue(inst.Id, out var te) ? te : new();
             var errorSummary = string.Join(", ", topErrors.Select(e => $"{e.Error} ({e.Count}x)"));
             var kb = InverterKnowledgeBase.GetApiErrorCase(inst.InverterBrand, errorSummary);
 
@@ -397,20 +513,11 @@ public class PredictiveDiagnosticsEngine
     //  Pattern 6: Repeating Fault Codes (same error recurring)
     // ══════════════════════════════════════════════════════════════
 
-    private async Task<List<PredictiveAlert>> AnalyzeRepeatingFaultsAsync(Installation inst)
+    private static List<PredictiveAlert> AnalyzeRepeatingFaults(Installation inst, DiagnosticsBatchMetrics m)
     {
         var alerts = new List<PredictiveAlert>();
-        var monthAgo = DateTime.UtcNow.AddDays(-30);
-
-        // Look for the same alert title recurring multiple times in 30 days
-        var recurringAlerts = await _context.SystemAlerts.AsNoTracking()
-            .Where(a => a.InstallationId == inst.Id && a.OccurredAt >= monthAgo)
-            .GroupBy(a => a.Title)
-            .Select(g => new { Title = g.Key, Count = g.Count(), Latest = g.Max(a => a.OccurredAt) })
-            .Where(g => g.Count >= 3)
-            .OrderByDescending(g => g.Count)
-            .Take(3)
-            .ToListAsync();
+        if (!m.RecurringAlerts.TryGetValue(inst.Id, out var recurringAlerts))
+            return alerts;
 
         foreach (var recurring in recurringAlerts)
         {
@@ -463,27 +570,11 @@ public class PredictiveDiagnosticsEngine
     //  Pattern 8: Known Fault Code Matching (from error logs)
     // ══════════════════════════════════════════════════════════════
 
-    private async Task<List<PredictiveAlert>> AnalyzeFaultCodePatternsAsync(Installation inst)
+    private static List<PredictiveAlert> AnalyzeFaultCodePatterns(Installation inst, DiagnosticsBatchMetrics m)
     {
         var alerts = new List<PredictiveAlert>();
-        var weekAgo = DateTime.UtcNow.AddDays(-7);
-
-        // Get recent error messages and try to match known fault codes
-        var recentErrors = await _context.InverterApiLogs.AsNoTracking()
-            .Where(l => l.InstallationId == inst.Id && l.RequestTime >= weekAgo
-                && !l.IsSuccess && l.ErrorMessage != null)
-            .Select(l => l.ErrorMessage!)
-            .Distinct()
-            .Take(20)
-            .ToListAsync();
-
-        // Also check recent alarm-type alerts
-        var recentAlarms = await _context.SystemAlerts.AsNoTracking()
-            .Where(a => a.InstallationId == inst.Id && a.OccurredAt >= weekAgo
-                && (a.AlertType == AlertType.Error || a.AlertType == AlertType.Warning))
-            .Select(a => a.Title + " " + a.Message)
-            .Take(10)
-            .ToListAsync();
+        var recentErrors = m.RecentDistinctErrors.TryGetValue(inst.Id, out var re) ? re : new List<string>();
+        var recentAlarms = m.RecentAlarmStrings.TryGetValue(inst.Id, out var ra) ? ra : new List<string>();
 
         var allErrors = recentErrors.Concat(recentAlarms).Distinct();
         var matchedCodes = new HashSet<string>();

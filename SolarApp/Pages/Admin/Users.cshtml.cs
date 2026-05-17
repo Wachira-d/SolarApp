@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
-using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.Admin;
@@ -18,7 +17,6 @@ public class UsersModel : PageModel
 
     public UsersModel(
         UserManager<ApplicationUser> userManager,
-        ApplicationDbContext context,            // kept for binding compatibility; no longer used
         IUserAdminQueryService queryService,
         IUserAdminCommandService commandService)
     {
