@@ -328,8 +328,7 @@ public class SolarDataSyncJob
                     // Station is in FAULT state (Grid Loss / OverTemp / Insulation / etc.)
                     // Cloud is reachable, but the inverter is reporting a hard fault.
                     // Surface this as a Critical alert so LINE notifies + dashboard turns red.
-                    installation.Status = InstallationStatus.Maintenance;
-                    LogApiCall(installation, "GetRealtimeData", 200, true,
+                    installation.Status = InstallationStatus.Maintenance;                    LogApiCall(installation, "GetRealtimeData", 200, true,
                         $"[FAULTY] {installation.InverterBrand} reports station faulty. " +
                         $"Reason: {realtime.FaultReason ?? "unknown"}. " +
                         $"Today={realtime.TodayEnergyKwh:0.0}kWh");
@@ -388,6 +387,30 @@ public class SolarDataSyncJob
                 }
                 else
                 {
+                    // Cloud reachable, inverter sleeping/offline but NOT faulty.
+                    // If we were stuck in Maintenance from a previous transient fault
+                    // (e.g. brief Grid Loss that cleared itself), recover now.
+                    // Before this fix: recovery required isDeviceOnline=true (health=2),
+                    // so a night-time sync after a cleared fault would stay Maintenance
+                    // indefinitely until the next daytime sync returned health=2.
+                    if (installation.Status == InstallationStatus.Maintenance
+                        && realtime.Health != Services.InverterApi.Models.HealthState.Faulty)
+                    {
+                        installation.Status = InstallationStatus.Active;
+                        LogApiCall(installation, "GetRealtimeData", 200, true,
+                            $"[RECOVERED] Station no longer faulty (health={realtime.Health}). " +
+                            "Status changed from Maintenance → Active.");
+
+                        var openFaults = await _context.SystemAlerts
+                            .Where(a => a.InstallationId == installation.Id
+                                && a.AlertType == AlertType.Error
+                                && a.ResolvedAt == null
+                                && a.Title.StartsWith("Station Faulty:"))
+                            .ToListAsync();
+                        foreach (var f in openFaults)
+                            f.ResolvedAt = DateTime.UtcNow;
+                    }
+
                     totalDeviceOffline++;
                     LogApiCall(installation, "GetRealtimeData", 200, true,
                         $"[DEVICE OFFLINE] API connected OK, but inverter reports offline/sleeping. " +
