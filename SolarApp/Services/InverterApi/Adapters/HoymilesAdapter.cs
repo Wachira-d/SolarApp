@@ -12,13 +12,16 @@ namespace SolarApp.Services.InverterApi.Adapters;
 /// Hoymiles migrated from global.hoymiles.com/platform/api/gateway to
 /// neapi.hoymiles.com in January 2025. The old URL returns 404.
 ///
-/// V3 Authentication flow:
-///   1. POST /iam/pub/0/c/region_c  (detect user's region → get login_url)
-///   2. POST {login_url}/iam/pub/3/auth/login  (username + hashed password → token)
-///      (Hoymiles upgraded V3 from /iam/pub/0/c/login_c to /iam/pub/3/auth/login
-///      around mid-2024. Old path returns status=1 "Log in failed" for all creds.)
-///
-/// Password encoding: MD5(password) + "." + Base64(SHA256(password))
+/// V3 Authentication flow (verified against the live web client and the
+/// reference TypeScript port at github.com/Eistee82/ioBroker.hoymiles):
+///   1. POST /iam/pub/3/auth/pre-insp  body { u: username }
+///      → { a: salt-hex, n: nonce-hex, v: version }
+///   2. ch = argon2id(password, salt = hexDecode(a),
+///                    t=3, m=32768 KiB, p=1, hashLen=32, version=0x13) → hex
+///      (Only when v == 3. For v == 1 or 2 fall back to the legacy
+///      md5(pwd) + "." + base64(sha256(pwd)) format.)
+///   3. POST /iam/pub/3/auth/login  body { u: username, ch, n }
+///      → token.  Note `n` is echoed back unchanged from step 1.
 ///
 /// Credentials mapping:
 ///   Username = S-Miles Cloud email / phone
@@ -82,12 +85,14 @@ public class HoymilesAdapter : IInverterApiAdapter
         // Pre-compute password variants (used by multiple layers)
         var passwordVariants = ComputePasswordVariants(password);
 
-        // ─── Layer 0a: V3-NEW challenge/response login ───
-        // Hoymiles V3 (production as of late-2024) uses a SHA-256 challenge body:
-        //   { u: <username>, n: <nonce>, ch: <hash(password, nonce)> }
-        // NOT the old { user_name, password } body. Try this FIRST against
-        // neapi/euapi (and any user-supplied override) since it's what the
-        // global.hoymiles.com web UI actually sends.
+        // ─── Layer 0a: V3 pre-insp + argon2id login ───
+        // Production flow as used by global.hoymiles.com:
+        //   1. POST /iam/pub/3/auth/pre-insp { u } → { a, n, v }
+        //   2. ch = argon2id(pwd, hexDecode(a))      (when v == 3)
+        //   3. POST /iam/pub/3/auth/login { u, ch, n }
+        // Try this FIRST against neapi/euapi/global gateway (and any
+        // user-supplied override) since it's the only formula the live
+        // server actually accepts.
         var chBases = new List<string>();
         if (!string.IsNullOrWhiteSpace(credentials.ApiBaseUrl))
             chBases.Add(credentials.ApiBaseUrl.TrimEnd('/'));
@@ -96,10 +101,9 @@ public class HoymilesAdapter : IInverterApiAdapter
         chBases.Add("https://global.hoymiles.com/platform/api/gateway");
         foreach (var chBase in chBases.Distinct())
         {
-            var chUrl = chBase + "/iam/pub/3/auth/login";
-            var chResult = await TryV3ChallengeLoginAsync(credentials.Username, password, chUrl, $"L0a-{PathLabel(chUrl)}", diag);
+            var chResult = await TryV3PreInspLoginAsync(credentials.Username, password, chBase, $"L0a-{ShortName(chBase)}", diag);
             if (chResult.Token != null)
-                return CacheAndReturn(cacheKey, chResult.Token, chBase, $"OK via V3-challenge | " + string.Join(" → ", diag));
+                return CacheAndReturn(cacheKey, chResult.Token, chBase, $"OK via V3-preinsp | " + string.Join(" → ", diag));
         }
 
         // ─── Layer 0: User-specified API endpoint override ───
@@ -297,100 +301,173 @@ public class HoymilesAdapter : IInverterApiAdapter
     }
 
     /// <summary>
-    /// V3-NEW challenge/response login (production as of late-2024).
-    /// Body schema (from browser inspection on global.hoymiles.com):
-    ///   { u: <username>, n: <16-byte hex nonce>, ch: <SHA-256 hex hash> }
+    /// V3 production login: pre-insp → argon2id (or md5.sha256) → login.
     ///
-    /// The hash formula isn't documented; we try common patterns until one works:
-    ///   1. SHA256(password + n)
-    ///   2. SHA256(n + password)
-    ///   3. SHA256(MD5(password) + n)
-    ///   4. SHA256(password + ":" + n)
-    /// First variant that returns status=0 with a token wins.
+    /// Step 1  POST {base}/iam/pub/3/auth/pre-insp  body { u }
+    ///         → { a: salt-hex, n: nonce-hex, v: 1|2|3 }
+    /// Step 2  Compute ch by version:
+    ///           v == 3 →  argon2id(pwd, hexDecode(a),
+    ///                              t=3, m=32768, p=1, hashLen=32, ver=0x13).Hex()
+    ///           v == 1|2 → md5Hex(pwd) + "." + base64(sha256(pwd))
+    /// Step 3  POST {base}/iam/pub/3/auth/login  body { u, ch, n }
+    ///
+    /// Always returns — never throws.
     /// </summary>
-    private async Task<(string? Token, int StatusCode)> TryV3ChallengeLoginAsync(
-        string username, string password, string fullUrl, string label, List<string> diag)
+    private async Task<(string? Token, int StatusCode)> TryV3PreInspLoginAsync(
+        string username, string password, string apiBase, string label, List<string> diag)
     {
-        // Generate 16-byte (32 hex) nonce — matches browser pattern
-        var nonceBytes = new byte[16];
-        System.Security.Cryptography.RandomNumberGenerator.Fill(nonceBytes);
-        var nonce = Convert.ToHexString(nonceBytes).ToLowerInvariant();
+        var preInspUrl = $"{apiBase.TrimEnd('/')}/iam/pub/3/auth/pre-insp";
+        var loginUrl = $"{apiBase.TrimEnd('/')}/iam/pub/3/auth/login";
 
-        var pwBytes = System.Text.Encoding.UTF8.GetBytes(password);
-        var md5Hex = BitConverter.ToString(System.Security.Cryptography.MD5.HashData(pwBytes)).Replace("-", "").ToLowerInvariant();
-
-        string Sha256Hex(string input)
+        // ── Step 1: pre-insp ───────────────────────────────────────────
+        string? saltHex; string? nonce; int version;
+        try
         {
-            var bytes = System.Text.Encoding.UTF8.GetBytes(input);
-            return BitConverter.ToString(System.Security.Cryptography.SHA256.HashData(bytes)).Replace("-", "").ToLowerInvariant();
-        }
-
-        // Hash variants ordered by likelihood (most common patterns first)
-        var hashVariants = new (string Name, string Hash)[]
-        {
-            ("sha256(pw+n)",      Sha256Hex(password + nonce)),
-            ("sha256(n+pw)",      Sha256Hex(nonce + password)),
-            ("sha256(md5(pw)+n)", Sha256Hex(md5Hex + nonce)),
-            ("sha256(pw:n)",      Sha256Hex(password + ":" + nonce)),
-            ("sha256(n+md5(pw))", Sha256Hex(nonce + md5Hex)),
-        };
-
-        foreach (var (variantName, hash) in hashVariants)
-        {
-            try
+            var client = CreateClient();
+            var req = BuildHoymilesRequest(HttpMethod.Post, preInspUrl, new { u = username });
+            var resp = await client.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
             {
-                var client = CreateClient();
-                var body = new { u = username, n = nonce, ch = hash };
-                var req = new HttpRequestMessage(HttpMethod.Post, fullUrl)
-                {
-                    Content = JsonContent.Create(body)
-                };
-
-                // Headers matching what the browser sends (captured from DevTools)
-                req.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-                req.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
-                req.Headers.UserAgent.ParseAdd(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36");
-                req.Headers.TryAddWithoutValidation("Origin", "https://global.hoymiles.com");
-                req.Headers.TryAddWithoutValidation("Referer", "https://global.hoymiles.com/");
-                req.Headers.TryAddWithoutValidation("language", "en-us");
-
-                var resp = await client.SendAsync(req);
-                if (!resp.IsSuccessStatusCode)
-                {
-                    diag.Add($"{label}-{variantName}:HTTP{(int)resp.StatusCode}");
-                    continue;
-                }
-
-                var content = await resp.Content.ReadAsStringAsync();
-                JsonElement json;
-                try { json = JsonDocument.Parse(content).RootElement; }
-                catch { diag.Add($"{label}-{variantName}:not-json"); continue; }
-
-                var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
-                if (status != "0" && status != "200" && status != "success")
-                {
-                    var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
-                    diag.Add($"{label}-{variantName}:status={status}({Truncate(msg, 20)})");
-                    continue;
-                }
-
-                var token = ExtractToken(json);
-                if (string.IsNullOrEmpty(token))
-                {
-                    diag.Add($"{label}-{variantName}:no-token");
-                    continue;
-                }
-
-                diag.Add($"{label}-{variantName}:OK");
-                return (token, (int)resp.StatusCode);
+                diag.Add($"{label}-preinsp:HTTP{(int)resp.StatusCode}");
+                return (null, (int)resp.StatusCode);
             }
-            catch (TaskCanceledException) { diag.Add($"{label}-{variantName}:timeout"); }
-            catch (HttpRequestException ex) { diag.Add($"{label}-{variantName}:net({Truncate(ex.Message, 20)})"); }
-            catch (Exception ex) { diag.Add($"{label}-{variantName}:err({ex.GetType().Name})"); }
+
+            var json = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
+            var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+            if (status != "0" && status != "200" && status != "success")
+            {
+                var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
+                diag.Add($"{label}-preinsp:status={status}({Truncate(msg, 20)})");
+                return (null, (int)resp.StatusCode);
+            }
+
+            if (!json.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+            {
+                diag.Add($"{label}-preinsp:no-data");
+                return (null, (int)resp.StatusCode);
+            }
+
+            saltHex = SafeGetString(data, "a");
+            nonce = SafeGetString(data, "n");
+            version = SafeGetInt(data, "v") ?? 3;
+
+            if (string.IsNullOrEmpty(nonce))
+            {
+                diag.Add($"{label}-preinsp:missing-n");
+                return (null, (int)resp.StatusCode);
+            }
+            if (version == 3 && string.IsNullOrEmpty(saltHex))
+            {
+                diag.Add($"{label}-preinsp:missing-a(v3)");
+                return (null, (int)resp.StatusCode);
+            }
+        }
+        catch (TaskCanceledException) { diag.Add($"{label}-preinsp:timeout"); return (null, 0); }
+        catch (HttpRequestException ex) { diag.Add($"{label}-preinsp:net({Truncate(ex.Message, 20)})"); return (null, 0); }
+        catch (Exception ex) { diag.Add($"{label}-preinsp:err({ex.GetType().Name})"); return (null, 0); }
+
+        // ── Step 2: derive ch ──────────────────────────────────────────
+        string ch;
+        try
+        {
+            ch = version switch
+            {
+                3 => EncryptPwdV3(password, saltHex!),
+                1 or 2 => EncryptPwdLegacy(password),
+                _ => throw new InvalidOperationException($"unsupported pre-insp v={version}"),
+            };
+        }
+        catch (Exception ex)
+        {
+            diag.Add($"{label}-hash:err({ex.GetType().Name})");
+            return (null, 0);
         }
 
-        return (null, 0);
+        // ── Step 3: login ──────────────────────────────────────────────
+        try
+        {
+            var client = CreateClient();
+            var req = BuildHoymilesRequest(HttpMethod.Post, loginUrl, new { u = username, ch, n = nonce });
+            var resp = await client.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                diag.Add($"{label}-login(v{version}):HTTP{(int)resp.StatusCode}");
+                return (null, (int)resp.StatusCode);
+            }
+
+            var content = await resp.Content.ReadAsStringAsync();
+            JsonElement json;
+            try { json = JsonDocument.Parse(content).RootElement; }
+            catch { diag.Add($"{label}-login(v{version}):not-json"); return (null, (int)resp.StatusCode); }
+
+            var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+            if (status != "0" && status != "200" && status != "success")
+            {
+                var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
+                diag.Add($"{label}-login(v{version}):status={status}({Truncate(msg, 20)})");
+                return (null, (int)resp.StatusCode);
+            }
+
+            var token = ExtractToken(json);
+            if (string.IsNullOrEmpty(token))
+            {
+                diag.Add($"{label}-login(v{version}):no-token");
+                return (null, (int)resp.StatusCode);
+            }
+
+            diag.Add($"{label}-login(v{version}):OK");
+            return (token, (int)resp.StatusCode);
+        }
+        catch (TaskCanceledException) { diag.Add($"{label}-login(v{version}):timeout"); return (null, 0); }
+        catch (HttpRequestException ex) { diag.Add($"{label}-login(v{version}):net({Truncate(ex.Message, 20)})"); return (null, 0); }
+        catch (Exception ex) { diag.Add($"{label}-login(v{version}):err({ex.GetType().Name})"); return (null, 0); }
+    }
+
+    /// <summary>
+    /// argon2id wrapper matching the S-Miles Cloud spec (verified against
+    /// captured live traffic: produces byte-identical ch hash).
+    /// Parameters: t=3, m=32 MiB, p=1, hashLen=32, version=0x13.
+    /// </summary>
+    private static string EncryptPwdV3(string password, string saltHex)
+    {
+        var salt = Convert.FromHexString(saltHex);
+        using var argon = new Konscious.Security.Cryptography.Argon2id(
+            System.Text.Encoding.UTF8.GetBytes(password))
+        {
+            Salt = salt,
+            DegreeOfParallelism = 1,
+            Iterations = 3,
+            MemorySize = 32 * 1024, // KiB
+        };
+        var hash = argon.GetBytes(32);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>Legacy v1/v2 hash: md5(pwd) + "." + base64(sha256(pwd)).</summary>
+    private static string EncryptPwdLegacy(string password)
+    {
+        var pwBytes = System.Text.Encoding.UTF8.GetBytes(password);
+        var md5Hex = Convert.ToHexString(System.Security.Cryptography.MD5.HashData(pwBytes)).ToLowerInvariant();
+        var sha256B64 = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(pwBytes));
+        return $"{md5Hex}.{sha256B64}";
+    }
+
+    /// <summary>
+    /// Build a Hoymiles-flavoured HTTP request: JSON body + browser headers
+    /// (Origin / Referer / Accept-Language / User-Agent / language) so the
+    /// neapi tier accepts it the same way as the global.hoymiles.com web UI.
+    /// </summary>
+    private static HttpRequestMessage BuildHoymilesRequest(HttpMethod method, string url, object body)
+    {
+        var req = new HttpRequestMessage(method, url) { Content = JsonContent.Create(body) };
+        req.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+        req.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+        req.Headers.UserAgent.ParseAdd(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36");
+        req.Headers.TryAddWithoutValidation("Origin", "https://global.hoymiles.com");
+        req.Headers.TryAddWithoutValidation("Referer", "https://global.hoymiles.com/");
+        req.Headers.TryAddWithoutValidation("language", "en-us");
+        return req;
     }
 
     /// <summary>
