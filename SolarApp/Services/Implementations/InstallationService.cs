@@ -88,7 +88,20 @@ public class InstallationService : IInstallationService
     public async Task UpdateAsync(Installation installation)
     {
         installation.UpdatedAt = DateTime.UtcNow;
-        _context.Installations.Update(installation);
+        // Avoid _context.Installations.Update(installation): when the
+        // installation was loaded via GetByIdAsync (which Include()s
+        // Customer/Partner/Equipment/etc.), Update cascades Modified state
+        // onto every still-tracked navigation property.  EF then issues
+        // UPDATEs on those rows using whatever's currently in memory — so a
+        // reassign of installation.CustomerId without re-syncing the
+        // navigation property rewrites the old Customer row with stale
+        // in-memory data, manifesting as a customer rename.
+        //
+        // Mark the row Modified ourselves only when the entity isn't already
+        // tracked (e.g. a future caller passes in a detached instance).
+        var entry = _context.Entry(installation);
+        if (entry.State == EntityState.Detached)
+            entry.State = EntityState.Modified;
         await _context.SaveChangesAsync();
     }
 
