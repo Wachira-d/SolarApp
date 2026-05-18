@@ -788,13 +788,11 @@ public class HoymilesAdapter : IInverterApiAdapter
             try
             {
                 var client = CreateClient();
+                var req = BuildHoymilesRequest(HttpMethod.Post, url, body);
                 if (authHeader.HasValue)
-                {
-                    client.DefaultRequestHeaders.Remove(authHeader.Value.Name);
-                    client.DefaultRequestHeaders.Add(authHeader.Value.Name, authHeader.Value.Value);
-                }
+                    req.Headers.TryAddWithoutValidation(authHeader.Value.Name, authHeader.Value.Value);
 
-                var resp = await client.PostAsJsonAsync(url, body);
+                var resp = await client.SendAsync(req);
                 var content = await resp.Content.ReadAsStringAsync();
 
                 // 5xx → retry; 4xx/2xx → return immediately
@@ -888,7 +886,7 @@ public class HoymilesAdapter : IInverterApiAdapter
             return (false, $"Hoymiles login failed: {loginError}");
 
         // Verify by fetching station list
-        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/select_by_page_c",
+        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/station/select_by_page",
             new { page = 1, page_size = 10 });
         if (data == null)
             return (false, "Hoymiles: logged in but station list call failed.");
@@ -901,7 +899,7 @@ public class HoymilesAdapter : IInverterApiAdapter
         var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return null;
 
-        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/select_by_page_c",
+        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/station/select_by_page",
             new { page = 1, page_size = 50 });
         if (data == null || data.Value.ValueKind != JsonValueKind.Object) return null;
 
@@ -949,14 +947,15 @@ public class HoymilesAdapter : IInverterApiAdapter
         var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return null;
 
-        // Try station-level realtime data
-        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/find_c",
-            new { sid = long.TryParse(credentials.PlantId, out var sidLong) ? (object)sidLong : credentials.PlantId });
+        // Try station realtime data (new V3 path used by global.hoymiles.com).
+        var sidObj = long.TryParse(credentials.PlantId, out var sidLong) ? (object)sidLong : credentials.PlantId;
+        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase,
+            "pvm-data/api/0/station/data/count_station_real_data", new { sid = sidObj });
         if (data == null)
         {
-            // Alternative endpoint
-            data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station_data/real_g_c",
-                new { sid = credentials.PlantId });
+            // Fallback: station/find returns aggregates including realtime power
+            data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/station/find",
+                new { id = sidObj });
         }
         if (data == null || data.Value.ValueKind != JsonValueKind.Object) return null;
 
@@ -1001,7 +1000,7 @@ public class HoymilesAdapter : IInverterApiAdapter
 
         try
         {
-            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/station/data/count_playback_power_by_day",
+            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm-data/api/0/station/data/count_playback_power_by_day",
                 new
                 {
                     sid = credentials.PlantId,
@@ -1070,7 +1069,7 @@ public class HoymilesAdapter : IInverterApiAdapter
 
         try
         {
-            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/alarm/select_by_page",
+            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "operations/warning/history",
                 new
                 {
                     sid = credentials.PlantId,
@@ -1129,8 +1128,12 @@ public class HoymilesAdapter : IInverterApiAdapter
 
         try
         {
-            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvmc/api/0/device/select_by_page",
-                new { sid = credentials.PlantId, page = 1, page_size = 100 });
+            // Try microinverters first (HM/HMS/HMT series), fall back to string inverters
+            var sidArg = long.TryParse(credentials.PlantId, out var sidL) ? (object)sidL : credentials.PlantId;
+            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/dev/micro/select_by_station",
+                new { id = sidArg })
+                ?? await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/dev/inverter/select_by_station",
+                new { id = sidArg });
             if (data == null) return devices;
 
             JsonElement arr;
