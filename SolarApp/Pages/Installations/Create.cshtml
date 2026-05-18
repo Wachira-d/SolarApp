@@ -143,8 +143,10 @@
                             <input asp-for="Input.CloudApiBaseUrl" class="form-control"
                                    placeholder="เว้นว่างเพื่อให้ระบบเลือกอัตโนมัติ — กรอกเมื่อ login ผิด region" />
                             <div class="form-text">
-                                ใช้เฉพาะเมื่อ account อยู่บน server ที่ระบบเลือกไม่ถูก เช่น
-                                <code>https://global.hoymiles.com</code> สำหรับ Hoymiles S-Miles Cloud Global
+                                ใช้เฉพาะเมื่อ account อยู่บน server ที่ระบบเลือกไม่ถูก. รับ 2 รูปแบบ:<br>
+                                <strong>Base URL</strong> เช่น <code>https://global.hoymiles.com</code> —
+                                ระบบจะลองหา login path เอง<br>
+                                <strong>Full URL</strong> ของ login endpoint — หาได้จาก Browser DevTools (F12 → Network)
                             </div>
                         </div>
                     </div>

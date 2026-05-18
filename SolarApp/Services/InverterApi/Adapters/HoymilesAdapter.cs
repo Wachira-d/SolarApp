@@ -81,34 +81,74 @@ public class HoymilesAdapter : IInverterApiAdapter
         var passwordVariants = ComputePasswordVariants(password);
 
         // ─── Layer 0: User-specified API endpoint override ───
-        // If the installation has CloudApiBaseUrl set, try it FIRST with all
-        // password variants before falling through to region auto-detection.
-        // Lets operators handle accounts that live on servers the adapter
-        // wouldn't auto-discover (e.g. global.hoymiles.com for S-Miles
-        // Cloud Global accounts).
+        // If the installation has CloudApiBaseUrl set, try it FIRST.
+        // Two modes:
+        //   (a) Full URL  — contains "/login" or "/auth" — we POST there directly
+        //       (operator already found the working endpoint via browser dev tools).
+        //   (b) Base URL  — we try a list of common login paths against the base.
+        // Each path × password-variant combo is one attempt; first success wins.
         if (!string.IsNullOrWhiteSpace(credentials.ApiBaseUrl))
         {
-            var overrideBase = credentials.ApiBaseUrl.TrimEnd('/');
-            diag.Add($"L0:override={ShortName(overrideBase)}");
+            var rawOverride = credentials.ApiBaseUrl.Trim().TrimEnd('/');
+            var looksLikeFullLoginUrl = rawOverride.Contains("/login", StringComparison.OrdinalIgnoreCase)
+                || rawOverride.Contains("/auth", StringComparison.OrdinalIgnoreCase);
+            diag.Add($"L0:override={ShortName(rawOverride)}{(looksLikeFullLoginUrl ? "(full)" : "(base)")}");
 
-            foreach (var (variantName, variantValue) in new[]
+            // Candidate paths to try when only the base is provided
+            string[] candidatePaths = looksLikeFullLoginUrl
+                ? new[] { "" } // Full URL — use as-is
+                : new[]
+                {
+                    "/iam/pub/0/c/login_c",                                 // V3 modern
+                    "/platform/api/gateway/iam/pub/0/c/login_c",            // V3 via platform gateway
+                    "/platform/api/gateway/iam/auth_login",                 // V0 via platform gateway
+                    "/pvm-iam/api/0/iam/auth_login",                        // V0 legacy
+                    "/website/api/0/auth/login",                            // Web-tier
+                };
+
+            var passwordsToTry = new[]
             {
                 ("hashed", passwordVariants["hashed"]),
                 ("plain",  password),
                 ("md5",    passwordVariants["md5"]),
-            })
+            };
+
+            (string? Token, string? ApiBase)? overrideHit = null;
+
+            foreach (var candidatePath in candidatePaths)
             {
-                var r = await TryV3LoginAsync(credentials.Username, variantValue,
-                    overrideBase, $"L0-{variantName}", diag);
-                if (r.Token != null)
+                var url = looksLikeFullLoginUrl ? rawOverride : rawOverride + candidatePath;
+
+                foreach (var (variantName, variantValue) in passwordsToTry)
                 {
-                    var effectiveBase = overrideBase.Contains("global.hoymiles.com", StringComparison.OrdinalIgnoreCase)
-                        ? $"{overrideBase}/platform/api/gateway"
-                        : overrideBase;
-                    return CacheAndReturn(cacheKey, r.Token, effectiveBase,
-                        $"OK via L0 override ({variantName}) | " + string.Join(" → ", diag));
+                    var label = $"L0-{ShortName(url)}-{variantName}";
+                    var r = await TryRawV3LoginAsync(credentials.Username, variantValue, url, label, diag);
+                    if (r.Token != null)
+                    {
+                        // Derive the api-base for subsequent data calls. Strip the
+                        // login-specific suffix so CallApiAsync can append data paths.
+                        var apiBase = url;
+                        foreach (var suffix in candidatePaths)
+                        {
+                            if (!string.IsNullOrEmpty(suffix) && apiBase.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                            {
+                                apiBase = apiBase.Substring(0, apiBase.Length - suffix.Length);
+                                // Re-add /platform/api/gateway if that's where login was
+                                if (suffix.Contains("/platform/api/gateway"))
+                                    apiBase += "/platform/api/gateway";
+                                break;
+                            }
+                        }
+                        overrideHit = (r.Token, apiBase);
+                        break;
+                    }
                 }
+                if (overrideHit.HasValue) break;
             }
+
+            if (overrideHit.HasValue)
+                return CacheAndReturn(cacheKey, overrideHit.Value.Token!, overrideHit.Value.ApiBase!,
+                    $"OK via L0 override | " + string.Join(" → ", diag));
         }
 
         // ─── Layer 2: V3 region-aware login (HASHED password) ───
@@ -225,6 +265,59 @@ public class HoymilesAdapter : IInverterApiAdapter
             diag.Add($"region:err({ex.GetType().Name})");
             return (RegionApiBase, DefaultApiBase);
         }
+    }
+
+    /// <summary>
+    /// Like TryV3LoginAsync but uses fullUrl exactly as-given (no path append).
+    /// Used by the Layer-0 override which already knows the full login URL
+    /// or is iterating through a list of candidate paths.
+    /// Always returns — never throws.
+    /// </summary>
+    private async Task<(string? Token, int StatusCode)> TryRawV3LoginAsync(
+        string username, string password, string fullUrl, string label, List<string> diag)
+    {
+        try
+        {
+            var client = CreateClient();
+            var body = new { user_name = username, password };
+            var resp = await client.PostAsJsonAsync(fullUrl, body);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                diag.Add($"{label}:HTTP{(int)resp.StatusCode}");
+                return (null, (int)resp.StatusCode);
+            }
+
+            var content = await resp.Content.ReadAsStringAsync();
+            JsonElement json;
+            try { json = JsonDocument.Parse(content).RootElement; }
+            catch
+            {
+                diag.Add($"{label}:not-json");
+                return (null, (int)resp.StatusCode);
+            }
+
+            var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+            if (status != "0" && status != "200" && status != "success")
+            {
+                var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
+                diag.Add($"{label}:status={status}({Truncate(msg, 30)})");
+                return (null, (int)resp.StatusCode);
+            }
+
+            var token = ExtractToken(json);
+            if (string.IsNullOrEmpty(token))
+            {
+                diag.Add($"{label}:no-token-in-resp");
+                return (null, (int)resp.StatusCode);
+            }
+
+            diag.Add($"{label}:OK");
+            return (token, (int)resp.StatusCode);
+        }
+        catch (TaskCanceledException) { diag.Add($"{label}:timeout"); return (null, 0); }
+        catch (HttpRequestException ex) { diag.Add($"{label}:net({Truncate(ex.Message, 30)})"); return (null, 0); }
+        catch (Exception ex) { diag.Add($"{label}:err({ex.GetType().Name})"); return (null, 0); }
     }
 
     /// <summary>
