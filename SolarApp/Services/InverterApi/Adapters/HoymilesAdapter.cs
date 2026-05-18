@@ -94,16 +94,20 @@ public class HoymilesAdapter : IInverterApiAdapter
                 || rawOverride.Contains("/auth", StringComparison.OrdinalIgnoreCase);
             diag.Add($"L0:override={ShortName(rawOverride)}{(looksLikeFullLoginUrl ? "(full)" : "(base)")}");
 
-            // Candidate paths to try when only the base is provided
+            // Candidate paths to try when only the base is provided.
+            // Ordered by likelihood for Hoymiles S-Miles Cloud Global tenants.
             string[] candidatePaths = looksLikeFullLoginUrl
                 ? new[] { "" } // Full URL — use as-is
                 : new[]
                 {
-                    "/iam/pub/0/c/login_c",                                 // V3 modern
-                    "/platform/api/gateway/iam/pub/0/c/login_c",            // V3 via platform gateway
-                    "/platform/api/gateway/iam/auth_login",                 // V0 via platform gateway
+                    "/platform/api/gateway/iam/auth_login",                 // V0 platform gateway — common on global
+                    "/iam-api/web/iam/login",                               // Modern IAM web service
+                    "/iam-api/v1/iam/login",                                // IAM v1
+                    "/api/iam/auth/login",                                  // Generic API path
+                    "/website/api/auth/login",                              // Website API path
+                    "/iam/pub/0/c/login_c",                                 // V3 at root (works on neapi/euapi)
+                    "/platform/api/gateway/iam/pub/0/c/login_c",            // V3 via gateway
                     "/pvm-iam/api/0/iam/auth_login",                        // V0 legacy
-                    "/website/api/0/auth/login",                            // Web-tier
                 };
 
             var passwordsToTry = new[]
@@ -271,6 +275,13 @@ public class HoymilesAdapter : IInverterApiAdapter
     /// Like TryV3LoginAsync but uses fullUrl exactly as-given (no path append).
     /// Used by the Layer-0 override which already knows the full login URL
     /// or is iterating through a list of candidate paths.
+    ///
+    /// Sends browser-like headers (User-Agent, Origin, Referer, Accept) so
+    /// Hoymiles' web tier (which gates some endpoints behind these checks)
+    /// accepts the request the same way it would from a real browser session.
+    /// Mimics the GoodWe SEMS portal login pattern: when there's no public
+    /// API, talk to the web portal endpoints with browser identity.
+    ///
     /// Always returns — never throws.
     /// </summary>
     private async Task<(string? Token, int StatusCode)> TryRawV3LoginAsync(
@@ -280,7 +291,27 @@ public class HoymilesAdapter : IInverterApiAdapter
         {
             var client = CreateClient();
             var body = new { user_name = username, password };
-            var resp = await client.PostAsJsonAsync(fullUrl, body);
+
+            var req = new HttpRequestMessage(HttpMethod.Post, fullUrl)
+            {
+                Content = JsonContent.Create(body)
+            };
+
+            // Browser-style headers — Hoymiles web tier often rejects requests
+            // missing these (returns HTML login page instead of JSON, or 403).
+            req.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            req.Headers.UserAgent.ParseAdd(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+            // Derive Origin + Referer from the URL so cross-origin checks pass
+            if (Uri.TryCreate(fullUrl, UriKind.Absolute, out var uri))
+            {
+                var origin = $"{uri.Scheme}://{uri.Host}";
+                req.Headers.TryAddWithoutValidation("Origin", origin);
+                req.Headers.TryAddWithoutValidation("Referer", $"{origin}/website/login");
+            }
+
+            var resp = await client.SendAsync(req);
 
             if (!resp.IsSuccessStatusCode)
             {
@@ -293,12 +324,13 @@ public class HoymilesAdapter : IInverterApiAdapter
             try { json = JsonDocument.Parse(content).RootElement; }
             catch
             {
-                diag.Add($"{label}:not-json");
+                // Some web tiers return HTML on auth failure even with 200 status
+                diag.Add($"{label}:not-json(len={content.Length})");
                 return (null, (int)resp.StatusCode);
             }
 
             var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
-            if (status != "0" && status != "200" && status != "success")
+            if (status != "0" && status != "200" && status != "success" && status != null)
             {
                 var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
                 diag.Add($"{label}:status={status}({Truncate(msg, 30)})");
@@ -308,6 +340,17 @@ public class HoymilesAdapter : IInverterApiAdapter
             var token = ExtractToken(json);
             if (string.IsNullOrEmpty(token))
             {
+                // Web-portal endpoints may set auth via Set-Cookie instead of token field.
+                // If we got 200 + no error status, try to use a cookie value as the token.
+                if (resp.Headers.TryGetValues("Set-Cookie", out var cookies))
+                {
+                    var cookieToken = string.Join("; ", cookies);
+                    if (!string.IsNullOrWhiteSpace(cookieToken))
+                    {
+                        diag.Add($"{label}:OK(cookie-auth)");
+                        return (cookieToken, (int)resp.StatusCode);
+                    }
+                }
                 diag.Add($"{label}:no-token-in-resp");
                 return (null, (int)resp.StatusCode);
             }
