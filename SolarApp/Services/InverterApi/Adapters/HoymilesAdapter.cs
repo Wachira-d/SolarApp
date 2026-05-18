@@ -98,17 +98,31 @@ public class HoymilesAdapter : IInverterApiAdapter
             return CacheAndReturn(cacheKey, md5Result.Token, apiBase, "OK via L4 (V3 md5) | " + string.Join(" → ", diag));
 
         // ─── Layer 5: Try other regional bases directly (skip region detection) ───
+        // Order matters: try `global.hoymiles.com` first because it's the
+        // S-Miles Cloud global instance used by accounts created via
+        // global.hoymiles.com/website/login (many Thai customers / O&M accounts).
+        // Removed naapi/apapi — those hostnames don't resolve (DNS-dead) and
+        // were wasting ~30s per sync attempt in DNS timeout.
         var regionalBases = new[]
         {
-            "https://neapi.hoymiles.com", "https://euapi.hoymiles.com",
-            "https://naapi.hoymiles.com", "https://apapi.hoymiles.com",
+            "https://global.hoymiles.com",
+            "https://neapi.hoymiles.com",
+            "https://euapi.hoymiles.com",
         };
         foreach (var baseUrl in regionalBases)
         {
             if (baseUrl == loginUrl) continue; // already tried
             var r = await TryV3LoginAsync(credentials.Username, passwordVariants["hashed"], baseUrl, $"L5-{ShortName(baseUrl)}", diag);
             if (r.Token != null)
-                return CacheAndReturn(cacheKey, r.Token, baseUrl, $"OK via L5 ({baseUrl}) | " + string.Join(" → ", diag));
+            {
+                // global.hoymiles.com serves data APIs under /platform/api/gateway;
+                // other hosts serve them at root. Bake the prefix into apiBase so
+                // CallApiAsync produces the right URL on subsequent data calls.
+                var effectiveApiBase = baseUrl.Contains("global.hoymiles.com", StringComparison.OrdinalIgnoreCase)
+                    ? $"{baseUrl}/platform/api/gateway"
+                    : baseUrl;
+                return CacheAndReturn(cacheKey, r.Token, effectiveApiBase, $"OK via L5 ({baseUrl}) | " + string.Join(" → ", diag));
+            }
         }
 
         // ─── Layer 6: Legacy V0 login ───
@@ -185,6 +199,8 @@ public class HoymilesAdapter : IInverterApiAdapter
     /// <summary>
     /// Try V3 login at given URL with given password variant.
     /// Records diagnostic in diag list. Always returns — never throws.
+    /// For global.hoymiles.com the login path lives under /platform/api/gateway;
+    /// for neapi/euapi it's at root. Path is auto-selected by host name.
     /// </summary>
     private async Task<(string? Token, int StatusCode)> TryV3LoginAsync(
         string username, string password, string baseUrl, string label, List<string> diag)
@@ -193,7 +209,13 @@ public class HoymilesAdapter : IInverterApiAdapter
         {
             var client = CreateClient();
             var body = new { user_name = username, password };
-            var url = $"{baseUrl.TrimEnd('/')}/iam/pub/0/c/login_c";
+
+            // global.hoymiles.com proxies the V3 IAM endpoints behind /platform/api/gateway.
+            // Other regional bases serve V3 paths at root. Same handler, different prefix.
+            var path = baseUrl.Contains("global.hoymiles.com", StringComparison.OrdinalIgnoreCase)
+                ? "/platform/api/gateway/iam/pub/0/c/login_c"
+                : "/iam/pub/0/c/login_c";
+            var url = $"{baseUrl.TrimEnd('/')}{path}";
             var resp = await client.PostAsJsonAsync(url, body);
 
             if (!resp.IsSuccessStatusCode)
@@ -229,15 +251,16 @@ public class HoymilesAdapter : IInverterApiAdapter
     }
 
     /// <summary>
-    /// Layer 6: Legacy V0 login. Tries 3 base URLs with old body/header wrapper.
+    /// Layer 6: Legacy V0 login. Last-resort fallback with old body/header
+    /// wrapper format. Removed intl.hoymiles.com (DNS-dead) and the bare
+    /// /platform/api/gateway global path (returns 404 — superseded by V3).
     /// </summary>
     private async Task<(string? Token, string? ApiBase)> TryLegacyLoginAsync(ApiCredentials credentials, List<string> diag)
     {
         var attempts = new[]
         {
             ("https://neapi.hoymiles.com", "/pvm-iam/api/0/iam/auth_login"),
-            ("https://global.hoymiles.com/platform/api/gateway", "/iam/auth_login"),
-            ("https://intl.hoymiles.com/platform/api/gateway", "/iam/auth_login"),
+            ("https://global.hoymiles.com", "/pvm-iam/api/0/iam/auth_login"),
         };
 
         foreach (var (baseUrl, path) in attempts)
@@ -275,7 +298,17 @@ public class HoymilesAdapter : IInverterApiAdapter
                 }
 
                 diag.Add($"L6-{ShortName(baseUrl)}:OK");
-                var apiBase = baseUrl.Contains("neapi") ? baseUrl : DefaultApiBase;
+                // Pick the right data-API base for downstream calls:
+                //   neapi  → use as-is (V0 + data share same root)
+                //   global → must include /platform/api/gateway prefix
+                //   other  → fall back to neapi (DefaultApiBase)
+                string apiBase;
+                if (baseUrl.Contains("neapi", StringComparison.OrdinalIgnoreCase))
+                    apiBase = baseUrl;
+                else if (baseUrl.Contains("global.hoymiles.com", StringComparison.OrdinalIgnoreCase))
+                    apiBase = $"{baseUrl}/platform/api/gateway";
+                else
+                    apiBase = DefaultApiBase;
                 return (token, apiBase);
             }
             catch (Exception ex) { diag.Add($"L6-{ShortName(baseUrl)}:err({ex.GetType().Name})"); }
