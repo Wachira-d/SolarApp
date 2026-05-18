@@ -1128,17 +1128,64 @@ public class HoymilesAdapter : IInverterApiAdapter
 
         try
         {
-            // Try microinverters first (HM/HMS/HMT series), fall back to string inverters
             var sidArg = long.TryParse(credentials.PlantId, out var sidL) ? (object)sidL : credentials.PlantId;
-            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/dev/micro/select_by_station",
-                new { id = sidArg })
-                ?? await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/dev/inverter/select_by_station",
-                new { id = sidArg });
-            if (data == null) return devices;
+
+            // Try each (path × body-shape) combo until one returns a non-empty
+            // result. JS bundle uses `sid` for some endpoints and `id` for
+            // others; for `dev/dtu/select_all` the param is `station_id`.
+            var attempts = new (string Path, object Body)[]
+            {
+                ("pvm/api/0/dev/micro/select_by_station",    new { sid = sidArg }),
+                ("pvm/api/0/dev/micro/select_by_station",    new { id  = sidArg }),
+                ("pvm/api/0/dev/inverter/select_by_station", new { sid = sidArg }),
+                ("pvm/api/0/dev/inverter/select_by_station", new { id  = sidArg }),
+                ("pvm/api/0/dev/dtu/select_all",             new { station_id = sidArg }),
+            };
+
+            JsonElement? data = null;
+            var trace = new List<string>();
+            foreach (var (path, body) in attempts)
+            {
+                var bodyKey = body.GetType().GetProperties()[0].Name;
+                var r = await CallApiAsync(token, apiBase ?? DefaultApiBase, path, body);
+                if (r == null) { trace.Add($"{path}({bodyKey}):null"); continue; }
+                if (r.Value.ValueKind == JsonValueKind.Array)
+                {
+                    var len = r.Value.GetArrayLength();
+                    trace.Add($"{path}({bodyKey}):arr[{len}]");
+                    if (len > 0) { data = r; break; }
+                    continue;
+                }
+                if (r.Value.ValueKind == JsonValueKind.Object)
+                {
+                    if (r.Value.TryGetProperty("list", out var l) && l.ValueKind == JsonValueKind.Array)
+                    {
+                        trace.Add($"{path}({bodyKey}):list[{l.GetArrayLength()}]");
+                        if (l.GetArrayLength() > 0) { data = r; break; }
+                        continue;
+                    }
+                    if (r.Value.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Array)
+                    {
+                        trace.Add($"{path}({bodyKey}):data[{d.GetArrayLength()}]");
+                        if (d.GetArrayLength() > 0) { data = r; break; }
+                        continue;
+                    }
+                    trace.Add($"{path}({bodyKey}):obj-no-list");
+                    continue;
+                }
+                trace.Add($"{path}({bodyKey}):kind={r.Value.ValueKind}");
+            }
+            if (data == null)
+            {
+                _logger.LogWarning("Hoymiles GetDevices: no device-list endpoint returned a non-empty array. Trace: {Trace}", string.Join(" → ", trace));
+                return devices;
+            }
+            _logger.LogInformation("Hoymiles GetDevices trace: {Trace}", string.Join(" → ", trace));
 
             JsonElement arr;
             if (data.Value.ValueKind == JsonValueKind.Array) arr = data.Value;
             else if (data.Value.TryGetProperty("list", out var l)) arr = l;
+            else if (data.Value.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Array) arr = d;
             else return devices;
 
             foreach (var item in arr.EnumerateArray())
