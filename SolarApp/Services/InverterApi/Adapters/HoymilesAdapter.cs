@@ -131,19 +131,19 @@ public class HoymilesAdapter : IInverterApiAdapter
                     {
                         // Derive the api-base for subsequent data calls. Strip the
                         // login-specific suffix so CallApiAsync can append data paths.
-                        var apiBase = url;
+                        var derivedBase = url;
                         foreach (var suffix in candidatePaths)
                         {
-                            if (!string.IsNullOrEmpty(suffix) && apiBase.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                            if (!string.IsNullOrEmpty(suffix) && derivedBase.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                             {
-                                apiBase = apiBase.Substring(0, apiBase.Length - suffix.Length);
+                                derivedBase = derivedBase.Substring(0, derivedBase.Length - suffix.Length);
                                 // Re-add /platform/api/gateway if that's where login was
                                 if (suffix.Contains("/platform/api/gateway"))
-                                    apiBase += "/platform/api/gateway";
+                                    derivedBase += "/platform/api/gateway";
                                 break;
                             }
                         }
-                        overrideHit = (r.Token, apiBase);
+                        overrideHit = (r.Token, derivedBase);
                         break;
                     }
                 }
