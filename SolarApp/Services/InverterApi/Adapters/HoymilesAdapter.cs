@@ -82,6 +82,26 @@ public class HoymilesAdapter : IInverterApiAdapter
         // Pre-compute password variants (used by multiple layers)
         var passwordVariants = ComputePasswordVariants(password);
 
+        // ─── Layer 0a: V3-NEW challenge/response login ───
+        // Hoymiles V3 (production as of late-2024) uses a SHA-256 challenge body:
+        //   { u: <username>, n: <nonce>, ch: <hash(password, nonce)> }
+        // NOT the old { user_name, password } body. Try this FIRST against
+        // neapi/euapi (and any user-supplied override) since it's what the
+        // global.hoymiles.com web UI actually sends.
+        var chBases = new List<string>();
+        if (!string.IsNullOrWhiteSpace(credentials.ApiBaseUrl))
+            chBases.Add(credentials.ApiBaseUrl.TrimEnd('/'));
+        chBases.Add("https://neapi.hoymiles.com");
+        chBases.Add("https://euapi.hoymiles.com");
+        chBases.Add("https://global.hoymiles.com/platform/api/gateway");
+        foreach (var chBase in chBases.Distinct())
+        {
+            var chUrl = chBase + "/iam/pub/3/auth/login";
+            var chResult = await TryV3ChallengeLoginAsync(credentials.Username, password, chUrl, $"L0a-{PathLabel(chUrl)}", diag);
+            if (chResult.Token != null)
+                return CacheAndReturn(cacheKey, chResult.Token, chBase, $"OK via V3-challenge | " + string.Join(" → ", diag));
+        }
+
         // ─── Layer 0: User-specified API endpoint override ───
         // If the installation has CloudApiBaseUrl set, try it FIRST.
         // Two modes:
@@ -274,6 +294,103 @@ public class HoymilesAdapter : IInverterApiAdapter
             diag.Add($"region:err({ex.GetType().Name})");
             return (RegionApiBase, DefaultApiBase);
         }
+    }
+
+    /// <summary>
+    /// V3-NEW challenge/response login (production as of late-2024).
+    /// Body schema (from browser inspection on global.hoymiles.com):
+    ///   { u: <username>, n: <16-byte hex nonce>, ch: <SHA-256 hex hash> }
+    ///
+    /// The hash formula isn't documented; we try common patterns until one works:
+    ///   1. SHA256(password + n)
+    ///   2. SHA256(n + password)
+    ///   3. SHA256(MD5(password) + n)
+    ///   4. SHA256(password + ":" + n)
+    /// First variant that returns status=0 with a token wins.
+    /// </summary>
+    private async Task<(string? Token, int StatusCode)> TryV3ChallengeLoginAsync(
+        string username, string password, string fullUrl, string label, List<string> diag)
+    {
+        // Generate 16-byte (32 hex) nonce — matches browser pattern
+        var nonceBytes = new byte[16];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(nonceBytes);
+        var nonce = Convert.ToHexString(nonceBytes).ToLowerInvariant();
+
+        var pwBytes = System.Text.Encoding.UTF8.GetBytes(password);
+        var md5Hex = BitConverter.ToString(System.Security.Cryptography.MD5.HashData(pwBytes)).Replace("-", "").ToLowerInvariant();
+
+        string Sha256Hex(string input)
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(input);
+            return BitConverter.ToString(System.Security.Cryptography.SHA256.HashData(bytes)).Replace("-", "").ToLowerInvariant();
+        }
+
+        // Hash variants ordered by likelihood (most common patterns first)
+        var hashVariants = new (string Name, string Hash)[]
+        {
+            ("sha256(pw+n)",      Sha256Hex(password + nonce)),
+            ("sha256(n+pw)",      Sha256Hex(nonce + password)),
+            ("sha256(md5(pw)+n)", Sha256Hex(md5Hex + nonce)),
+            ("sha256(pw:n)",      Sha256Hex(password + ":" + nonce)),
+            ("sha256(n+md5(pw))", Sha256Hex(nonce + md5Hex)),
+        };
+
+        foreach (var (variantName, hash) in hashVariants)
+        {
+            try
+            {
+                var client = CreateClient();
+                var body = new { u = username, n = nonce, ch = hash };
+                var req = new HttpRequestMessage(HttpMethod.Post, fullUrl)
+                {
+                    Content = JsonContent.Create(body)
+                };
+
+                // Headers matching what the browser sends (captured from DevTools)
+                req.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                req.Headers.AcceptLanguage.ParseAdd("en-US,en;q=0.9");
+                req.Headers.UserAgent.ParseAdd(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36");
+                req.Headers.TryAddWithoutValidation("Origin", "https://global.hoymiles.com");
+                req.Headers.TryAddWithoutValidation("Referer", "https://global.hoymiles.com/");
+                req.Headers.TryAddWithoutValidation("language", "en-us");
+
+                var resp = await client.SendAsync(req);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    diag.Add($"{label}-{variantName}:HTTP{(int)resp.StatusCode}");
+                    continue;
+                }
+
+                var content = await resp.Content.ReadAsStringAsync();
+                JsonElement json;
+                try { json = JsonDocument.Parse(content).RootElement; }
+                catch { diag.Add($"{label}-{variantName}:not-json"); continue; }
+
+                var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
+                if (status != "0" && status != "200" && status != "success")
+                {
+                    var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
+                    diag.Add($"{label}-{variantName}:status={status}({Truncate(msg, 20)})");
+                    continue;
+                }
+
+                var token = ExtractToken(json);
+                if (string.IsNullOrEmpty(token))
+                {
+                    diag.Add($"{label}-{variantName}:no-token");
+                    continue;
+                }
+
+                diag.Add($"{label}-{variantName}:OK");
+                return (token, (int)resp.StatusCode);
+            }
+            catch (TaskCanceledException) { diag.Add($"{label}-{variantName}:timeout"); }
+            catch (HttpRequestException ex) { diag.Add($"{label}-{variantName}:net({Truncate(ex.Message, 20)})"); }
+            catch (Exception ex) { diag.Add($"{label}-{variantName}:err({ex.GetType().Name})"); }
+        }
+
+        return (null, 0);
     }
 
     /// <summary>
