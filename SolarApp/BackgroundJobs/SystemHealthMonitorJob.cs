@@ -321,7 +321,7 @@ public class SystemHealthMonitorJob
                         "  3. Run 'Diagnose' from the Installation page to see available stations on your account",
                     RootCauseAnalysis = $"⚠ LIKELY CONFIGURATION ERROR\n" +
                         $"Sanity check: no [ONLINE] log found in the last 7 days.\n" +
-                        $"Observed {offlineCount}/{totalCount} [DEVICE OFFLINE] responses in last {OfflineHoursThreshold}h.\n" +
+                        $"Observed {offlineCount}/{totalCount} [DEVICE OFFLINE] responses in last {offlineHoursThreshold}h.\n" +
                         $"If this were a real inverter fault, we'd expect to have seen it produce at some point in the past week.\n" +
                         $"Most common cause: PlantId doesn't match any station on the configured Huawei/GoodWe/etc. account.",
                     OccurredAt = DateTime.UtcNow,
@@ -347,7 +347,7 @@ public class SystemHealthMonitorJob
                 Severity = AlertSeverity.High,
                 Title = $"Inverter Silent (Daytime): {inst.SiteName}",
                 Message = $"[{inst.InverterBrand}] {inst.SiteName}: " +
-                          $"Cloud API is reachable, but the inverter has not reported production for {OfflineHoursThreshold}+ hours " +
+                          $"Cloud API is reachable, but the inverter has not reported production for {offlineHoursThreshold}+ hours " +
                           "during daytime. " +
                           "THIS IS A REAL PROBLEM — check on-site:\n" +
                           "  • Inverter power (AC breaker tripped?)\n" +
@@ -355,7 +355,7 @@ public class SystemHealthMonitorJob
                           "  • Data-logger (WiFi stick, DTSU) is plugged in and its LEDs are normal\n" +
                           "  • Inverter display for error codes",
                 RootCauseAnalysis = $"⚠ DEVICE OFFLINE DURING DAYTIME\n" +
-                    $"Observed {offlineCount} consecutive [DEVICE OFFLINE] API responses in the last {OfflineHoursThreshold} hours. " +
+                    $"Observed {offlineCount} consecutive [DEVICE OFFLINE] API responses in the last {offlineHoursThreshold} hours. " +
                     $"This site HAS been online in the past 7 days, so configuration is likely correct. " +
                     $"The cloud API is healthy, but the inverter stopped reporting data — strongly suggests a physical problem at the site.",
                 OccurredAt = DateTime.UtcNow,
@@ -364,7 +364,7 @@ public class SystemHealthMonitorJob
 
             _logger.LogWarning(
                 "Installation {Id} ({Site}) daytime-silent: {Count}/{Total} offline API responses over {Hours}h",
-                inst.Id, inst.SiteName, offlineCount, totalCount, OfflineHoursThreshold);
+                inst.Id, inst.SiteName, offlineCount, totalCount, offlineHoursThreshold);
         }
 
         await _context.SaveChangesAsync();

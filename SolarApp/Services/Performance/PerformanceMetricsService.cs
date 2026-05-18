@@ -283,7 +283,7 @@ public class PerformanceMetricsService : IPerformanceMetricsService
         return fleet;
     }
 
-    private static void AssignHealthGrade(InstallationPerformance p)
+    private void AssignHealthGrade(InstallationPerformance p)
     {
         var score = 0m;
         score += p.PerformanceRatio * 60;    // PR weight 60%
@@ -318,7 +318,7 @@ public class PerformanceMetricsService : IPerformanceMetricsService
     /// Used by GetFleetPerformanceAsync to avoid N+1 queries.
     /// Note: skips weather lookup (constant PSH) so the fleet view is fast.
     /// </summary>
-    private static InstallationPerformance ComputePerformanceFromData(
+    private InstallationPerformance ComputePerformanceFromData(
         Installation installation, DateTime fromDate, DateTime toDate,
         List<EnergyData> dailyRecords, ElectricityTariff? tariff, int unresolvedAlerts)
     {

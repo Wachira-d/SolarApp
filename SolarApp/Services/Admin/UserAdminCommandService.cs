@@ -349,8 +349,8 @@ public class UserAdminCommandService : IUserAdminCommandService
         _context.Partners.Add(new Partner
         {
             CompanyName = input.CompanyName.Trim(),
-            ContactEmail = input.ContactEmail,
-            ContactPhone = input.ContactPhone,
+            ContactEmail = input.ContactEmail ?? string.Empty,
+            ContactPhone = input.ContactPhone ?? string.Empty,
             Address = input.Address,
             City = input.City,
             Province = input.Province,
@@ -380,8 +380,8 @@ public class UserAdminCommandService : IUserAdminCommandService
             return CommandResult.Fail("Contract end date cannot be before start date");
 
         partner.CompanyName = input.CompanyName.Trim();
-        partner.ContactEmail = input.ContactEmail;
-        partner.ContactPhone = input.ContactPhone;
+        partner.ContactEmail = input.ContactEmail ?? string.Empty;
+        partner.ContactPhone = input.ContactPhone ?? string.Empty;
         partner.Address = input.Address;
         partner.City = input.City;
         partner.Province = input.Province;
