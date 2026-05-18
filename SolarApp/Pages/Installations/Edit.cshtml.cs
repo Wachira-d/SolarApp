@@ -146,6 +146,13 @@ public class EditModel : PageModel
         // not move installations to a different tenant.
         var isAdmin = User.IsInRole("Admin");
 
+        // Snapshot original link before any reassign mutation — needed so the
+        // inline-edit block below can tell whether the user changed the
+        // dropdown (in which case those fields hold the *new* customer's data
+        // auto-filled by Edit.cshtml's customerSelect change handler, not a
+        // genuine edit of the originally-linked customer).
+        var originalCustomerId = installation.CustomerId;
+
         if (Input.CustomerId > 0 && Input.CustomerId != installation.CustomerId)
         {
             if (!isAdmin)
@@ -155,12 +162,24 @@ public class EditModel : PageModel
                 return Page();
             }
             var customerExists = await _context.Customers.AnyAsync(c => c.Id == Input.CustomerId && c.IsActive);
-            if (customerExists)
-                installation.CustomerId = Input.CustomerId;
+            if (!customerExists)
+            {
+                ModelState.AddModelError(string.Empty, "Selected customer does not exist or is inactive.");
+                await LoadCustomersAsync();
+                return Page();
+            }
+            installation.CustomerId = Input.CustomerId;
         }
 
-        // Inline edit customer name (if provided)
-        if (!string.IsNullOrWhiteSpace(Input.CustomerFirstName) || !string.IsNullOrWhiteSpace(Input.CustomerLastName))
+        // Inline-edit customer details — ONLY when the user did NOT switch
+        // customers in the dropdown. When they did, CustomerFirstName/Last/
+        // Phone/Email were auto-populated by the JS change handler with the
+        // newly-selected customer's data; applying them would either be a
+        // no-op (when reassign succeeded) or clobber the original customer's
+        // name with the new one's (when reassign was rejected).
+        var userSwitchedCustomer = Input.CustomerId > 0 && Input.CustomerId != originalCustomerId;
+        if (!userSwitchedCustomer
+            && (!string.IsNullOrWhiteSpace(Input.CustomerFirstName) || !string.IsNullOrWhiteSpace(Input.CustomerLastName)))
         {
             var customer = await _context.Customers.FindAsync(installation.CustomerId);
             if (customer != null)
