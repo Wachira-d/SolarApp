@@ -130,7 +130,7 @@ public class HoymilesAdapter : IInverterApiAdapter
 
                 foreach (var (variantName, variantValue) in passwordsToTry)
                 {
-                    var label = $"L0-{ShortName(url)}-{variantName}";
+                    var label = $"L0-{PathLabel(url)}-{variantName}";
                     var r = await TryRawV3LoginAsync(credentials.Username, variantValue, url, label, diag);
                     if (r.Token != null)
                     {
@@ -308,10 +308,23 @@ public class HoymilesAdapter : IInverterApiAdapter
             req.Headers.UserAgent.ParseAdd(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
-            // Derive Origin + Referer from the URL so cross-origin checks pass
+            // Origin / Referer matter for Hoymiles API gateway. When user logs in
+            // at global.hoymiles.com/website/login, the browser POSTs to
+            // neapi.hoymiles.com but with Origin = https://global.hoymiles.com
+            // (the page origin, NOT the API host). The server validates that.
+            //
+            // We mimic the browser:
+            //   - If target host is an *.hoymiles.com API server (neapi/euapi/etc),
+            //     use https://global.hoymiles.com as Origin / Referer.
+            //   - Otherwise derive from the URL host (for fully-custom endpoints).
             if (Uri.TryCreate(fullUrl, UriKind.Absolute, out var uri))
             {
-                var origin = $"{uri.Scheme}://{uri.Host}";
+                var isHoymilesApi = uri.Host.EndsWith(".hoymiles.com", StringComparison.OrdinalIgnoreCase)
+                    && !uri.Host.Equals("global.hoymiles.com", StringComparison.OrdinalIgnoreCase)
+                    && !uri.Host.Equals("world.hoymiles.com", StringComparison.OrdinalIgnoreCase);
+                var origin = isHoymilesApi
+                    ? "https://global.hoymiles.com"
+                    : $"{uri.Scheme}://{uri.Host}";
                 req.Headers.TryAddWithoutValidation("Origin", origin);
                 req.Headers.TryAddWithoutValidation("Referer", $"{origin}/website/login");
             }
@@ -500,8 +513,22 @@ public class HoymilesAdapter : IInverterApiAdapter
     }
 
     /// <summary>Short label for diagnostic logging.</summary>
+    // Compact host label for diagnostic strings (e.g. "neapi", "global").
     private static string ShortName(string url) =>
         url.Replace("https://", "").Replace("http://", "").Split('/')[0].Split('.')[0];
+
+    // Compact host+path label for diagnostic strings — preserves enough of
+    // the path to tell candidate URLs apart (e.g. "neapi:/iam/pub/3/auth/login").
+    private static string PathLabel(string url)
+    {
+        var noProto = url.Replace("https://", "").Replace("http://", "");
+        var slash = noProto.IndexOf('/');
+        if (slash < 0) return noProto;
+        var host = noProto[..slash].Split('.')[0];
+        var path = noProto[slash..];
+        if (path.Length > 35) path = path[..32] + "...";
+        return $"{host}:{path}";
+    }
 
     /// <summary>Cache token and return success tuple.</summary>
     private (string Token, string ApiBase, string Message) CacheAndReturn(string cacheKey, string token, string apiBase, string message)
