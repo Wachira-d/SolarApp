@@ -14,7 +14,9 @@ namespace SolarApp.Services.InverterApi.Adapters;
 ///
 /// V3 Authentication flow:
 ///   1. POST /iam/pub/0/c/region_c  (detect user's region → get login_url)
-///   2. POST {login_url}/iam/pub/0/c/login_c  (username + hashed password → token)
+///   2. POST {login_url}/iam/pub/3/auth/login  (username + hashed password → token)
+///      (Hoymiles upgraded V3 from /iam/pub/0/c/login_c to /iam/pub/3/auth/login
+///      around mid-2024. Old path returns status=1 "Log in failed" for all creds.)
 ///
 /// Password encoding: MD5(password) + "." + Base64(SHA256(password))
 ///
@@ -96,17 +98,20 @@ public class HoymilesAdapter : IInverterApiAdapter
 
             // Candidate paths to try when only the base is provided.
             // Ordered by likelihood for Hoymiles S-Miles Cloud Global tenants.
+            // /iam/pub/3/auth/login is the CURRENT production path (verified via
+            // browser DevTools on global.hoymiles.com — login button POSTs here).
             string[] candidatePaths = looksLikeFullLoginUrl
                 ? new[] { "" } // Full URL — use as-is
                 : new[]
                 {
-                    "/platform/api/gateway/iam/auth_login",                 // V0 platform gateway — common on global
+                    "/iam/pub/3/auth/login",                                // V3 NEW (current production)
+                    "/platform/api/gateway/iam/pub/3/auth/login",           // V3 NEW via gateway
+                    "/platform/api/gateway/iam/auth_login",                 // V0 platform gateway
                     "/iam-api/web/iam/login",                               // Modern IAM web service
                     "/iam-api/v1/iam/login",                                // IAM v1
                     "/api/iam/auth/login",                                  // Generic API path
                     "/website/api/auth/login",                              // Website API path
-                    "/iam/pub/0/c/login_c",                                 // V3 at root (works on neapi/euapi)
-                    "/platform/api/gateway/iam/pub/0/c/login_c",            // V3 via gateway
+                    "/iam/pub/0/c/login_c",                                 // V3 OLD (deprecated, kept for back-compat)
                     "/pvm-iam/api/0/iam/auth_login",                        // V0 legacy
                 };
 
@@ -372,49 +377,18 @@ public class HoymilesAdapter : IInverterApiAdapter
     private async Task<(string? Token, int StatusCode)> TryV3LoginAsync(
         string username, string password, string baseUrl, string label, List<string> diag)
     {
-        try
-        {
-            var client = CreateClient();
-            var body = new { user_name = username, password };
+        // Production V3 login path as of mid-2024 = /iam/pub/3/auth/login
+        // (verified via browser DevTools on global.hoymiles.com).
+        // global.hoymiles.com proxies IAM endpoints behind /platform/api/gateway.
+        // Other regional bases (neapi/euapi) serve them at root.
+        var path = baseUrl.Contains("global.hoymiles.com", StringComparison.OrdinalIgnoreCase)
+            ? "/platform/api/gateway/iam/pub/3/auth/login"
+            : "/iam/pub/3/auth/login";
+        var url = $"{baseUrl.TrimEnd('/')}{path}";
 
-            // global.hoymiles.com proxies the V3 IAM endpoints behind /platform/api/gateway.
-            // Other regional bases serve V3 paths at root. Same handler, different prefix.
-            var path = baseUrl.Contains("global.hoymiles.com", StringComparison.OrdinalIgnoreCase)
-                ? "/platform/api/gateway/iam/pub/0/c/login_c"
-                : "/iam/pub/0/c/login_c";
-            var url = $"{baseUrl.TrimEnd('/')}{path}";
-            var resp = await client.PostAsJsonAsync(url, body);
-
-            if (!resp.IsSuccessStatusCode)
-            {
-                diag.Add($"{label}:HTTP{(int)resp.StatusCode}");
-                return (null, (int)resp.StatusCode);
-            }
-
-            var content = await resp.Content.ReadAsStringAsync();
-            var json = JsonDocument.Parse(content).RootElement;
-            var status = SafeGetString(json, "status") ?? SafeGetInt(json, "status")?.ToString();
-
-            if (status != "0" && status != "200" && status != "success")
-            {
-                var msg = SafeGetString(json, "message") ?? SafeGetString(json, "msg") ?? "no-msg";
-                diag.Add($"{label}:status={status}({Truncate(msg, 30)})");
-                return (null, (int)resp.StatusCode);
-            }
-
-            var token = ExtractToken(json);
-            if (string.IsNullOrEmpty(token))
-            {
-                diag.Add($"{label}:no-token-in-resp");
-                return (null, (int)resp.StatusCode);
-            }
-
-            diag.Add($"{label}:OK");
-            return (token, (int)resp.StatusCode);
-        }
-        catch (TaskCanceledException) { diag.Add($"{label}:timeout"); return (null, 0); }
-        catch (HttpRequestException ex) { diag.Add($"{label}:net({Truncate(ex.Message, 30)})"); return (null, 0); }
-        catch (Exception ex) { diag.Add($"{label}:err({ex.GetType().Name})"); return (null, 0); }
+        // Delegate to TryRawV3LoginAsync so this layer also gets the browser
+        // headers + cookie fallback + non-JSON tolerance.
+        return await TryRawV3LoginAsync(username, password, url, label, diag);
     }
 
     /// <summary>
