@@ -20,17 +20,20 @@ public class EditModel : PageModel
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ApplicationDbContext _context;
     private readonly ICredentialProtector _credProtector;
+    private readonly ILogger<EditModel> _logger;
 
     public EditModel(
         IInstallationService installationService,
         UserManager<ApplicationUser> userManager,
         ApplicationDbContext context,
-        ICredentialProtector credProtector)
+        ICredentialProtector credProtector,
+        ILogger<EditModel> logger)
     {
         _installationService = installationService;
         _userManager = userManager;
         _context = context;
         _credProtector = credProtector;
+        _logger = logger;
     }
 
     [BindProperty]
@@ -168,7 +171,19 @@ public class EditModel : PageModel
                 await LoadCustomersAsync();
                 return Page();
             }
+
+            // Defense layer 1 — sever the old Customer navigation BEFORE flipping
+            // the FK.  GetByIdAsync Include()s installation.Customer; if we leave
+            // that reference attached, EF's FK fix-up keeps the old Customer
+            // entity tracked, and any state-cascade (DbSet.Update, audit hooks,
+            // automatic detection of stale navigations) can issue an UPDATE on
+            // the old Customer row using whatever's in memory.  Detach the old
+            // entity entirely so EF cannot emit any SQL for it.
+            var oldCustomerEntity = installation.Customer;
+            installation.Customer = null;
             installation.CustomerId = Input.CustomerId;
+            if (oldCustomerEntity != null)
+                _context.Entry(oldCustomerEntity).State = EntityState.Detached;
         }
 
         // Inline-edit customer details — ONLY when the user did NOT switch
@@ -178,6 +193,7 @@ public class EditModel : PageModel
         // no-op (when reassign succeeded) or clobber the original customer's
         // name with the new one's (when reassign was rejected).
         var userSwitchedCustomer = Input.CustomerId > 0 && Input.CustomerId != originalCustomerId;
+        int? intentionallyEditedCustomerId = null;
         if (!userSwitchedCustomer
             && (!string.IsNullOrWhiteSpace(Input.CustomerFirstName) || !string.IsNullOrWhiteSpace(Input.CustomerLastName)))
         {
@@ -193,6 +209,7 @@ public class EditModel : PageModel
                 if (Input.CustomerEmail != null)
                     customer.Email = Input.CustomerEmail.Trim();
                 customer.UpdatedAt = DateTime.UtcNow;
+                intentionallyEditedCustomerId = customer.Id;
             }
         }
 
@@ -213,7 +230,13 @@ public class EditModel : PageModel
                 await LoadCustomersAsync();
                 return Page();
             }
+            // Same detach pattern as Customer reassign — prevent EF from holding
+            // a stale Partner navigation that could be rewritten on save.
+            var oldPartnerEntity = installation.Partner;
+            installation.Partner = null;
             installation.PartnerId = Input.PartnerId;
+            if (oldPartnerEntity != null)
+                _context.Entry(oldPartnerEntity).State = EntityState.Detached;
         }
         installation.InverterBrand = Input.InverterBrand;
         installation.InverterModel = Input.InverterModel;
@@ -292,6 +315,29 @@ public class EditModel : PageModel
         installation.InverterWarrantyExpiryDate = installation.InstallationDate.AddYears(installation.InverterWarrantyYears);
 
         installation.UpdatedAt = DateTime.UtcNow;
+
+        // Defense layer 2 — final safety net. Walk every Customer entity in
+        // the ChangeTracker and revert any that's flagged Modified except
+        // the one (if any) that the inline-edit block intentionally touched.
+        // This catches future regressions where some code path (EF FK fix-up,
+        // an auto-mapper, an audit interceptor, etc.) marks a Customer as
+        // Modified without explicit caller intent.  Logging the revert
+        // surfaces the underlying bug instead of letting data corruption
+        // ship silently.
+        foreach (var entry in _context.ChangeTracker.Entries<Customer>().ToList())
+        {
+            if (entry.State == EntityState.Modified
+                && entry.Entity.Id != intentionallyEditedCustomerId)
+            {
+                _logger.LogWarning(
+                    "Edit Installation {InstallationId}: reverted unintended Customer.Modified state for customerId={CustomerId} (intentional edit was for {IntentionalId}). Properties marked changed: {Changed}",
+                    installation.Id,
+                    entry.Entity.Id,
+                    intentionallyEditedCustomerId,
+                    string.Join(",", entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name)));
+                entry.State = EntityState.Unchanged;
+            }
+        }
 
         await _installationService.UpdateAsync(installation);
         return RedirectToPage("Index");
