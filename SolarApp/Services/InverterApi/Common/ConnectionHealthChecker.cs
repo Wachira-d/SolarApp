@@ -131,7 +131,8 @@ public class ConnectionHealthChecker : IConnectionHealthChecker
             ApiSecret = installation.CloudApiSecret,
             Username = installation.CloudUsername,
             Password = installation.CloudPassword,
-            PlantId = installation.PlantId
+            PlantId = installation.PlantId,
+            ApiBaseUrl = installation.CloudApiBaseUrl
         };
 
         var adapter = _adapterFactory.GetAdapter(installation.InverterBrand);

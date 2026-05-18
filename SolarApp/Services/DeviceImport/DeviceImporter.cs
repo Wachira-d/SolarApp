@@ -64,7 +64,8 @@ public class DeviceImporter : IDeviceImporter
             ApiSecret = _credProtector.Unprotect(installation.CloudApiSecret),
             Username = _credProtector.Unprotect(installation.CloudUsername),
             Password = _credProtector.Unprotect(installation.CloudPassword),
-            PlantId = installation.PlantId
+            PlantId = installation.PlantId,
+            ApiBaseUrl = installation.CloudApiBaseUrl
         };
 
         // 1. Try to get plant-level info (capacity, install date, location)

@@ -97,6 +97,7 @@ public class SolarDataSyncJob
                         Password = _credProtector.Unprotect(first.inst.CloudPassword),
                         ApiKey = _credProtector.Unprotect(first.inst.CloudApiKey),
                         ApiSecret = _credProtector.Unprotect(first.inst.CloudApiSecret),
+                        ApiBaseUrl = first.inst.CloudApiBaseUrl,
                     };
                     var plantIds = group.Select(x => x.inst.PlantId!).ToList();
 
@@ -162,6 +163,7 @@ public class SolarDataSyncJob
                         Password = _credProtector.Unprotect(first.CloudPassword),
                         ApiKey = _credProtector.Unprotect(first.CloudApiKey),
                         ApiSecret = _credProtector.Unprotect(first.CloudApiSecret),
+                        ApiBaseUrl = first.CloudApiBaseUrl,
                     };
                     var plantIds = group.Select(i => i.PlantId!).ToList();
 
@@ -196,7 +198,8 @@ public class SolarDataSyncJob
                     ApiSecret = _credProtector.Unprotect(installation.CloudApiSecret),
                     Username = _credProtector.Unprotect(installation.CloudUsername),
                     Password = _credProtector.Unprotect(installation.CloudPassword),
-                    PlantId = installation.PlantId
+                    PlantId = installation.PlantId,
+                    ApiBaseUrl = installation.CloudApiBaseUrl
                 };
 
                 // ─── 1. Realtime snapshot ───

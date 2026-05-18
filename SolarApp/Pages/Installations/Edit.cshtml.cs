@@ -77,6 +77,7 @@ public class EditModel : PageModel
         public string? CloudUsername { get; set; }
         public string? CloudPassword { get; set; }
         public string? PlantId { get; set; }
+        public string? CloudApiBaseUrl { get; set; }
 
         [Required][Range(0.1, 10000)] public decimal SystemCapacityKw { get; set; }
         [Required][Range(1, 10000)] public int NumberOfPanels { get; set; }
@@ -230,6 +231,13 @@ public class EditModel : PageModel
         if (!string.IsNullOrWhiteSpace(Input.PlantId))
             installation.PlantId = Input.PlantId.Trim();
         // else keep the existing installation.PlantId
+
+        // CloudApiBaseUrl: explicit empty = clear; null = keep; non-empty = set
+        if (Input.CloudApiBaseUrl != null)
+        {
+            var trimmed = Input.CloudApiBaseUrl.Trim();
+            installation.CloudApiBaseUrl = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+        }
         installation.SystemCapacityKw = Input.SystemCapacityKw;
         installation.NumberOfPanels = Input.NumberOfPanels;
         installation.PanelWattage = Input.PanelWattage;
@@ -310,6 +318,7 @@ public class EditModel : PageModel
             CloudUsername = _credProtector.Unprotect(installation.CloudUsername),
             CloudPassword = null,
             PlantId = installation.PlantId,
+            CloudApiBaseUrl = installation.CloudApiBaseUrl,
             SystemCapacityKw = installation.SystemCapacityKw,
             NumberOfPanels = installation.NumberOfPanels,
             PanelWattage = installation.PanelWattage,

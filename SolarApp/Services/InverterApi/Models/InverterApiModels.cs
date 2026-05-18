@@ -7,6 +7,13 @@ public class ApiCredentials
     public string? Username { get; set; }
     public string? Password { get; set; }
     public string? PlantId { get; set; }
+
+    /// <summary>
+    /// Optional override of the inverter cloud API base URL. When set, the
+    /// adapter should try this endpoint FIRST and skip region auto-detection.
+    /// See Installation.CloudApiBaseUrl for the user-facing documentation.
+    /// </summary>
+    public string? ApiBaseUrl { get; set; }
 }
 
 public class PlantInfo

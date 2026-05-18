@@ -80,6 +80,37 @@ public class HoymilesAdapter : IInverterApiAdapter
         // Pre-compute password variants (used by multiple layers)
         var passwordVariants = ComputePasswordVariants(password);
 
+        // ─── Layer 0: User-specified API endpoint override ───
+        // If the installation has CloudApiBaseUrl set, try it FIRST with all
+        // password variants before falling through to region auto-detection.
+        // Lets operators handle accounts that live on servers the adapter
+        // wouldn't auto-discover (e.g. global.hoymiles.com for S-Miles
+        // Cloud Global accounts).
+        if (!string.IsNullOrWhiteSpace(credentials.ApiBaseUrl))
+        {
+            var overrideBase = credentials.ApiBaseUrl.TrimEnd('/');
+            diag.Add($"L0:override={ShortName(overrideBase)}");
+
+            foreach (var (variantName, variantValue) in new[]
+            {
+                ("hashed", passwordVariants["hashed"]),
+                ("plain",  password),
+                ("md5",    passwordVariants["md5"]),
+            })
+            {
+                var r = await TryV3LoginAsync(credentials.Username, variantValue,
+                    overrideBase, $"L0-{variantName}", diag);
+                if (r.Token != null)
+                {
+                    var effectiveBase = overrideBase.Contains("global.hoymiles.com", StringComparison.OrdinalIgnoreCase)
+                        ? $"{overrideBase}/platform/api/gateway"
+                        : overrideBase;
+                    return CacheAndReturn(cacheKey, r.Token, effectiveBase,
+                        $"OK via L0 override ({variantName}) | " + string.Join(" → ", diag));
+                }
+            }
+        }
+
         // ─── Layer 2: V3 region-aware login (HASHED password) ───
         var (loginUrl, apiBase) = await DetectRegionAsync(credentials.Username, diag);
 

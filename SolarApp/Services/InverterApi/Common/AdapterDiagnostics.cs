@@ -90,7 +90,8 @@ public class AdapterDiagnostics : IAdapterDiagnostics
             ApiSecret = installation.CloudApiSecret,
             Username = installation.CloudUsername,
             Password = installation.CloudPassword,
-            PlantId = installation.PlantId
+            PlantId = installation.PlantId,
+            ApiBaseUrl = installation.CloudApiBaseUrl
         };
 
         // Step 1: Test Connection / Authentication

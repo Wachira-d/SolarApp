@@ -32,6 +32,19 @@ public class Installation
     public string? CloudPassword { get; set; }
     public string? PlantId { get; set; }
 
+    /// <summary>
+    /// Optional override for the inverter cloud API base URL. When set, the
+    /// adapter skips region auto-detection and tries this endpoint FIRST.
+    /// Useful when:
+    ///   - The account lives on a regional server the adapter doesn't auto-detect
+    ///     (e.g. global.hoymiles.com vs euapi/neapi for Hoymiles)
+    ///   - The manufacturer migrated APIs and the default is out of date
+    ///   - Behind a corporate proxy / custom routing
+    /// Examples: https://global.hoymiles.com  |  https://neapi.hoymiles.com
+    /// Leave blank for auto-detection (default behaviour, no change).
+    /// </summary>
+    public string? CloudApiBaseUrl { get; set; }
+
     // System specifications
     public SystemType SystemType { get; set; } = SystemType.OnGrid;
     public decimal SystemCapacityKw { get; set; }

@@ -581,6 +581,8 @@ public class Startup
         {
             (Table: "Installations", Column: "InverterSizeKw",
              Sql: "ALTER TABLE [Installations] ADD [InverterSizeKw] decimal(10,3) NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "CloudApiBaseUrl",
+             Sql: "ALTER TABLE [Installations] ADD [CloudApiBaseUrl] nvarchar(500) NULL"),
             (Table: "Equipment", Column: "RatingKw",
              Sql: "ALTER TABLE [Equipment] ADD [RatingKw] decimal(10,3) NULL"),
             (Table: "Equipment", Column: "RatingWatts",
@@ -1173,7 +1175,8 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                     ApiSecret = credProtector.Unprotect(installation.CloudApiSecret),
                     Username = credProtector.Unprotect(installation.CloudUsername),
                     Password = credProtector.Unprotect(installation.CloudPassword),
-                    PlantId = installation.PlantId
+                    PlantId = installation.PlantId,
+                    ApiBaseUrl = installation.CloudApiBaseUrl
                 };
 
                 var realtimeResult = await adapter.GetRealtimeResultAsync(credentials);
@@ -1353,6 +1356,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 var username  = form["username"].ToString();
                 var password  = form["password"].ToString();
                 var plantId   = form["plantId"].ToString();
+                var apiBaseUrl = form["apiBaseUrl"].ToString();
 
                 // Fill any blank field from the stored installation credentials.
                 // Empty input from the form = "use the saved value" (same as Save).
@@ -1382,6 +1386,8 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                             password = credProtector.Unprotect(inst.CloudPassword) ?? "";
                         if (string.IsNullOrEmpty(plantId))
                             plantId = inst.PlantId ?? "";
+                        if (string.IsNullOrEmpty(apiBaseUrl))
+                            apiBaseUrl = inst.CloudApiBaseUrl ?? "";
                     }
                 }
 
@@ -1391,7 +1397,8 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                     ApiSecret = apiSecret,
                     Username = username,
                     Password = password,
-                    PlantId = plantId
+                    PlantId = plantId,
+                    ApiBaseUrl = string.IsNullOrEmpty(apiBaseUrl) ? null : apiBaseUrl
                 };
 
                 var adapter = factory.GetAdapter(brand);

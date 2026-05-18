@@ -132,6 +132,23 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- Advanced: API endpoint override -->
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <label asp-for="Input.CloudApiBaseUrl" class="form-label">
+                                <i class="bi bi-gear"></i> API Endpoint Override
+                                <span class="badge bg-secondary ms-1">Advanced</span>
+                            </label>
+                            <input asp-for="Input.CloudApiBaseUrl" class="form-control"
+                                   placeholder="เว้นว่างเพื่อให้ระบบเลือกอัตโนมัติ — กรอกเมื่อ login ผิด region" />
+                            <div class="form-text">
+                                ใช้เฉพาะเมื่อ account อยู่บน server ที่ระบบเลือกไม่ถูก เช่น
+                                <code>https://global.hoymiles.com</code> สำหรับ Hoymiles S-Miles Cloud Global
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="testResult"></div>
 
                     <!-- Warranty & Maintenance -->
@@ -189,6 +206,7 @@
             formData.append('username', document.querySelector('[name="Input.CloudUsername"]').value);
             formData.append('password', document.querySelector('[name="Input.CloudPassword"]').value);
             formData.append('plantId', document.querySelector('[name="Input.PlantId"]').value);
+            formData.append('apiBaseUrl', document.querySelector('[name="Input.CloudApiBaseUrl"]')?.value || '');
 
             btn.disabled = true;
             result.innerHTML = '<span class="text-muted"><i class="spinner-border spinner-border-sm"></i> Testing...</span>';

@@ -62,6 +62,7 @@ public class CreateModel : PageModel
         public string? CloudUsername { get; set; }
         public string? CloudPassword { get; set; }
         public string? PlantId { get; set; }
+        public string? CloudApiBaseUrl { get; set; }
 
         [Required][Range(0.1, 10000)] public decimal SystemCapacityKw { get; set; }
         [Required][Range(1, 10000)] public int NumberOfPanels { get; set; }
@@ -123,6 +124,7 @@ public class CreateModel : PageModel
             CloudUsername = _credProtector.Protect(Input.CloudUsername),
             CloudPassword = _credProtector.Protect(Input.CloudPassword),
             PlantId = Input.PlantId,
+            CloudApiBaseUrl = string.IsNullOrWhiteSpace(Input.CloudApiBaseUrl) ? null : Input.CloudApiBaseUrl.Trim(),
             SystemCapacityKw = Input.SystemCapacityKw,
             NumberOfPanels = Input.NumberOfPanels,
             PanelWattage = Input.PanelWattage,
