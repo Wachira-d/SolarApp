@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SolarApp.Services.Security;
 using Xunit;
