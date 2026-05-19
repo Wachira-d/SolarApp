@@ -204,18 +204,18 @@ public class EditModel : PageModel
                 return Page();
             }
 
-            // Defense layer 1 — sever the old Customer navigation BEFORE flipping
-            // the FK.  GetByIdAsync Include()s installation.Customer; if we leave
-            // that reference attached, EF's FK fix-up keeps the old Customer
-            // entity tracked, and any state-cascade (DbSet.Update, audit hooks,
-            // automatic detection of stale navigations) can issue an UPDATE on
-            // the old Customer row using whatever's in memory.  Detach the old
-            // entity entirely so EF cannot emit any SQL for it.
-            var oldCustomerEntity = installation.Customer;
-            installation.Customer = null;
+            // Only flip the FK.  Earlier versions also did
+            //   installation.Customer = null; _context.Entry(old).State = Detached;
+            // but that throws on save because CustomerId is a required
+            // (non-nullable) FK and EF's NavigationFixer treats nav-to-null
+            // as "severing a required relationship" → InvalidOperationException.
+            //
+            // With the real root cause fixed (duplicate hidden Input.CustomerId
+            // form field, see commit d870edb) the other defenses (inline-edit
+            // gate, no-cascade UpdateAsync, Layer-2 change-tracker safety net)
+            // already prevent the rename — detaching the navigation isn't
+            // needed and was actively harmful.
             installation.CustomerId = Input.CustomerId;
-            if (oldCustomerEntity != null)
-                _context.Entry(oldCustomerEntity).State = EntityState.Detached;
         }
 
         // Inline-edit customer details — ONLY when the user did NOT switch
@@ -262,13 +262,11 @@ public class EditModel : PageModel
                 await LoadCustomersAsync();
                 return Page();
             }
-            // Same detach pattern as Customer reassign — prevent EF from holding
-            // a stale Partner navigation that could be rewritten on save.
-            var oldPartnerEntity = installation.Partner;
-            installation.Partner = null;
+            // FK-only update (see the Customer block above for why we don't
+            // also null the Partner navigation).  PartnerId is nullable so
+            // the severed-required-relationship error wouldn't fire here, but
+            // we keep the two reassign blocks symmetrical for readability.
             installation.PartnerId = Input.PartnerId;
-            if (oldPartnerEntity != null)
-                _context.Entry(oldPartnerEntity).State = EntityState.Detached;
         }
         installation.InverterBrand = Input.InverterBrand;
         installation.InverterModel = Input.InverterModel;
