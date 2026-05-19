@@ -103,6 +103,15 @@ public class EditModel : PageModel
         public decimal? FeedInTariffRate { get; set; }
         public decimal? ContractValue { get; set; }
 
+        // Service scope (see Installation.cs for semantics)
+        public ServiceLevel ServiceLevel { get; set; } = ServiceLevel.FullOM;
+        public bool IncludesMonitoring { get; set; } = true;
+        public bool IncludesCleaning { get; set; } = true;
+        public bool IncludesPreventiveMaintenance { get; set; } = true;
+        public bool IncludesCorrectiveMaintenance { get; set; } = true;
+        public bool IncludesWarrantyService { get; set; } = true;
+        public string? ServiceNotes { get; set; }
+
         public string? Notes { get; set; }
     }
 
@@ -299,6 +308,18 @@ public class EditModel : PageModel
         installation.ContractValue = Input.ContractValue;
         installation.Notes = Input.Notes;
 
+        // Service scope. ServiceLevel is the UI preset; the IncludesXxx flags
+        // are the runtime source of truth (the Edit form's JS toggles them
+        // when the preset radio changes, but the operator can also override
+        // them directly for Custom contracts).
+        installation.ServiceLevel = Input.ServiceLevel;
+        installation.IncludesMonitoring = Input.IncludesMonitoring;
+        installation.IncludesCleaning = Input.IncludesCleaning;
+        installation.IncludesPreventiveMaintenance = Input.IncludesPreventiveMaintenance;
+        installation.IncludesCorrectiveMaintenance = Input.IncludesCorrectiveMaintenance;
+        installation.IncludesWarrantyService = Input.IncludesWarrantyService;
+        installation.ServiceNotes = string.IsNullOrWhiteSpace(Input.ServiceNotes) ? null : Input.ServiceNotes.Trim();
+
         // Recalculate WarrantyExpiryDate if WarrantyYears changed
         if (installation.WarrantyYears != Input.WarrantyYears)
         {
@@ -402,7 +423,14 @@ public class EditModel : PageModel
             ElectricityRatePerKwh = installation.ElectricityRatePerKwh,
             FeedInTariffRate = installation.FeedInTariffRate,
             ContractValue = installation.ContractValue,
-            Notes = installation.Notes
+            Notes = installation.Notes,
+            ServiceLevel = installation.ServiceLevel,
+            IncludesMonitoring = installation.IncludesMonitoring,
+            IncludesCleaning = installation.IncludesCleaning,
+            IncludesPreventiveMaintenance = installation.IncludesPreventiveMaintenance,
+            IncludesCorrectiveMaintenance = installation.IncludesCorrectiveMaintenance,
+            IncludesWarrantyService = installation.IncludesWarrantyService,
+            ServiceNotes = installation.ServiceNotes,
         };
     }
 

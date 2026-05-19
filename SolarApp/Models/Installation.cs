@@ -83,6 +83,39 @@ public class Installation
     public DateTime? LastOnlineAt { get; set; }
     public string? Notes { get; set; }
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  Service scope — which services we actually provide for this site
+    // ─────────────────────────────────────────────────────────────────────
+    // Background jobs respect these flags:
+    //   * SolarDataSyncJob skips sites with IncludesMonitoring = false
+    //     (no cloud account, partner monitors themselves).
+    //   * GetInstallationsNeedingCleaning / cleaning reminders skip sites
+    //     with IncludesCleaning = false.
+    //   * PM/CM schedulers skip the corresponding flag.
+    // The ServiceLevel enum is a UI preset that pre-fills the flags; the
+    // flags are the source of truth at runtime.
+
+    /// <summary>Preset that pre-fills the IncludesXxx flags from the UI.</summary>
+    public ServiceLevel ServiceLevel { get; set; } = ServiceLevel.FullOM;
+
+    /// <summary>Online cloud monitoring (data sync, alerts, dashboard tiles).</summary>
+    public bool IncludesMonitoring { get; set; } = true;
+
+    /// <summary>Scheduled panel-cleaning visits.</summary>
+    public bool IncludesCleaning { get; set; } = true;
+
+    /// <summary>Preventive maintenance: routine checks, inspections, calibration.</summary>
+    public bool IncludesPreventiveMaintenance { get; set; } = true;
+
+    /// <summary>Corrective maintenance: respond to faults / breakdowns / repairs.</summary>
+    public bool IncludesCorrectiveMaintenance { get; set; } = true;
+
+    /// <summary>Warranty claim handling on behalf of the customer.</summary>
+    public bool IncludesWarrantyService { get; set; } = true;
+
+    /// <summary>Free-form notes for unusual contract terms (e.g. "PM 2 ครั้ง/ปี เท่านั้น").</summary>
+    public string? ServiceNotes { get; set; }
+
     // Financial
     public decimal? ContractValue { get; set; }
     public decimal ElectricityRatePerKwh { get; set; } = 4.0m;

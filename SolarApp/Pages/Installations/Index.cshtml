@@ -42,6 +42,24 @@
                     <p class="text-muted small mb-2">
                         <i class="bi bi-geo-alt"></i> @inst.Address
                     </p>
+                    @{
+                        var (svcLabel, svcClass) = inst.ServiceLevel switch
+                        {
+                            SolarApp.Models.Enums.ServiceLevel.FullOM         => ("Full O&M",   "bg-success"),
+                            SolarApp.Models.Enums.ServiceLevel.MonitoringOnly => ("Monitoring", "bg-info text-dark"),
+                            SolarApp.Models.Enums.ServiceLevel.CleaningOnly   => ("Cleaning",   "bg-primary"),
+                            SolarApp.Models.Enums.ServiceLevel.PreventiveOnly => ("PM Only",    "bg-warning text-dark"),
+                            _                                                  => ("Custom",     "bg-secondary"),
+                        };
+                    }
+                    <div class="mb-2">
+                        <span class="badge @svcClass" title="ขอบเขตการบริการ">@svcLabel</span>
+                        @if (inst.IncludesMonitoring) { <i class="bi bi-cloud-arrow-down text-success ms-1" title="Monitoring"></i> }
+                        @if (inst.IncludesCleaning) { <i class="bi bi-droplet text-primary ms-1" title="ล้างแผง"></i> }
+                        @if (inst.IncludesPreventiveMaintenance) { <i class="bi bi-clipboard-check text-info ms-1" title="PM"></i> }
+                        @if (inst.IncludesCorrectiveMaintenance) { <i class="bi bi-tools text-warning ms-1" title="CM"></i> }
+                        @if (inst.IncludesWarrantyService) { <i class="bi bi-shield-check text-secondary ms-1" title="Warranty"></i> }
+                    </div>
                     <div class="row text-center mb-3">
                         <div class="col-4">
                             <small class="text-muted d-block">กำลังผลิต</small>

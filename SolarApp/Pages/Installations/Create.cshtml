@@ -180,6 +180,74 @@
                         </div>
                     </div>
 
+                    @* ─── Service Scope ───────────────────────────────────────────── *@
+                    <hr />
+                    <h5 class="mb-3">ขอบเขตการบริการ (Service Scope)</h5>
+                    <p class="text-muted small mb-2">
+                        เลือกรูปแบบบริการที่เราดูแลให้ไซต์นี้
+                        Background jobs (sync ข้อมูล, แจ้งเตือนล้างแผง) จะทำงานตามฟิลด์เหล่านี้
+                    </p>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">รูปแบบสัญญา</label>
+                        <div class="btn-group d-block" role="group" id="serviceLevelGroup">
+                            @foreach (var level in new[] {
+                                (SolarApp.Models.Enums.ServiceLevel.FullOM, "Full O&M", "ดูแลครบ: monitor + ล้าง + PM + CM + warranty"),
+                                (SolarApp.Models.Enums.ServiceLevel.MonitoringOnly, "Monitoring", "เฝ้าระวังออนไลน์เท่านั้น"),
+                                (SolarApp.Models.Enums.ServiceLevel.CleaningOnly, "Cleaning", "เข้าล้างแผงตามรอบเท่านั้น"),
+                                (SolarApp.Models.Enums.ServiceLevel.PreventiveOnly, "PM Only", "PM round (ล้าง+ตรวจ) ไม่มี cloud account"),
+                                (SolarApp.Models.Enums.ServiceLevel.Custom, "Custom", "เลือกเองด้านล่าง"),
+                            })
+                            {
+                                <input type="radio" class="btn-check" name="Input.ServiceLevel"
+                                       id="svc-@level.Item1" value="@((int)level.Item1)"
+                                       checked="@(Model.Input.ServiceLevel == level.Item1)" autocomplete="off" />
+                                <label class="btn btn-outline-primary mb-1 me-1" for="svc-@level.Item1"
+                                       title="@level.Item3">@level.Item2</label>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-4 col-6">
+                            <div class="form-check">
+                                <input asp-for="Input.IncludesMonitoring" class="form-check-input service-flag" />
+                                <label asp-for="Input.IncludesMonitoring" class="form-check-label">Monitoring</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-6">
+                            <div class="form-check">
+                                <input asp-for="Input.IncludesCleaning" class="form-check-input service-flag" />
+                                <label asp-for="Input.IncludesCleaning" class="form-check-label">ล้างแผงตามรอบ</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-6">
+                            <div class="form-check">
+                                <input asp-for="Input.IncludesPreventiveMaintenance" class="form-check-input service-flag" />
+                                <label asp-for="Input.IncludesPreventiveMaintenance" class="form-check-label">Preventive Maintenance</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-6">
+                            <div class="form-check">
+                                <input asp-for="Input.IncludesCorrectiveMaintenance" class="form-check-input service-flag" />
+                                <label asp-for="Input.IncludesCorrectiveMaintenance" class="form-check-label">Corrective Maintenance</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4 col-6">
+                            <div class="form-check">
+                                <input asp-for="Input.IncludesWarrantyService" class="form-check-input service-flag" />
+                                <label asp-for="Input.IncludesWarrantyService" class="form-check-label">Warranty service</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Input.ServiceNotes" class="form-label">หมายเหตุเงื่อนไขบริการ</label>
+                        <textarea asp-for="Input.ServiceNotes" class="form-control" rows="2"
+                                  placeholder="เช่น &quot;PM 2 ครั้ง/ปี เท่านั้น&quot;"></textarea>
+                    </div>
+                    @* ─── End Service Scope ────────────────────────────────────────── *@
+
                     <div class="mb-3">
                         <label asp-for="Input.Notes" class="form-label">Notes</label>
                         <textarea asp-for="Input.Notes" class="form-control" rows="3"></textarea>
@@ -198,6 +266,37 @@
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
     <script>
+        // ─── Service-scope preset → flag auto-toggling ───────────────────────
+        const SERVICE_LEVEL_PRESETS = {
+            0:  { mon: true,  clean: true,  pm: true,  cm: true,  warr: true  },
+            1:  { mon: true,  clean: false, pm: false, cm: false, warr: false },
+            2:  { mon: false, clean: true,  pm: false, cm: false, warr: false },
+            3:  { mon: false, clean: true,  pm: true,  cm: false, warr: false },
+        };
+        const flagMap = {
+            mon:   'Input.IncludesMonitoring',
+            clean: 'Input.IncludesCleaning',
+            pm:    'Input.IncludesPreventiveMaintenance',
+            cm:    'Input.IncludesCorrectiveMaintenance',
+            warr:  'Input.IncludesWarrantyService',
+        };
+        document.querySelectorAll('input[name="Input.ServiceLevel"]').forEach(radio => {
+            radio.addEventListener('change', e => {
+                const preset = SERVICE_LEVEL_PRESETS[parseInt(e.target.value, 10)];
+                if (!preset) return;
+                Object.entries(flagMap).forEach(([k, name]) => {
+                    const el = document.querySelector(`[name="${name}"]`);
+                    if (el) el.checked = preset[k];
+                });
+            });
+        });
+        document.querySelectorAll('.service-flag').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const customRadio = document.getElementById('svc-Custom');
+                if (customRadio) customRadio.checked = true;
+            });
+        });
+
         document.getElementById('testConnectionBtn')?.addEventListener('click', async () => {
             const btn = document.getElementById('testConnectionBtn');
             const result = document.getElementById('testResult');

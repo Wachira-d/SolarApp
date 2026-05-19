@@ -85,6 +85,15 @@ public class CreateModel : PageModel
         public decimal? FeedInTariffRate { get; set; }
         public decimal? ContractValue { get; set; }
 
+        // Service scope — defaults to full O&M for new sites
+        public ServiceLevel ServiceLevel { get; set; } = ServiceLevel.FullOM;
+        public bool IncludesMonitoring { get; set; } = true;
+        public bool IncludesCleaning { get; set; } = true;
+        public bool IncludesPreventiveMaintenance { get; set; } = true;
+        public bool IncludesCorrectiveMaintenance { get; set; } = true;
+        public bool IncludesWarrantyService { get; set; } = true;
+        public string? ServiceNotes { get; set; }
+
         public string? Notes { get; set; }
     }
 
@@ -144,6 +153,13 @@ public class CreateModel : PageModel
             FeedInTariffRate = Input.FeedInTariffRate,
             ContractValue = Input.ContractValue,
             Notes = Input.Notes,
+            ServiceLevel = Input.ServiceLevel,
+            IncludesMonitoring = Input.IncludesMonitoring,
+            IncludesCleaning = Input.IncludesCleaning,
+            IncludesPreventiveMaintenance = Input.IncludesPreventiveMaintenance,
+            IncludesCorrectiveMaintenance = Input.IncludesCorrectiveMaintenance,
+            IncludesWarrantyService = Input.IncludesWarrantyService,
+            ServiceNotes = string.IsNullOrWhiteSpace(Input.ServiceNotes) ? null : Input.ServiceNotes.Trim(),
             CreatedByUserId = user?.Id
         };
 

@@ -143,9 +143,13 @@ public class InstallationService : IInstallationService
 
     public async Task<List<Installation>> GetInstallationsNeedingCleaningAsync()
     {
+        // Only sites we're contracted to clean.  Partner-monitored sites that
+        // we don't visit must not generate cleaning reminders.
         return await _context.Installations
             .Include(i => i.Customer)
-            .Where(i => i.NextCleaningDueDate != null && i.NextCleaningDueDate <= DateTime.UtcNow)
+            .Where(i => i.IncludesCleaning
+                        && i.NextCleaningDueDate != null
+                        && i.NextCleaningDueDate <= DateTime.UtcNow)
             .ToListAsync();
     }
 

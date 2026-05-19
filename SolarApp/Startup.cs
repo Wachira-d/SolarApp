@@ -599,6 +599,23 @@ public class Startup
              Sql: "ALTER TABLE [CleaningRecords] ADD [AfterPhotos] nvarchar(max) NULL"),
             (Table: "WorkOrders", Column: "ReminderSentAt",
              Sql: "ALTER TABLE [WorkOrders] ADD [ReminderSentAt] datetime2 NULL"),
+
+            // Service-scope flags. Defaults preserve existing behaviour: every
+            // legacy row becomes Full O&M with all five services enabled.
+            (Table: "Installations", Column: "ServiceLevel",
+             Sql: "ALTER TABLE [Installations] ADD [ServiceLevel] int NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "IncludesMonitoring",
+             Sql: "ALTER TABLE [Installations] ADD [IncludesMonitoring] bit NOT NULL DEFAULT 1"),
+            (Table: "Installations", Column: "IncludesCleaning",
+             Sql: "ALTER TABLE [Installations] ADD [IncludesCleaning] bit NOT NULL DEFAULT 1"),
+            (Table: "Installations", Column: "IncludesPreventiveMaintenance",
+             Sql: "ALTER TABLE [Installations] ADD [IncludesPreventiveMaintenance] bit NOT NULL DEFAULT 1"),
+            (Table: "Installations", Column: "IncludesCorrectiveMaintenance",
+             Sql: "ALTER TABLE [Installations] ADD [IncludesCorrectiveMaintenance] bit NOT NULL DEFAULT 1"),
+            (Table: "Installations", Column: "IncludesWarrantyService",
+             Sql: "ALTER TABLE [Installations] ADD [IncludesWarrantyService] bit NOT NULL DEFAULT 1"),
+            (Table: "Installations", Column: "ServiceNotes",
+             Sql: "ALTER TABLE [Installations] ADD [ServiceNotes] nvarchar(1000) NULL"),
         };
 
         var indexUpgrades = new (string Name, string Table, string Columns)[]

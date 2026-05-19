@@ -37,8 +37,13 @@ public class SolarDataSyncJob
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
     public async Task ExecuteAsync()
     {
+        // Respect per-site service scope: sites flagged IncludesMonitoring=false
+        // are partner-monitored (we don't have a cloud account / aren't
+        // contracted to pull data). Skip them entirely so we don't waste API
+        // calls or surface bogus "API failure" alerts.
         var installations = await _context.Installations
             .Where(i => i.Status != InstallationStatus.Inactive
+                        && i.IncludesMonitoring
                         && i.PlantId != null && i.PlantId != "")
             .ToListAsync();
 

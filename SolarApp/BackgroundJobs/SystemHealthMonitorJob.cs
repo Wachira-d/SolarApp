@@ -68,8 +68,11 @@ public class SystemHealthMonitorJob
 
         // ─── Part A: API connection lost (LastOnlineAt is our "last successful
         // cloud contact" marker; if stale, the cloud is unreachable) ───
+        // Skip non-monitored sites: we have no cloud account for them, so a
+        // stale LastOnlineAt is expected and must not raise alerts.
         var offlineInstallations = await _context.Installations
             .Where(i => i.Status == InstallationStatus.Active
+                && i.IncludesMonitoring
                 && i.LastOnlineAt != null
                 && i.LastOnlineAt < threshold)
             .ToListAsync();
@@ -252,7 +255,7 @@ public class SystemHealthMonitorJob
         var windowStart = DateTime.UtcNow.AddHours(-offlineHoursThreshold);
 
         var candidates = await _context.Installations
-            .Where(i => i.Status == InstallationStatus.Active)
+            .Where(i => i.Status == InstallationStatus.Active && i.IncludesMonitoring)
             .ToListAsync();
 
         // Look back 7 days to distinguish real outages from "never worked" config errors
@@ -372,8 +375,11 @@ public class SystemHealthMonitorJob
 
     private async Task CheckMaintenanceDueAsync()
     {
+        // Only raise "cleaning due" alerts for sites we actually clean.
         var installations = await _context.Installations
-            .Where(i => i.NextCleaningDueDate != null && i.NextCleaningDueDate <= DateTime.UtcNow)
+            .Where(i => i.IncludesCleaning
+                        && i.NextCleaningDueDate != null
+                        && i.NextCleaningDueDate <= DateTime.UtcNow)
             .ToListAsync();
 
         foreach (var installation in installations)
@@ -403,9 +409,13 @@ public class SystemHealthMonitorJob
 
     private async Task CheckWarrantyExpiryAsync()
     {
+        // Warranty-expiry reminders are only relevant for sites where we
+        // handle warranty service. Customer-managed warranty sites get no
+        // reminder from us.
         var threshold = DateTime.UtcNow.AddDays(90);
         var installations = await _context.Installations
-            .Where(i => i.WarrantyExpiryDate <= threshold
+            .Where(i => i.IncludesWarrantyService
+                && i.WarrantyExpiryDate <= threshold
                 && i.WarrantyExpiryDate > DateTime.UtcNow)
             .ToListAsync();
 
