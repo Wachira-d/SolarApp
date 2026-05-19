@@ -15,7 +15,13 @@
                 <form method="post">
                     <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
                     <input type="hidden" asp-for="Input.Id" />
-                    <input type="hidden" asp-for="Input.CustomerId" />
+                    @* No hidden Input.CustomerId here — the <select> at line 56
+                       already submits this field.  Having both produces TWO
+                       form values with the same name, and ASP.NET model binding
+                       takes the FIRST one (= the hidden's stale value from page
+                       load), silently ignoring the dropdown selection.  That
+                       caused the "switching customer renames the original"
+                       bug because the reassign guards saw no change. *@
 
                     <!-- Site Information -->
                     <h6 class="text-muted mb-3">Site Information</h6>

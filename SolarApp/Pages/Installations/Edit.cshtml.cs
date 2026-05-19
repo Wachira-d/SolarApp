@@ -144,6 +144,29 @@ public class EditModel : PageModel
         if (installation.Id != Input.Id)
             return BadRequest();
 
+        // Defense layer 5 — duplicate form-field guard.  If the cshtml ever
+        // accidentally emits two <input name="Input.CustomerId"> elements
+        // (e.g. someone re-adds a hidden field next to the dropdown), the
+        // default scalar binder takes the FIRST value, which is the stale
+        // page-load id — making the page silently ignore the user's dropdown
+        // selection and triggering the customer-rename bug.  Detect that
+        // case here and prefer the LAST value (the dropdown is always the
+        // last <select name="Input.CustomerId"> in form order).
+        if (Request.HasFormContentType)
+        {
+            var rawCustomerIds = Request.Form["Input.CustomerId"];
+            if (rawCustomerIds.Count > 1
+                && int.TryParse(rawCustomerIds[rawCustomerIds.Count - 1], out var lastCid)
+                && lastCid != Input.CustomerId)
+            {
+                _logger.LogWarning(
+                    "Edit Installation {Id}: form submitted {Count} Input.CustomerId values ({Values}); binder picked '{Bound}' but dropdown was '{Last}'. Overriding to dropdown value.",
+                    id, rawCustomerIds.Count, string.Join(",", rawCustomerIds.ToArray()),
+                    Input.CustomerId, lastCid);
+                Input.CustomerId = lastCid;
+            }
+        }
+
         if (!ModelState.IsValid)
         {
             await LoadCustomerDisplayNameAsync(installation.CustomerId);
