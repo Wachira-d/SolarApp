@@ -11,13 +11,22 @@ namespace SolarApp.Services.InverterApi.Adapters;
 /// <summary>
 /// Solis Cloud API Adapter.
 ///
-/// Mode 1 - Official API (HMAC-SHA1 signature):
-///   ApiKey = API Key ID, ApiSecret = API Key Secret
-///   Get from: SolisCloud > User Profile > API Management
+/// Mode 1 — Official HMAC API (preferred, supported by SolisCloud):
+///   ApiKey    = API Key ID
+///   ApiSecret = API Key Secret
+///   Get from  : SolisCloud → User Profile → API Management
 ///
-/// Mode 2 - Reverse Web Login (unofficial, when ApiKey = "SOLISWEB"):
-///   Username = SolisCloud email, Password = SolisCloud password
-///   Uses the same login flow as the web dashboard.
+/// Mode 2 — Reverse Web Login (no API key needed, may break if Solis
+/// changes the web portal):
+///   Username  = SolisCloud email
+///   Password  = SolisCloud password
+///   ApiKey    = blank  (or the legacy "SOLISWEB" sentinel — still accepted)
+///   ApiSecret = blank
+///
+/// Mode is auto-detected: any credential set with Username+Password but
+/// no ApiKey/ApiSecret is treated as web-login.  The legacy "SOLISWEB"
+/// sentinel is still recognised so existing installations don't need a
+/// data migration.
 ///
 /// PlantId = Station ID (numeric, e.g. 1298491919450550810)
 /// </summary>
@@ -36,24 +45,47 @@ public class SolisAdapter : IInverterApiAdapter
         _logger = logger;
     }
 
-    private bool IsWebMode(ApiCredentials c) =>
-        string.Equals(c.ApiKey, "SOLISWEB", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Web-login mode: chosen automatically when the operator leaves
+    /// ApiKey/ApiSecret blank and provides Username+Password instead.
+    /// The legacy explicit sentinel "SOLISWEB" is also accepted for
+    /// installations that were configured before auto-detect existed.
+    /// </summary>
+    private static bool IsWebMode(ApiCredentials c)
+    {
+        if (string.Equals(c.ApiKey, "SOLISWEB", StringComparison.OrdinalIgnoreCase))
+            return true;
+        var hasApi = !string.IsNullOrWhiteSpace(c.ApiKey) && !string.IsNullOrWhiteSpace(c.ApiSecret);
+        var hasUserPass = !string.IsNullOrWhiteSpace(c.Username) && !string.IsNullOrWhiteSpace(c.Password);
+        return !hasApi && hasUserPass;
+    }
 
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
+        var hasApiKey = !string.IsNullOrWhiteSpace(credentials.ApiKey)
+            && !string.Equals(credentials.ApiKey, "SOLISWEB", StringComparison.OrdinalIgnoreCase);
+        var hasApiSecret = !string.IsNullOrWhiteSpace(credentials.ApiSecret);
+        var hasUser = !string.IsNullOrWhiteSpace(credentials.Username);
+        var hasPass = !string.IsNullOrWhiteSpace(credentials.Password);
+
+        if (!hasApiKey && !hasApiSecret && !hasUser && !hasPass)
+            return (false,
+                "Solis: enter either (a) API Key + API Secret from SolisCloud → User Profile → API Management, " +
+                "or (b) your SolisCloud Username (email) + Password.");
+
         if (IsWebMode(credentials))
         {
-            if (string.IsNullOrEmpty(credentials.Username))
-                return (false, "Username (SolisCloud email) is required for SOLISWEB mode");
-            if (string.IsNullOrEmpty(credentials.Password))
-                return (false, "Password (SolisCloud password) is required for SOLISWEB mode");
+            if (!hasUser)
+                return (false, "Solis web-login mode: Username (SolisCloud email) is required.");
+            if (!hasPass)
+                return (false, "Solis web-login mode: Password (SolisCloud password) is required.");
         }
         else
         {
-            if (string.IsNullOrEmpty(credentials.ApiKey))
-                return (false, "API Key ID is required (get from SolisCloud > User Profile > API Management)");
-            if (string.IsNullOrEmpty(credentials.ApiSecret))
-                return (false, "API Secret is required");
+            if (!hasApiKey)
+                return (false, "Solis API mode: API Key ID is required (or leave blank and provide Username/Password).");
+            if (!hasApiSecret)
+                return (false, "Solis API mode: API Secret is required.");
         }
 
         try
@@ -65,18 +97,18 @@ public class SolisAdapter : IInverterApiAdapter
                 {
                     var diagnostic = _lastWebLoginError ?? "No diagnostic info";
                     return (false,
-                        "Solis SOLISWEB mode no longer works reliably — SolisCloud has locked down their " +
-                        "web portal login endpoints and now requires HMAC-SHA1 signature auth " +
-                        "(same as the official API).\n\n" +
-                        "▶ SOLUTION: Switch to Official API mode\n" +
+                        "Solis web-login failed.  SolisCloud has progressively locked down their " +
+                        "web portal endpoints, so password login can break without warning when " +
+                        "they ship a portal update.\n\n" +
+                        "▶ RECOMMENDED: switch to Official API mode\n" +
                         "  1. Login to https://www.soliscloud.com\n" +
                         "  2. Go to: My Account → API Management → Apply for API Key\n" +
                         "  3. Wait for approval (usually same-day)\n" +
                         "  4. Get the Key ID and Key Secret\n" +
                         "  5. In SolarApp, edit this installation:\n" +
-                        "     • API Key = your Key ID (not the word 'SOLISWEB')\n" +
+                        "     • API Key    = your Key ID\n" +
                         "     • API Secret = your Key Secret\n" +
-                        "     • Leave Username/Password blank\n\n" +
+                        "     • Username/Password may be left blank\n\n" +
                         $"Diagnostic from login attempts:\n{Truncate(diagnostic, 1200)}");
                 }
 
