@@ -116,6 +116,52 @@ public class Installation
     /// <summary>Free-form notes for unusual contract terms (e.g. "PM 2 ครั้ง/ปี เท่านั้น").</summary>
     public string? ServiceNotes { get; set; }
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  Cloud connection — how and how often we poll the brand API
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>How we authenticate to the brand's cloud (see BrandCapabilities for what each brand supports).</summary>
+    public ConnectionMethod ConnectionMethod { get; set; } = ConnectionMethod.OfficialApi;
+
+    /// <summary>
+    /// How often the background sync job should hit this site's cloud API.
+    /// Operator-chosen from a dropdown of presets (5 / 15 / 30 / 60 / 120 /
+    /// 360 / 720 / 1440 min); clamped to the brand's minimum at save time.
+    /// </summary>
+    public int SyncIntervalMinutes { get; set; } = 15;
+
+    /// <summary>
+    /// Earliest UTC time the next sync may run.  SolarDataSyncJob filters on
+    /// this so each site fires at its own cadence even though the Hangfire
+    /// job runs on a uniform 5-min schedule.  Null = never synced yet (eligible).
+    /// </summary>
+    public DateTime? NextSyncDueAt { get; set; }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Customer alerts — LINE group routing + per-event toggles
+    // ─────────────────────────────────────────────────────────────────────
+    // We push event-driven alerts to the customer over LINE.  Customers
+    // care most about "solar system down" (grid loss, inverter offline).
+    // Operators choose which event categories to forward per installation.
+
+    /// <summary>LINE group / user / room id to push customer-facing alerts to.</summary>
+    public string? LineGroupId { get; set; }
+
+    /// <summary>Notify on grid-loss / inverter offline (customer-visible — recommended ON).</summary>
+    public bool NotifyOnGridLoss { get; set; } = true;
+
+    /// <summary>Notify when cloud API stops responding (system-internal — usually OFF for customer LINE).</summary>
+    public bool NotifyOnApiFailure { get; set; } = false;
+
+    /// <summary>Notify when production is well below the expected curve for the day.</summary>
+    public bool NotifyOnLowProduction { get; set; } = false;
+
+    /// <summary>Remind when a scheduled cleaning is due.</summary>
+    public bool NotifyOnCleaningDue { get; set; } = false;
+
+    /// <summary>Remind when warranty expiry is approaching.</summary>
+    public bool NotifyOnWarrantyExpiry { get; set; } = false;
+
     // Financial
     public decimal? ContractValue { get; set; }
     public decimal ElectricityRatePerKwh { get; set; } = 4.0m;

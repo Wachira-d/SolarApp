@@ -575,11 +575,36 @@ public class SystemHealthMonitorJob
                 sentInThisCycle++;
             }
 
-            // 1. Send to Alert Group (if configured)
+            // 1. Send to Alert Group (technical message — for operator staff)
             await SendOneAsync(alertGroupId ?? "", "group");
 
-            // 2. Notify customer via LINE (Customer + LineUserId must exist)
-            await SendOneAsync(alert.Installation.Customer?.LineUserId ?? "", "customer");
+            // 2. Notify customer via LINE.  Uses installation.LineGroupId if
+            //    configured (per-installation routing), else falls back to
+            //    Customer.LineUserId.  Customer-facing message is plain Thai
+            //    (see CustomerAlertMessageBuilder), and we only send the
+            //    alert types that the operator enabled for this site
+            //    (NotifyOnGridLoss / NotifyOnLowProduction / ...).
+            var customerLineId = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
+                .PickRecipient(alert.Installation);
+            var customerNotifyAllowed = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
+                .ShouldNotifyCustomer(alert.Installation, alert.AlertType);
+            if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed
+                && sentInThisCycle < maxSendsPerCycle)
+            {
+                attempted++;
+                try
+                {
+                    var customerMsg = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
+                        .Build(alert, alert.Installation);
+                    await _lineService.SendMessageAsync(customerLineId, customerMsg);
+                    succeeded++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed LINE customer notify for alert {Id}", alert.Id);
+                }
+                sentInThisCycle++;
+            }
 
             // 3. Notify partner users via LINE (from preloaded dict, no N+1)
             if (alert.Installation.PartnerId.HasValue

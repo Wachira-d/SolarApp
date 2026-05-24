@@ -330,6 +330,120 @@
 
                     @* ─── End Service Scope ────────────────────────────────────────── *@
 
+                    @* ─── Cloud Connection ─────────────────────────────────────────── *@
+                    <hr />
+                    <h5 class="mb-3">การเชื่อมต่อ Cloud API</h5>
+                    @{
+                        var cap = SolarApp.Services.InverterApi.Common.BrandCapabilities.Get(Model.Input.InverterBrand);
+                    }
+                    <p class="text-muted small mb-2">
+                        Brand <strong>@Model.Input.InverterBrand</strong> รองรับ:
+                        <code>@string.Join(", ", cap.SupportedMethods)</code>
+                        — ขั้นต่ำ <strong>@cap.MinIntervalMinutes นาที</strong>/รอบ.
+                        @cap.Notes
+                    </p>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.ConnectionMethod" class="form-label">วิธีเชื่อมต่อ</label>
+                            <select asp-for="Input.ConnectionMethod" class="form-select">
+                                @foreach (var m in cap.SupportedMethods)
+                                {
+                                    <option value="@((int)m)" selected="@(Model.Input.ConnectionMethod == m)">
+                                        @(m switch {
+                                            SolarApp.Models.Enums.ConnectionMethod.OfficialApi  => "Official API (API Key + Secret)",
+                                            SolarApp.Models.Enums.ConnectionMethod.UserPassword => "Username + Password (web-login)",
+                                            SolarApp.Models.Enums.ConnectionMethod.Hybrid       => "Hybrid",
+                                            _ => m.ToString(),
+                                        })
+                                    </option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.SyncIntervalMinutes" class="form-label">ความถี่ในการดึงข้อมูล</label>
+                            <select asp-for="Input.SyncIntervalMinutes" class="form-select">
+                                @foreach (var v in SolarApp.Services.InverterApi.Common.BrandCapabilities.AllowedIntervalMinutes)
+                                {
+                                    var disabled = v < cap.MinIntervalMinutes;
+                                    var label = v switch {
+                                        < 60   => $"ทุก {v} นาที",
+                                        60     => "ทุก 1 ชั่วโมง",
+                                        < 1440 => $"ทุก {v/60} ชั่วโมง",
+                                        1440   => "วันละครั้ง",
+                                        _      => $"{v} นาที",
+                                    };
+                                    <option value="@v" selected="@(Model.Input.SyncIntervalMinutes == v)" disabled="@disabled">
+                                        @label@(disabled ? " (ต่ำกว่า brand ขั้นต่ำ)" : "")
+                                    </option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    @* ─── End Cloud Connection ──────────────────────────────────────── *@
+
+                    @* ─── LINE Alerts ───────────────────────────────────────────────── *@
+                    <hr />
+                    <h5 class="mb-3"><i class="bi bi-line"></i> แจ้งเตือนลูกค้าผ่าน LINE</h5>
+                    <p class="text-muted small mb-2">
+                        ส่งแจ้งเตือนเข้า LINE Group / User ของลูกค้าได้โดยตรง
+                        เลือกได้ว่าจะส่งเรื่องอะไรบ้าง — ปล่อยว่างถ้าไม่ต้องการส่ง
+                    </p>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.LineGroupId" class="form-label">LINE Group / User ID</label>
+                            <input asp-for="Input.LineGroupId" class="form-control" placeholder="C1234... หรือ U1234..." />
+                            <small class="text-muted">
+                                ถ้าเว้นว่าง — ระบบจะใช้ LineUserId ของลูกค้าใน Customer แทน
+                            </small>
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-6 col-12">
+                            <div class="form-check">
+                                <input asp-for="Input.NotifyOnGridLoss" class="form-check-input" />
+                                <label asp-for="Input.NotifyOnGridLoss" class="form-check-label">
+                                    <strong class="text-danger">🚨 ระบบดับ / ไม่ผลิตไฟฟ้า</strong>
+                                    <small class="d-block text-muted">เช่น ไฟดับ inverter ออฟไลน์ Grid loss — แนะนำให้เปิด</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-12">
+                            <div class="form-check">
+                                <input asp-for="Input.NotifyOnLowProduction" class="form-check-input" />
+                                <label asp-for="Input.NotifyOnLowProduction" class="form-check-label">
+                                    ⚡ ผลิตไฟต่ำกว่าปกติ
+                                    <small class="d-block text-muted">production ต่ำกว่ากราฟปกติของวันนั้น ๆ</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-12">
+                            <div class="form-check">
+                                <input asp-for="Input.NotifyOnCleaningDue" class="form-check-input" />
+                                <label asp-for="Input.NotifyOnCleaningDue" class="form-check-label">
+                                    💧 ครบรอบล้างแผง
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-12">
+                            <div class="form-check">
+                                <input asp-for="Input.NotifyOnWarrantyExpiry" class="form-check-input" />
+                                <label asp-for="Input.NotifyOnWarrantyExpiry" class="form-check-label">
+                                    📋 ใกล้หมดประกัน
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-12">
+                            <div class="form-check">
+                                <input asp-for="Input.NotifyOnApiFailure" class="form-check-input" />
+                                <label asp-for="Input.NotifyOnApiFailure" class="form-check-label">
+                                    🔌 API เชื่อมต่อ cloud ไม่ได้
+                                    <small class="d-block text-muted">เป็นปัญหาทางเทคนิคของระบบ มักไม่แนะนำให้ส่งหาลูกค้า</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    @* ─── End LINE Alerts ──────────────────────────────────────────────── *@
+
                     <div class="mb-3">
                         <label asp-for="Input.Notes" class="form-label">Notes</label>
                         <textarea asp-for="Input.Notes" class="form-control" rows="3"></textarea>

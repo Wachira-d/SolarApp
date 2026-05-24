@@ -37,14 +37,16 @@ public class SolarDataSyncJob
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
     public async Task ExecuteAsync()
     {
-        // Respect per-site service scope: sites flagged IncludesMonitoring=false
-        // are partner-monitored (we don't have a cloud account / aren't
-        // contracted to pull data). Skip them entirely so we don't waste API
-        // calls or surface bogus "API failure" alerts.
+        // Respect per-site service scope AND per-site sync interval.
+        //   * IncludesMonitoring=false → partner-monitored site, skip entirely.
+        //   * NextSyncDueAt in the future → site is on a longer cadence than
+        //     this Hangfire run; skip until its due time arrives.
+        var now = DateTime.UtcNow;
         var installations = await _context.Installations
             .Where(i => i.Status != InstallationStatus.Inactive
                         && i.IncludesMonitoring
-                        && i.PlantId != null && i.PlantId != "")
+                        && i.PlantId != null && i.PlantId != ""
+                        && (i.NextSyncDueAt == null || i.NextSyncDueAt <= now))
             .ToListAsync();
 
         _logger.LogInformation("Solar data sync: starting for {Count} installations", installations.Count);
@@ -650,6 +652,12 @@ public class SolarDataSyncJob
                 LogApiCall(installation, "Sync", 500, false,
                     $"[UNEXPECTED ERROR] {ex.GetType().Name}: {ex.Message}");
             }
+
+            // Schedule next sync per-installation cadence. The Hangfire job
+            // runs every 5 min globally; this gate keeps us from re-syncing
+            // a 1-hour-interval site until its hour is up.
+            var interval = installation.SyncIntervalMinutes <= 0 ? 15 : installation.SyncIntervalMinutes;
+            installation.NextSyncDueAt = DateTime.UtcNow.AddMinutes(interval);
 
             // Batch save every 10 installations to reduce DB round-trips
             // (was: SaveChangesAsync per installation = 100+ round-trips per sync)

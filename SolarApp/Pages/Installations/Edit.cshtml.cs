@@ -112,6 +112,18 @@ public class EditModel : PageModel
         public bool IncludesWarrantyService { get; set; } = true;
         public string? ServiceNotes { get; set; }
 
+        // Cloud connection method + sync frequency
+        public ConnectionMethod ConnectionMethod { get; set; } = ConnectionMethod.OfficialApi;
+        public int SyncIntervalMinutes { get; set; } = 15;
+
+        // Customer LINE alerts
+        public string? LineGroupId { get; set; }
+        public bool NotifyOnGridLoss { get; set; } = true;
+        public bool NotifyOnApiFailure { get; set; } = false;
+        public bool NotifyOnLowProduction { get; set; } = false;
+        public bool NotifyOnCleaningDue { get; set; } = false;
+        public bool NotifyOnWarrantyExpiry { get; set; } = false;
+
         public string? Notes { get; set; }
     }
 
@@ -341,6 +353,26 @@ public class EditModel : PageModel
         installation.IncludesWarrantyService = Input.IncludesWarrantyService;
         installation.ServiceNotes = string.IsNullOrWhiteSpace(Input.ServiceNotes) ? null : Input.ServiceNotes.Trim();
 
+        // Cloud connection — clamp interval to the brand-allowed minimum so
+        // an operator can't pick "5 min" for a brand that mandates 15.
+        installation.ConnectionMethod = Input.ConnectionMethod;
+        installation.SyncIntervalMinutes = SolarApp.Services.InverterApi.Common.BrandCapabilities
+            .ClampInterval(Input.InverterBrand, Input.SyncIntervalMinutes);
+
+        // Reset NextSyncDueAt so the next Hangfire run picks this site up
+        // immediately when the interval was just lowered (and naturally
+        // honours the new floor when it was raised, since the sync job
+        // sets NextSyncDueAt = now + interval after each successful sync).
+        installation.NextSyncDueAt = null;
+
+        // LINE customer-alert routing
+        installation.LineGroupId = string.IsNullOrWhiteSpace(Input.LineGroupId) ? null : Input.LineGroupId.Trim();
+        installation.NotifyOnGridLoss = Input.NotifyOnGridLoss;
+        installation.NotifyOnApiFailure = Input.NotifyOnApiFailure;
+        installation.NotifyOnLowProduction = Input.NotifyOnLowProduction;
+        installation.NotifyOnCleaningDue = Input.NotifyOnCleaningDue;
+        installation.NotifyOnWarrantyExpiry = Input.NotifyOnWarrantyExpiry;
+
         // Recalculate WarrantyExpiryDate if WarrantyYears changed
         if (installation.WarrantyYears != Input.WarrantyYears)
         {
@@ -452,6 +484,14 @@ public class EditModel : PageModel
             IncludesCorrectiveMaintenance = installation.IncludesCorrectiveMaintenance,
             IncludesWarrantyService = installation.IncludesWarrantyService,
             ServiceNotes = installation.ServiceNotes,
+            ConnectionMethod = installation.ConnectionMethod,
+            SyncIntervalMinutes = installation.SyncIntervalMinutes <= 0 ? 15 : installation.SyncIntervalMinutes,
+            LineGroupId = installation.LineGroupId,
+            NotifyOnGridLoss = installation.NotifyOnGridLoss,
+            NotifyOnApiFailure = installation.NotifyOnApiFailure,
+            NotifyOnLowProduction = installation.NotifyOnLowProduction,
+            NotifyOnCleaningDue = installation.NotifyOnCleaningDue,
+            NotifyOnWarrantyExpiry = installation.NotifyOnWarrantyExpiry,
         };
     }
 

@@ -616,6 +616,28 @@ public class Startup
              Sql: "ALTER TABLE [Installations] ADD [IncludesWarrantyService] bit NOT NULL DEFAULT 1"),
             (Table: "Installations", Column: "ServiceNotes",
              Sql: "ALTER TABLE [Installations] ADD [ServiceNotes] nvarchar(1000) NULL"),
+
+            // Cloud-connection per-installation overrides
+            (Table: "Installations", Column: "ConnectionMethod",
+             Sql: "ALTER TABLE [Installations] ADD [ConnectionMethod] int NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "SyncIntervalMinutes",
+             Sql: "ALTER TABLE [Installations] ADD [SyncIntervalMinutes] int NOT NULL DEFAULT 15"),
+            (Table: "Installations", Column: "NextSyncDueAt",
+             Sql: "ALTER TABLE [Installations] ADD [NextSyncDueAt] datetime2 NULL"),
+
+            // Customer LINE-alert routing
+            (Table: "Installations", Column: "LineGroupId",
+             Sql: "ALTER TABLE [Installations] ADD [LineGroupId] nvarchar(100) NULL"),
+            (Table: "Installations", Column: "NotifyOnGridLoss",
+             Sql: "ALTER TABLE [Installations] ADD [NotifyOnGridLoss] bit NOT NULL DEFAULT 1"),
+            (Table: "Installations", Column: "NotifyOnApiFailure",
+             Sql: "ALTER TABLE [Installations] ADD [NotifyOnApiFailure] bit NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "NotifyOnLowProduction",
+             Sql: "ALTER TABLE [Installations] ADD [NotifyOnLowProduction] bit NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "NotifyOnCleaningDue",
+             Sql: "ALTER TABLE [Installations] ADD [NotifyOnCleaningDue] bit NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "NotifyOnWarrantyExpiry",
+             Sql: "ALTER TABLE [Installations] ADD [NotifyOnWarrantyExpiry] bit NOT NULL DEFAULT 0"),
         };
 
         var indexUpgrades = new (string Name, string Table, string Columns)[]
