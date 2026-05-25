@@ -359,23 +359,52 @@ public static class InverterKnowledgeBase
 
     public static KnownCase? MatchFaultCode(InverterBrand brand, string errorText)
     {
-        var upper = errorText.ToUpperInvariant();
+        // Strip parenthesised "for example" enumerations BEFORE keyword
+        // matching.  Without this, alert text like
+        //   "Open FusionSolar to see the alarm (e.g. Grid Loss, Insulation,
+        //    OverTemp)"
+        // gets matched against "INSULATION" and produces a fake "Huawei
+        // 2063 DC insulation" diagnosis on sites whose actual alarm is
+        // something completely different (network disconnect, comms loss,
+        // …).  Those enumerations are explanations of *possible* causes,
+        // never the actual cause.
+        var stripped = System.Text.RegularExpressions.Regex.Replace(
+            errorText ?? string.Empty,
+            @"\([^()]*(?:e\.g\.|i\.e\.|such as|เช่น|ตัวอย่าง|เช่นเช่น)[^()]*\)",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var upper = stripped.ToUpperInvariant();
 
         if (brand == InverterBrand.Huawei)
         {
-            if (upper.Contains("2063") || upper.Contains("INSULATION"))
+            // Tighter keyword: "INSULATION RESISTANCE" / "ISO RESISTANCE"
+            // (the specific Huawei 2063 fault wording).  Bare "INSULATION"
+            // appears in too many unrelated contexts to be a reliable
+            // single-token match.
+            if (upper.Contains("2063")
+                || upper.Contains("INSULATION RESISTANCE")
+                || upper.Contains("ISO RESISTANCE")
+                || upper.Contains("INSULATION FAULT"))
                 return new(
                     new[] { "Huawei 2063: Low insulation resistance", "ตรวจสาย DC ว่ามีน้ำเข้า connector", "ตรวจแผงว่ามี hotspot/crack" },
                     new[] { "ตรวจ MC4 connector ทุกจุด — ถอดเช็คความชื้น", "วัด insulation resistance ด้วย megger", "เปลี่ยนสาย DC ที่สงสัย" },
                     "Huawei fault 2063: DC insulation resistance low — check wiring and connector moisture");
 
+            // "RESIDUAL CURRENT" is the specific Huawei 2064 phrase; bare
+            // "RESIDUAL" is too broad (matches unrelated alarm text).
             if (upper.Contains("2064") || upper.Contains("RESIDUAL CURRENT"))
                 return new(
                     new[] { "Huawei 2064: High residual current — earth leakage ⚠ safety critical", "ตรวจสายดิน", "ตรวจ ELCB/RCD ว่าไม่ trip" },
                     new[] { "ตรวจ grounding ทั้งระบบ", "ตรวจ DC cable ว่าไม่สัมผัสโลหะ", "ถ้าเกิดซ้ำ → ส่งช่างตรวจ earth leakage path" },
                     "Huawei fault 2064: Residual current — safety-critical earth leakage");
 
-            if (upper.Contains("2031") || upper.Contains("ARC"))
+            // "ARC" alone is a too-common 3-letter substring (matches words
+            // like "March", "search", "Aarchive"). Require "ARC FAULT" /
+            // "DC ARC" / "ARCING" or the numeric code.
+            if (upper.Contains("2031")
+                || upper.Contains("ARC FAULT")
+                || upper.Contains("DC ARC")
+                || upper.Contains("ARCING"))
                 return new(
                     new[] { "Huawei 2031: DC Arc Fault ⚠ FIRE RISK", "ตรวจ MC4 connector ว่าแน่นดี", "ตรวจสาย DC ว่าไม่มีรอยขาด/ถลอก" },
                     new[] { "ปิดระบบทันที ถ้ามี arc จริง", "ตรวจ MC4 ทุกจุด — ขันให้แน่น", "เปลี่ยน MC4 ที่สงสัย (ไม่ควรใช้ซ้ำ)" },
@@ -384,13 +413,17 @@ public static class InverterKnowledgeBase
 
         if (brand == InverterBrand.GoodWe)
         {
-            if (upper.Contains("E010") || upper.Contains("RESIDUAL"))
+            // Bare "RESIDUAL" matched too many unrelated contexts; require
+            // "RESIDUAL CURRENT" or the numeric code.
+            if (upper.Contains("E010") || upper.Contains("RESIDUAL CURRENT"))
                 return new(
                     new[] { "GoodWe E010: Residual current fault", "ตรวจ MC4 ว่ามีน้ำเข้า", "มักเกิดหลังฝนตก" },
                     new[] { "ทำให้ MC4 แห้ง → ใช้ silicone seal", "ตรวจ DC cable route ว่าน้ำไม่ไหลผ่าน" },
                     "GoodWe E010: Residual current — usually MC4 water ingress in monsoon");
 
-            if (upper.Contains("CODE 16") || upper.Contains("FAN"))
+            // Bare "FAN" matched any word containing "fan" (e.g. "fan-out").
+            // Require "FAN FAILURE" / "FAN FAULT" or the numeric code.
+            if (upper.Contains("CODE 16") || upper.Contains("FAN FAILURE") || upper.Contains("FAN FAULT"))
                 return new(
                     new[] { "GoodWe Code 16: External fan failure", "ตรวจเสียงพัดลม", "ตรวจว่าพัดลมหมุนหรือไม่" },
                     new[] { "เปลี่ยนพัดลม", "ทำความสะอาดฝุ่นที่ heat sink" },
@@ -399,19 +432,28 @@ public static class InverterKnowledgeBase
 
         if (brand == InverterBrand.Deye)
         {
-            if (upper.Contains("F06") || upper.Contains("OVERVOLTAGE") || upper.Contains("GRID.*VOLT"))
+            // "GRID.*VOLT" was a literal substring (NOT regex), so it never
+            // matched anything; dropped.  "OVERVOLTAGE" alone is specific
+            // enough.
+            if (upper.Contains("F06") || upper.Contains("OVERVOLTAGE") || upper.Contains("GRID OVER VOLT"))
                 return new(
                     new[] { "Deye F06: Grid overvoltage", "ตรวจ voltage ที่หน้า meter (>253V = ผิดปกติ)", "มักเกิดในพื้นที่ชนบท/หม้อแปลงไกล" },
                     new[] { "แจ้ง กฟภ./กฟน. ให้ตรวจ tap หม้อแปลง", "ปรับ grid voltage upper limit ใน inverter (ถ้ากฎหมายอนุญาต)" },
                     "Deye F06: Grid overvoltage — common in rural Thailand, report to utility for transformer tap adjustment");
 
-            if (upper.Contains("F07") || upper.Contains("OVER.*TEMP") || upper.Contains("TEMPERATURE"))
+            // Same: "OVER.*TEMP" was a literal substring. "TEMPERATURE" alone
+            // is too generic ("ambient temperature OK" matches!) — require
+            // "OVER TEMP" / "OVERTEMP" / numeric code.
+            if (upper.Contains("F07") || upper.Contains("OVERTEMP") || upper.Contains("OVER TEMP")
+                || upper.Contains("OVER-TEMPERATURE") || upper.Contains("HIGH TEMPERATURE"))
                 return new(
                     new[] { "Deye F07: Over-temperature", "ตรวจอุณหภูมิ inverter", "ตรวจช่องระบายอากาศ" },
                     new[] { "รอ 30-60 นาทีให้เย็นลง", "ติดพัดลมเสริม/หลังคาบังแดด", "ทำความสะอาดช่องระบายอากาศ" },
                     "Deye F07: Over-temperature — common in Thai climate, improve ventilation");
 
-            if (upper.Contains("W03") || upper.Contains("CAN") || upper.Contains("BMS"))
+            // Bare "CAN" matched the English modal verb ("you can…").
+            // Require "CAN BUS" / "CAN COMM" / "CAN COMMUNICATION".
+            if (upper.Contains("W03") || upper.Contains("CAN BUS") || upper.Contains("CAN COMM") || upper.Contains("BMS"))
                 return new(
                     new[] { "Deye W03: CAN communication failure with battery BMS", "ตรวจสาย CAN cable", "ตรวจ battery BMS ว่ายังทำงาน" },
                     new[] { "ตรวจ CAN cable connector ทั้งสองฝั่ง", "เปลี่ยนสาย CAN ถ้าสงสัย", "Restart battery + inverter" },
@@ -420,7 +462,10 @@ public static class InverterKnowledgeBase
 
         if (brand == InverterBrand.FoxESS)
         {
-            if (upper.Contains("F37") || upper.Contains("ISOLATION") || upper.Contains("INSULATION"))
+            // Same INSULATION reasoning as Huawei 2063 — bare "INSULATION"
+            // matches example-list text.  Use specific phrasing only.
+            if (upper.Contains("F37") || upper.Contains("ISOLATION FAULT")
+                || upper.Contains("INSULATION RESISTANCE") || upper.Contains("INSULATION FAULT"))
                 return new(
                     new[] { "FoxESS F37: DC isolation fault", "ตรวจ DC cable ว่ามีน้ำเข้า", "มักเกิดช่วงฤดูฝน" },
                     new[] { "ตรวจ MC4 ทุกจุด", "วัด insulation resistance", "ซีล conduit ด้วย silicone" },

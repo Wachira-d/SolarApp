@@ -478,7 +478,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                 IsOnline = isOnline,
                 Health = mappedHealth,
                 FaultReason = mappedHealth == HealthState.Faulty
-                    ? "Station reported faulty by Huawei (real_health_state=1) — check FusionSolar app for the specific alarm (e.g. Grid Loss, Insulation, OverTemp)"
+                    ? "Huawei reports station faulty (real_health_state=1). Open FusionSolar to view the specific alarm — the actual alarm code/name will be ingested via getAlarmList on the next sync round and surfaced as its own alert."
                     : null
             };
         }
@@ -661,7 +661,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                     IsOnline = isOnline,
                     Health = mappedHealth,
                     FaultReason = mappedHealth == HealthState.Faulty
-                        ? "Station reported faulty by Huawei (real_health_state=1) — check FusionSolar app for the specific alarm (e.g. Grid Loss, Insulation, OverTemp)"
+                        ? "Huawei reports station faulty (real_health_state=1). Open FusionSolar to view the specific alarm — the actual alarm code/name will be ingested via getAlarmList on the next sync round and surfaced as its own alert."
                         : null
                 };
             }

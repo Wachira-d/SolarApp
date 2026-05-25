@@ -355,22 +355,49 @@ public class SolarDataSyncJob
 
                     if (!existingFault)
                     {
+                        // Pull the most recent OPEN per-alarm records so the
+                        // generic Station Faulty alert references the actual
+                        // Huawei alarm(s) — not our placeholder text.  Anything
+                        // ingested by GetAlarmsAsync in a previous sync round
+                        // is in SystemAlerts already.
+                        var since = DateTime.UtcNow.AddHours(-24);
+                        var openAlarmTitles = await _context.SystemAlerts
+                            .Where(a => a.InstallationId == installation.Id
+                                && a.AlertType == AlertType.Error
+                                && a.ResolvedAt == null
+                                && a.OccurredAt >= since
+                                && a.Title != faultTitle)         // exclude the previous-day Station Faulty itself
+                            .OrderByDescending(a => a.OccurredAt)
+                            .Take(5)
+                            .Select(a => a.Title)
+                            .ToListAsync();
+
+                        var alarmSummary = openAlarmTitles.Count > 0
+                            ? "\n\nรหัส alarm ที่ Huawei รายงานล่าสุด:\n• " + string.Join("\n• ", openAlarmTitles)
+                            : "\n\n(ยังไม่มีรหัส alarm จาก getAlarmList — รอ sync รอบถัดไป หรือเปิด FusionSolar เพื่อดู)";
+
                         _context.SystemAlerts.Add(new SystemAlert
                         {
                             InstallationId = installation.Id,
                             AlertType = AlertType.Error,
                             Severity = AlertSeverity.Critical,
                             Title = faultTitle,
-                            Message = $"[{installation.InverterBrand}] {installation.SiteName} กำลังรายงานสถานะ FAULTY. " +
-                                $"{realtime.FaultReason ?? "ตรวจสอบรายละเอียดในแอป FusionSolar"} " +
-                                "— กรุณาเข้าตรวจสอบที่หน้างาน",
+                            // No "(Grid Loss / Insulation / OverTemp / ฯลฯ)" enumeration here —
+                            // it was getting matched by InverterKnowledgeBase.MatchFaultCode
+                            // as evidence of those faults, producing fake "Huawei 2063 DC
+                            // insulation" diagnostics on a site that actually had a network
+                            // disconnection alarm.  Only the real alarm titles from
+                            // getAlarmList belong in the visible message.
+                            Message = $"[{installation.InverterBrand}] {installation.SiteName} รายงานสถานะ FAULTY ผ่าน real_health_state=1. " +
+                                "กรุณาเปิดแอป FusionSolar เพื่อดูรหัส alarm จริงและเข้าตรวจสอบหน้างาน" +
+                                alarmSummary,
                             RootCauseAnalysis = "⚠ STATION-LEVEL FAULT detected via Huawei NBI real_health_state=1.\n" +
-                                "Cloud API ปกติ แต่ inverter รายงานว่ามีปัญหา (Grid Loss / Insulation / OverTemp / ฯลฯ).\n" +
+                                "Cloud API ปกติ แต่ inverter รายงานว่ามีปัญหา " +
+                                "(สาเหตุที่แท้จริงให้ดูจากรหัส alarm ที่ Huawei รายงานข้างต้น — อย่าเดาจากรายการตัวอย่าง).\n" +
                                 "การตรวจสอบเบื้องต้น:\n" +
-                                "  1. เปิดแอป FusionSolar → ดูรายการ Alarm ของไซต์นี้\n" +
+                                "  1. เปิดแอป FusionSolar → ดูรายการ Alarm ของไซต์นี้เพื่อทราบสาเหตุที่แท้จริง\n" +
                                 "  2. ตรวจ AC breaker / DC isolator\n" +
-                                "  3. ตรวจหน้าจอ inverter หาเลข error\n" +
-                                "  4. ถ้าเป็น Grid Loss ตรวจไฟฟ้าจากการไฟฟ้าและ MCB หลัก",
+                                "  3. ตรวจหน้าจอ inverter หาเลข error",
                             OccurredAt = DateTime.UtcNow,
                             IsNotified = false
                         });
