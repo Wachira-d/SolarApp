@@ -376,15 +376,42 @@ public class SolarDataSyncJob
                             .Select(a => a.Title)
                             .ToListAsync();
 
-                        var alarmSummary = openAlarmTitles.Count > 0
+                        // ── Confirmation gate ────────────────────────────────────────
+                        // Huawei's real_health_state=1 alone is unreliable — observed
+                        // in production: FusionSolar's Active Alarms list shows zero
+                        // open alarms while the field still reports 1 (the inverter
+                        // is just powered off / data-logger offline / Huawei state
+                        // mismatch).  Without a confirming alarm in getAlarmList,
+                        // firing a "Critical: Station Faulty" alert to the team's
+                        // LINE group is false alarm.
+                        //
+                        // Policy:
+                        //   * No confirming alarm + first time we see it
+                        //     → create the row at lower severity (Medium) with
+                        //       IsNotified=true so it appears on the dashboard for
+                        //       investigation but does NOT push to LINE.  Next sync
+                        //       round will pick up real alarms via getAlarmList and
+                        //       those individual rows trigger their own properly-
+                        //       categorised LINE alerts.
+                        //   * Confirming alarm present (≥1 open Error alert from
+                        //     getAlarmList in the last 24h) → escalate to Critical
+                        //     with LINE notification, like before, because we now
+                        //     have a real cause to report.
+                        var hasConfirmingAlarm = openAlarmTitles.Count > 0;
+                        var severity = hasConfirmingAlarm ? AlertSeverity.Critical : AlertSeverity.Medium;
+                        var suppressLine = !hasConfirmingAlarm;
+
+                        var alarmSummary = hasConfirmingAlarm
                             ? "\n\nรหัส alarm ที่ Huawei รายงานล่าสุด:\n• " + string.Join("\n• ", openAlarmTitles)
-                            : "\n\n(ยังไม่มีรหัส alarm จาก getAlarmList — รอ sync รอบถัดไป หรือเปิด FusionSolar เพื่อดู)";
+                            : "\n\n⚠ ยังไม่มี alarm ใน FusionSolar's getAlarmList ที่ยืนยันสถานะนี้ — " +
+                              "อาจเป็นเครื่อง off / data logger ขาดการเชื่อมต่อ / Huawei reporting glitch " +
+                              "(ระบบจะไม่แจ้ง LINE จนกว่ามี alarm จริงยืนยัน)";
 
                         _context.SystemAlerts.Add(new SystemAlert
                         {
                             InstallationId = installation.Id,
                             AlertType = AlertType.Error,
-                            Severity = AlertSeverity.Critical,
+                            Severity = severity,
                             Title = faultTitle,
                             // No "(Grid Loss / Insulation / OverTemp / ฯลฯ)" enumeration here —
                             // it was getting matched by InverterKnowledgeBase.MatchFaultCode
@@ -409,7 +436,11 @@ public class SolarDataSyncJob
                                 "  3. ถ้า alarm บอก grid/voltage → ตรวจไฟฟ้าและ MCB\n" +
                                 "  4. ถ้า alarm บอก insulation/arc/temp → ตามขั้นตอนของ alarm นั้น ๆ",
                             OccurredAt = DateTime.UtcNow,
-                            IsNotified = false
+                            // suppressLine = true → mark as already-notified so
+                            // SystemHealthMonitorJob's LINE pass skips it; the
+                            // row still lights up the dashboard for the operator
+                            // to investigate.
+                            IsNotified = suppressLine
                         });
                     }
                 }
