@@ -64,7 +64,7 @@ $@"⚠️ ระบบโซลาร์เซลล์มีปัญหา
 ทีมงานได้รับการแจ้งเตือนและกำลังตรวจสอบ
 สอบถามเพิ่มเติม กรุณาตอบกลับในแชทนี้ครับ",
 
-            AlertType.LowProduction =>
+            AlertType.LowPerformance =>
 $@"⚡ ผลิตไฟฟ้าได้ต่ำกว่าปกติ
 
 📍 ไซต์: {site}
@@ -166,7 +166,7 @@ $@"✅ {site} กลับมาทำงานปกติแล้ว (หย�
     {
         AlertType.Offline           => install.NotifyOnGridLoss,
         AlertType.Error             => install.NotifyOnGridLoss,
-        AlertType.LowProduction     => install.NotifyOnLowProduction,
+        AlertType.LowPerformance     => install.NotifyOnLowProduction,
         AlertType.MaintenanceDue    => install.NotifyOnCleaningDue,
         AlertType.WarrantyExpiring  => install.NotifyOnWarrantyExpiry,
         _                           => false,

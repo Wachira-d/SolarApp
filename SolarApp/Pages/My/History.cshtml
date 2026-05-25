@@ -1,0 +1,74 @@
+@page
+@model SolarApp.Pages.My.HistoryModel
+@{
+    ViewData["Title"] = "ประวัติการผลิต";
+}
+
+<div class="my-card" style="display:flex; gap:6px; padding:8px; overflow-x:auto">
+    @{
+        var ranges = new[] { ("30d", "30 วัน"), ("90d", "90 วัน"), ("1y", "1 ปี"), ("all", "ทั้งหมด") };
+        foreach (var (key, label) in ranges)
+        {
+            var active = (Model.Range == key);
+            <a asp-page="/My/History" asp-route-range="@key"
+               class="btn btn-sm @(active ? "btn-success" : "btn-outline-secondary")"
+               style="white-space:nowrap; @(active ? "background:var(--my-accent); border-color:var(--my-accent);" : "")">
+                @label
+            </a>
+        }
+    }
+</div>
+
+<div class="my-stat-grid mt-2">
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-lightning-charge icon"></i> รวม</div>
+        <div class="v">@Model.Total.ToString("N0") <small>kWh</small></div>
+    </div>
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-graph-up icon"></i> เฉลี่ย/วัน</div>
+        <div class="v">@Model.Average.ToString("0.0") <small>kWh</small></div>
+    </div>
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-trophy icon"></i> วันที่ดีที่สุด</div>
+        <div class="v">@Model.BestDay.ToString("0.0") <small>kWh</small></div>
+        @if (!string.IsNullOrEmpty(Model.BestDayLabel))
+        { <div class="text-muted small">@Model.BestDayLabel</div> }
+    </div>
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-calendar icon"></i> วันที่บันทึก</div>
+        <div class="v">@Model.Points.Count <small>วัน</small></div>
+    </div>
+</div>
+
+<div class="my-section-title">กราฟการผลิตรายวัน</div>
+<div class="my-card" style="padding:12px">
+    <div style="position:relative; height:260px"><canvas id="historyChart"></canvas></div>
+</div>
+
+@section Scripts {
+<script>
+    const ctx = document.getElementById('historyChart');
+    if (ctx) {
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: @Json.Serialize(Model.Points.Select(p => p.Label)),
+                datasets: [{
+                    label: 'kWh',
+                    data: @Json.Serialize(Model.Points.Select(p => p.Kwh)),
+                    backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--my-accent').trim() || '#2fc774',
+                    borderRadius: 4,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { autoSkip: true, maxRotation: 0 } },
+                    y: { beginAtZero: true, grid: { color: 'rgba(127,127,127,0.08)' }, ticks: { callback: v => v + ' kWh' } },
+                },
+            },
+        });
+    }
+</script>
+}

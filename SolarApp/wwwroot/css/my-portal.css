@@ -1,0 +1,304 @@
+/* ─────────────────────────────────────────────────────────────────────
+   My — customer-facing portal styles
+   Mobile-app aesthetic: bottom-nav layout, big hero numbers, theme
+   variables for the in-app color picker, dark-mode aware.
+   Designed mobile-first (375px) and scales up to desktop (1200+).
+   ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  --my-accent: #2fc774;        /* solar green (default) */
+  --my-accent-rgb: 47 199 116;
+  --my-accent-soft: #e6f9ee;
+  --my-bg: #f5f7fa;
+  --my-surface: #ffffff;
+  --my-text: #1c1c1e;
+  --my-text-muted: #6b7280;
+  --my-border: rgba(0 0 0 / 0.06);
+  --my-shadow: 0 1px 3px rgba(0 0 0 / 0.04), 0 10px 20px rgba(0 0 0 / 0.04);
+  --my-radius: 18px;
+  --my-radius-sm: 12px;
+}
+
+[data-my-theme="blue"] {
+  --my-accent: #2b6cff;
+  --my-accent-rgb: 43 108 255;
+  --my-accent-soft: #e7efff;
+}
+[data-my-theme="purple"] {
+  --my-accent: #8b5cf6;
+  --my-accent-rgb: 139 92 246;
+  --my-accent-soft: #f1ecff;
+}
+[data-my-theme="orange"] {
+  --my-accent: #f97316;
+  --my-accent-rgb: 249 115 22;
+  --my-accent-soft: #fff0e5;
+}
+[data-my-theme="pink"] {
+  --my-accent: #ec4899;
+  --my-accent-rgb: 236 72 153;
+  --my-accent-soft: #ffe7f3;
+}
+[data-my-theme="teal"] {
+  --my-accent: #14b8a6;
+  --my-accent-rgb: 20 184 166;
+  --my-accent-soft: #d8f6f2;
+}
+
+/* dark mode — switched via [data-my-mode="dark"] on <html> */
+[data-my-mode="dark"] {
+  --my-bg: #0b0e14;
+  --my-surface: #161a23;
+  --my-text: #f1f3f7;
+  --my-text-muted: #8b919e;
+  --my-border: rgba(255 255 255 / 0.07);
+  --my-shadow: 0 1px 3px rgba(0 0 0 / 0.4), 0 10px 24px rgba(0 0 0 / 0.4);
+  --my-accent-soft: rgba(var(--my-accent-rgb) / 0.18);
+}
+
+/* ── App shell ─────────────────────────────────────────────────────── */
+body.my-app {
+  background: var(--my-bg);
+  color: var(--my-text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+               "Segoe UI", Inter, "Sarabun", "Noto Sans Thai", system-ui, sans-serif;
+  margin: 0;
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));   /* clears bottom nav */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.my-shell { max-width: 720px; margin: 0 auto; padding: 16px 16px 0; }
+
+/* ── Top app bar ───────────────────────────────────────────────────── */
+.my-header {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--my-bg);
+  padding: 8px 16px 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.my-header h1 { font-size: 1.4rem; font-weight: 700; margin: 0; line-height: 1.15; }
+.my-header .greeting { font-size: .82rem; color: var(--my-text-muted); margin-bottom: 2px; }
+
+.my-header-actions { display: flex; gap: 6px; }
+.my-header-actions .btn-icon {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--my-surface);
+  color: var(--my-text);
+  display: grid; place-items: center;
+  font-size: 1.1rem;
+  box-shadow: var(--my-shadow);
+  position: relative;
+}
+.my-header-actions .btn-icon .badge-dot {
+  position: absolute; top: 6px; right: 6px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #ef4444;
+  border: 2px solid var(--my-bg);
+}
+
+/* ── Hero card (big number with gauge) ─────────────────────────────── */
+.my-hero {
+  background: linear-gradient(135deg,
+              rgb(var(--my-accent-rgb) / 1),
+              rgb(var(--my-accent-rgb) / 0.78));
+  color: #fff;
+  border-radius: var(--my-radius);
+  padding: 22px;
+  box-shadow: 0 10px 28px rgb(var(--my-accent-rgb) / 0.25);
+  position: relative;
+  overflow: hidden;
+}
+.my-hero::after {
+  content: ""; position: absolute; inset: -40% -20% auto auto;
+  width: 240px; height: 240px;
+  background: radial-gradient(circle, rgba(255 255 255 / 0.18) 0%, transparent 60%);
+  pointer-events: none;
+}
+.my-hero .label { opacity: .9; font-size: .82rem; letter-spacing: .02em; text-transform: uppercase; }
+.my-hero .value { font-size: 2.8rem; font-weight: 800; line-height: 1; margin: 6px 0; font-variant-numeric: tabular-nums; }
+.my-hero .unit  { font-size: 1.1rem; font-weight: 600; opacity: .9; margin-left: 4px; }
+.my-hero .sub   { opacity: .9; font-size: .92rem; }
+
+.my-hero-stats { display: flex; gap: 18px; margin-top: 18px; }
+.my-hero-stats > div { flex: 1; }
+.my-hero-stats .k { opacity: .82; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+.my-hero-stats .v { font-size: 1.25rem; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* ── Section title ─────────────────────────────────────────────────── */
+.my-section-title {
+  font-size: .85rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em;
+  color: var(--my-text-muted);
+  margin: 22px 4px 10px;
+}
+
+/* ── Card ──────────────────────────────────────────────────────────── */
+.my-card {
+  background: var(--my-surface);
+  border-radius: var(--my-radius);
+  padding: 16px;
+  box-shadow: var(--my-shadow);
+  margin-bottom: 12px;
+  border: 1px solid var(--my-border);
+}
+.my-card-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.my-card-title { font-weight: 600; }
+
+/* Site list card */
+.my-site-card { cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; text-decoration: none; color: inherit; display: block; }
+.my-site-card:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0 0 0 / 0.08); color: inherit; text-decoration: none; }
+
+.my-site-card .status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  display: inline-block; margin-right: 8px; flex-shrink: 0;
+}
+.status-dot.online      { background: #10b981; box-shadow: 0 0 0 4px rgba(16 185 129 / 0.18); }
+.status-dot.offline     { background: #6b7280; }
+.status-dot.maintenance { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245 158 11 / 0.18); }
+.status-dot.faulty      { background: #ef4444; box-shadow: 0 0 0 4px rgba(239 68 68 / 0.18); }
+
+.my-site-card .name  { font-weight: 600; font-size: 1.02rem; }
+.my-site-card .sub   { font-size: .85rem; color: var(--my-text-muted); }
+.my-site-card .now   { font-size: 1.3rem; font-weight: 700; color: var(--my-accent); font-variant-numeric: tabular-nums; }
+.my-site-card .now small { font-size: .85rem; opacity: .75; font-weight: 600; }
+
+/* ── Stat grid ─────────────────────────────────────────────────────── */
+.my-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 540px) { .my-stat-grid { grid-template-columns: repeat(4, 1fr); } }
+.my-stat {
+  background: var(--my-surface);
+  border-radius: var(--my-radius-sm);
+  padding: 14px;
+  border: 1px solid var(--my-border);
+}
+.my-stat .k { font-size: .75rem; color: var(--my-text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.my-stat .v { font-size: 1.55rem; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.my-stat .v small { font-size: .82rem; font-weight: 600; opacity: .7; }
+.my-stat .icon { color: var(--my-accent); font-size: 1.1rem; }
+
+/* ── Gauge (animated arc for realtime power) ───────────────────────── */
+.my-gauge {
+  position: relative;
+  width: 200px; height: 200px;
+  margin: 0 auto;
+}
+.my-gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.my-gauge .track { fill: none; stroke: var(--my-accent-soft); stroke-width: 18; }
+.my-gauge .fill  { fill: none; stroke: var(--my-accent); stroke-width: 18; stroke-linecap: round; transition: stroke-dashoffset .6s ease; }
+.my-gauge .label {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  text-align: center;
+}
+.my-gauge .label .v { font-size: 2.2rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.my-gauge .label .u { font-size: .9rem; color: var(--my-text-muted); margin-top: 2px; }
+.my-gauge .label .k { font-size: .75rem; color: var(--my-text-muted); text-transform: uppercase; letter-spacing: .04em; }
+
+/* ── Savings card ──────────────────────────────────────────────────── */
+.my-savings {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  color: #78350f;
+  border-radius: var(--my-radius);
+  padding: 18px;
+  display: flex; gap: 14px; align-items: center;
+}
+[data-my-mode="dark"] .my-savings { background: linear-gradient(135deg, #3b2c10, #2c1f08); color: #fcd34d; }
+.my-savings .icon { font-size: 2rem; }
+.my-savings .v { font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.my-savings .k { font-size: .82rem; opacity: .85; }
+.my-savings .eco { display: flex; gap: 14px; margin-top: 6px; font-size: .8rem; opacity: .9; }
+
+/* ── Alert pill (customer-friendly) ────────────────────────────────── */
+.my-alert {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 12px 14px;
+  border-left: 3px solid var(--my-accent);
+  background: var(--my-accent-soft);
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.my-alert.severity-critical { border-color: #ef4444; background: rgba(239 68 68 / 0.08); }
+.my-alert.severity-high     { border-color: #f59e0b; background: rgba(245 158 11 / 0.08); }
+.my-alert.severity-info     { border-color: #3b82f6; background: rgba(59 130 246 / 0.08); }
+.my-alert .icon { font-size: 1.4rem; }
+.my-alert .title { font-weight: 600; font-size: .95rem; }
+.my-alert .when  { font-size: .78rem; color: var(--my-text-muted); margin-top: 2px; }
+
+/* ── Bottom nav ────────────────────────────────────────────────────── */
+.my-bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+  background: var(--my-surface);
+  border-top: 1px solid var(--my-border);
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  display: flex; justify-content: space-around;
+  box-shadow: 0 -4px 16px rgba(0 0 0 / 0.05);
+}
+.my-bottom-nav a {
+  flex: 1; max-width: 96px;
+  text-align: center;
+  text-decoration: none; color: var(--my-text-muted);
+  padding: 6px 4px;
+  border-radius: var(--my-radius-sm);
+  transition: color .15s ease, background .15s ease;
+  font-size: .72rem;
+  position: relative;
+}
+.my-bottom-nav a i { display: block; font-size: 1.35rem; line-height: 1; margin-bottom: 3px; }
+.my-bottom-nav a.active { color: var(--my-accent); background: var(--my-accent-soft); font-weight: 600; }
+.my-bottom-nav .badge-count {
+  position: absolute; top: 4px; right: 18px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px;
+  background: #ef4444; color: #fff;
+  font-size: .65rem; font-weight: 700;
+  display: grid; place-items: center;
+  border: 2px solid var(--my-surface);
+}
+
+/* ── Theme picker ──────────────────────────────────────────────────── */
+.my-theme-swatch-grid { display: flex; flex-wrap: wrap; gap: 12px; }
+.my-theme-swatch {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  cursor: pointer;
+  transition: transform .15s ease, border-color .15s ease;
+  display: grid; place-items: center;
+  color: #fff;
+  font-size: 1.2rem;
+}
+.my-theme-swatch:hover { transform: scale(1.06); }
+.my-theme-swatch.active { border-color: var(--my-text); transform: scale(1.06); }
+.my-theme-swatch i { opacity: 0; transition: opacity .15s ease; }
+.my-theme-swatch.active i { opacity: 1; }
+
+/* ── Empty state ───────────────────────────────────────────────────── */
+.my-empty {
+  text-align: center; padding: 60px 20px; color: var(--my-text-muted);
+}
+.my-empty .icon { font-size: 3.5rem; opacity: .35; margin-bottom: 12px; }
+
+/* ── Pull-to-refresh hint (CSS-only minimal) ───────────────────────── */
+.my-refresh-hint {
+  text-align: center; color: var(--my-text-muted); font-size: .78rem;
+  padding: 6px; opacity: .6;
+}
+
+/* ── Small responsive tweaks ───────────────────────────────────────── */
+@media (max-width: 360px) {
+  .my-hero .value { font-size: 2.2rem; }
+  .my-gauge { width: 170px; height: 170px; }
+}
+@media (min-width: 768px) {
+  .my-shell { padding: 24px 24px 0; }
+  .my-bottom-nav { max-width: 720px; left: 50%; transform: translateX(-50%);
+                   margin-bottom: 18px; border-radius: var(--my-radius);
+                   border: 1px solid var(--my-border); }
+}

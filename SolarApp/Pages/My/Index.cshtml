@@ -1,0 +1,103 @@
+@page
+@model SolarApp.Pages.My.IndexModel
+@{
+    ViewData["Title"] = "ภาพรวม";
+}
+
+@if (Model.Customer == null)
+{
+    <div class="my-empty">
+        <div class="icon"><i class="bi bi-person-x"></i></div>
+        <p>บัญชีของคุณยังไม่ได้ผูกกับโปรไฟล์ลูกค้า<br/>กรุณาติดต่อผู้ติดตั้งระบบ</p>
+    </div>
+    return;
+}
+
+@if (Model.Sites.Count == 0)
+{
+    <div class="my-empty">
+        <div class="icon"><i class="bi bi-sun"></i></div>
+        <p>ยังไม่มีระบบโซลาร์ที่ผูกกับบัญชีของคุณ<br/>กรุณาติดต่อผู้ติดตั้งเพื่อเชื่อมโยงไซต์</p>
+    </div>
+    return;
+}
+
+@* ── Hero: total power right now ──────────────────────────────────── *@
+<div class="my-hero" id="hero">
+    <div class="label">กำลังผลิตขณะนี้</div>
+    <div>
+        <span class="value" id="heroPower">@Model.Overview.TotalCurrentPowerKw.ToString("0.0")</span><span class="unit">kW</span>
+    </div>
+    <div class="sub">
+        <i class="bi bi-circle-fill" style="font-size:.55rem"></i>
+        @Model.Overview.OnlineSites / @Model.Overview.TotalSites ไซต์กำลังออนไลน์
+    </div>
+
+    <div class="my-hero-stats">
+        <div>
+            <div class="k">วันนี้</div>
+            <div class="v"><span id="heroToday">@Model.Overview.TotalTodayKwh.ToString("0.0")</span> <small>kWh</small></div>
+        </div>
+        <div>
+            <div class="k">30 วัน</div>
+            <div class="v">@Model.Overview.TotalMonthKwh.ToString("N0") <small>kWh</small></div>
+        </div>
+        <div>
+            <div class="k">ตลอดอายุ</div>
+            <div class="v">@Model.Overview.TotalLifetimeKwh.ToString("N0") <small>kWh</small></div>
+        </div>
+    </div>
+</div>
+
+@* ── Savings highlight ────────────────────────────────────────────── *@
+<div class="my-section-title">ประหยัด 30 วันที่ผ่านมา</div>
+<div class="my-savings">
+    <div class="icon"><i class="bi bi-piggy-bank-fill"></i></div>
+    <div style="flex:1">
+        <div class="v">฿@Model.Overview.EstimatedSavingsThbMonth.ToString("N0")</div>
+        <div class="k">ประหยัดค่าไฟ + ขายไฟคืน (ประมาณการ)</div>
+        <div class="eco">
+            <span><i class="bi bi-cloud-haze"></i> ลด CO₂ @Model.Overview.Co2SavedKgMonth.ToString("N0") kg</span>
+            <span><i class="bi bi-tree-fill"></i> ≈ @Model.Overview.TreesEquivalentMonth ต้นไม้</span>
+        </div>
+    </div>
+</div>
+
+@* ── Site list ────────────────────────────────────────────────────── *@
+<div class="my-section-title">ไซต์ของคุณ (@Model.Sites.Count)</div>
+
+@foreach (var s in Model.Sites)
+{
+    <a class="my-card my-site-card" asp-page="/My/Site" asp-route-id="@s.Id">
+        <div class="my-card-row">
+            <div style="flex:1; min-width:0">
+                <div class="name text-truncate"><span class="status-dot @s.StatusCss"></span>@s.Name</div>
+                <div class="sub">@s.CapacityKw kWp · @s.Brand · @s.StatusLabel</div>
+            </div>
+            <div style="text-align:right">
+                <div class="now">@s.CurrentPowerKw.ToString("0.0")<small> kW</small></div>
+                <div class="sub">วันนี้ @s.TodayKwh.ToString("0.0") kWh</div>
+                @if (s.OpenAlerts > 0)
+                {
+                    <div><span class="badge" style="background:#ef4444; color:#fff; font-size:.65rem">⚠ @s.OpenAlerts</span></div>
+                }
+            </div>
+        </div>
+    </a>
+}
+
+<div class="my-refresh-hint">ข้อมูลรีเฟรชอัตโนมัติทุก 30 วินาที</div>
+
+@section Scripts {
+<script>
+    // Live refresh of hero numbers — pulls the same aggregates from
+    // /api/my/overview and animates the digits up/down.
+    MyPortal.poll('/api/my/overview', 30_000, data => {
+        if (!data) return;
+        const power = document.getElementById('heroPower');
+        const today = document.getElementById('heroToday');
+        if (power) MyPortal.animateNumber(power, data.totalCurrentPowerKw, 1);
+        if (today) MyPortal.animateNumber(today, data.totalTodayKwh, 1);
+    });
+</script>
+}

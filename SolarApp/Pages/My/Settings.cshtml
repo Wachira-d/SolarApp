@@ -1,0 +1,121 @@
+@page
+@model SolarApp.Pages.My.SettingsModel
+@{
+    ViewData["Title"] = "ตั้งค่า";
+}
+
+<div class="my-card">
+    <div class="my-card-row">
+        <div>
+            <div class="my-card-title">@(Model.FullName ?? "ลูกค้า")</div>
+            <div class="text-muted small">@Model.Email</div>
+        </div>
+        <i class="bi bi-person-circle" style="font-size:1.8rem; color:var(--my-accent)"></i>
+    </div>
+</div>
+
+@* ── Theme picker ────────────────────────────────────────────────── *@
+<div class="my-section-title">ธีมสี</div>
+<div class="my-card">
+    <div class="my-theme-swatch-grid" id="themePicker">
+        @{
+            var themes = new[] {
+                ("green",  "#2fc774", "เขียวโซลาร์"),
+                ("blue",   "#2b6cff", "น้ำเงิน"),
+                ("purple", "#8b5cf6", "ม่วง"),
+                ("orange", "#f97316", "ส้ม"),
+                ("pink",   "#ec4899", "ชมพู"),
+                ("teal",   "#14b8a6", "เขียวอมฟ้า"),
+            };
+            foreach (var (key, color, label) in themes)
+            {
+                <button type="button" class="my-theme-swatch" data-theme="@key"
+                        style="background:@color" title="@label">
+                    <i class="bi bi-check2"></i>
+                </button>
+            }
+        }
+    </div>
+</div>
+
+@* ── Display mode (light / dark / auto) ──────────────────────────── *@
+<div class="my-section-title">โหมดการแสดงผล</div>
+<div class="my-card" style="padding:6px">
+    <div class="btn-group w-100" role="group" id="modePicker">
+        <button type="button" class="btn btn-outline-secondary" data-mode="auto"><i class="bi bi-circle-half"></i> อัตโนมัติ</button>
+        <button type="button" class="btn btn-outline-secondary" data-mode="light"><i class="bi bi-sun"></i> สว่าง</button>
+        <button type="button" class="btn btn-outline-secondary" data-mode="dark"><i class="bi bi-moon"></i> มืด</button>
+    </div>
+</div>
+
+@* ── About / privacy ─────────────────────────────────────────────── *@
+<div class="my-section-title">ทั่วไป</div>
+<div class="my-card">
+    <div class="my-card-row" style="padding:8px 0; border-bottom:1px solid var(--my-border)">
+        <div>
+            <div class="my-card-title">เกี่ยวกับแอป</div>
+            <div class="text-muted small">เวอร์ชัน Customer Portal 1.0</div>
+        </div>
+        <i class="bi bi-info-circle"></i>
+    </div>
+    <div class="my-card-row" style="padding:8px 0; border-bottom:1px solid var(--my-border)">
+        <div>
+            <div class="my-card-title">ความเป็นส่วนตัว</div>
+            <div class="text-muted small">เห็นข้อมูลเฉพาะคุณและผู้ติดตั้งระบบ</div>
+        </div>
+        <i class="bi bi-shield-check" style="color:#10b981"></i>
+    </div>
+    <a asp-page="/Account/Logout" class="my-card-row" style="padding:8px 0; text-decoration:none; color:inherit">
+        <div>
+            <div class="my-card-title text-danger">ออกจากระบบ</div>
+        </div>
+        <i class="bi bi-box-arrow-right text-danger"></i>
+    </a>
+</div>
+
+<div class="text-center text-muted small mt-3" style="padding:20px">
+    <i class="bi bi-sun-fill" style="color:var(--my-accent)"></i>
+    My Solar — ระบบติดตามโซลาร์เซลล์
+</div>
+
+@section Scripts {
+<script>
+    function refreshThemeActive() {
+        const cur = localStorage.getItem('my.theme') || 'green';
+        document.querySelectorAll('#themePicker .my-theme-swatch').forEach(b => {
+            b.classList.toggle('active', b.dataset.theme === cur);
+        });
+    }
+    function refreshModeActive() {
+        const cur = localStorage.getItem('my.mode') || 'auto';
+        document.querySelectorAll('#modePicker .btn').forEach(b => {
+            const on = b.dataset.mode === cur;
+            b.classList.toggle('btn-outline-secondary', !on);
+            b.classList.toggle('btn-success', on);
+            if (on) {
+                b.style.background = 'var(--my-accent)';
+                b.style.borderColor = 'var(--my-accent)';
+                b.style.color = '#fff';
+            } else {
+                b.style.background = '';
+                b.style.borderColor = '';
+                b.style.color = '';
+            }
+        });
+    }
+    document.getElementById('themePicker')?.addEventListener('click', e => {
+        const btn = e.target.closest('.my-theme-swatch');
+        if (!btn) return;
+        MyPortal.applyTheme(btn.dataset.theme);
+        refreshThemeActive();
+    });
+    document.getElementById('modePicker')?.addEventListener('click', e => {
+        const btn = e.target.closest('.btn');
+        if (!btn || !btn.dataset.mode) return;
+        MyPortal.applyMode(btn.dataset.mode);
+        refreshModeActive();
+    });
+    refreshThemeActive();
+    refreshModeActive();
+</script>
+}

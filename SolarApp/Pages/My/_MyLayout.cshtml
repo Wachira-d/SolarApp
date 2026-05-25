@@ -1,0 +1,91 @@
+@inject Microsoft.AspNetCore.Identity.UserManager<SolarApp.Models.ApplicationUser> UserManager
+@inject SolarApp.Data.ApplicationDbContext Db
+@{
+    var pageName = ViewContext.RouteData.Values["page"]?.ToString() ?? "";
+    bool IsActive(string p) => pageName.Equals(p, StringComparison.OrdinalIgnoreCase);
+
+    int unresolvedAlerts = 0;
+    string? customerFirstName = null;
+    try
+    {
+        var u = await UserManager.GetUserAsync(User);
+        if (u != null)
+        {
+            var custId = await Db.Customers
+                .Where(c => c.UserId == u.Id)
+                .Select(c => (int?)c.Id)
+                .FirstOrDefaultAsync();
+            if (custId.HasValue)
+            {
+                customerFirstName = await Db.Customers
+                    .Where(c => c.Id == custId.Value)
+                    .Select(c => c.FirstName)
+                    .FirstOrDefaultAsync();
+                unresolvedAlerts = await Db.SystemAlerts
+                    .Where(a => a.ResolvedAt == null
+                        && a.Installation.CustomerId == custId.Value)
+                    .CountAsync();
+            }
+        }
+    }
+    catch { /* layout must never throw */ }
+}
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="theme-color" content="#2fc774" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>@ViewData["Title"] — My Solar</title>
+    <link rel="manifest" href="~/manifest.webmanifest" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="~/css/my-portal.css" asp-append-version="true" />
+</head>
+<body class="my-app">
+    <div class="my-shell">
+        <header class="my-header">
+            <div>
+                <div class="greeting">สวัสดี@(string.IsNullOrEmpty(customerFirstName) ? "" : " คุณ" + customerFirstName) 👋</div>
+                <h1>@ViewData["Title"]</h1>
+            </div>
+            <div class="my-header-actions">
+                <a class="btn-icon" asp-page="/My/Alerts" title="แจ้งเตือน">
+                    <i class="bi bi-bell"></i>
+                    @if (unresolvedAlerts > 0) { <span class="badge-dot"></span> }
+                </a>
+                <a class="btn-icon" asp-page="/My/Settings" title="ตั้งค่า">
+                    <i class="bi bi-gear"></i>
+                </a>
+            </div>
+        </header>
+
+        @RenderBody()
+    </div>
+
+    <nav class="my-bottom-nav" aria-label="Primary">
+        <a asp-page="/My/Index" class="@(IsActive("/My/Index") ? "active" : "")">
+            <i class="bi bi-house-door@(IsActive("/My/Index") ? "-fill" : "")"></i> หน้าหลัก
+        </a>
+        <a asp-page="/My/Sites" class="@(IsActive("/My/Sites") || IsActive("/My/Site") ? "active" : "")">
+            <i class="bi bi-sun@(IsActive("/My/Sites") || IsActive("/My/Site") ? "-fill" : "")"></i> ไซต์
+        </a>
+        <a asp-page="/My/History" class="@(IsActive("/My/History") ? "active" : "")">
+            <i class="bi bi-bar-chart@(IsActive("/My/History") ? "-fill" : "")"></i> ประวัติ
+        </a>
+        <a asp-page="/My/Alerts" class="@(IsActive("/My/Alerts") ? "active" : "")">
+            <i class="bi bi-bell@(IsActive("/My/Alerts") ? "-fill" : "")"></i> แจ้งเตือน
+            @if (unresolvedAlerts > 0) { <span class="badge-count">@unresolvedAlerts</span> }
+        </a>
+        <a asp-page="/My/Settings" class="@(IsActive("/My/Settings") ? "active" : "")">
+            <i class="bi bi-gear@(IsActive("/My/Settings") ? "-fill" : "")"></i> ตั้งค่า
+        </a>
+    </nav>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="~/js/my-portal.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

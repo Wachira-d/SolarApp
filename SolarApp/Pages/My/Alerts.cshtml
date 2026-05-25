@@ -1,0 +1,52 @@
+@page
+@model SolarApp.Pages.My.AlertsModel
+@{
+    ViewData["Title"] = "แจ้งเตือน";
+}
+
+@{
+    string SevClass(string s) => s switch {
+        "critical" => "severity-critical",
+        "high"     => "severity-high",
+        _          => "severity-info",
+    };
+}
+
+@if (Model.Active.Count == 0 && Model.Resolved.Count == 0)
+{
+    <div class="my-empty">
+        <div class="icon" style="color:#10b981"><i class="bi bi-shield-check"></i></div>
+        <p>ไม่มีแจ้งเตือน — ระบบทำงานปกติทุกไซต์ 🎉</p>
+    </div>
+    return;
+}
+
+@if (Model.Active.Any())
+{
+    <div class="my-section-title">กำลังเปิดอยู่ (@Model.Active.Count)</div>
+    foreach (var a in Model.Active)
+    {
+        <a asp-page="/My/Site" asp-route-id="@a.SiteId" class="my-alert @SevClass(a.Severity)" style="text-decoration:none; color:inherit">
+            <div class="icon"><i class="bi bi-exclamation-triangle-fill"></i></div>
+            <div style="flex:1">
+                <div class="title">@a.Title</div>
+                <div class="when">@a.SiteName · @a.When.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+            </div>
+        </a>
+    }
+}
+
+@if (Model.Resolved.Any())
+{
+    <div class="my-section-title">แก้ไขแล้ว (ล่าสุด)</div>
+    foreach (var a in Model.Resolved)
+    {
+        <a asp-page="/My/Site" asp-route-id="@a.SiteId" class="my-alert" style="text-decoration:none; color:inherit; opacity:.75; border-color:#10b981; background:rgba(16 185 129 / 0.06)">
+            <div class="icon" style="color:#10b981"><i class="bi bi-check-circle-fill"></i></div>
+            <div style="flex:1">
+                <div class="title">@a.Title</div>
+                <div class="when">@a.SiteName · @a.Resolved!.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm") (กลับมาทำงาน)</div>
+            </div>
+        </a>
+    }
+}

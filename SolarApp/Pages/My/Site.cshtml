@@ -1,0 +1,211 @@
+@page "{id:int}"
+@model SolarApp.Pages.My.SiteModel
+@{
+    ViewData["Title"] = Model.Site?.SiteName ?? "ไซต์";
+    var gaugeFraction = Model.Site != null && Model.Site.SystemCapacityKw > 0
+        ? (double)(Model.CurrentPowerKw / Model.Site.SystemCapacityKw)
+        : 0;
+    if (gaugeFraction > 1) gaugeFraction = 1;
+    if (gaugeFraction < 0) gaugeFraction = 0;
+}
+
+@if (Model.Site == null)
+{
+    <div class="my-empty">
+        <div class="icon"><i class="bi bi-question-circle"></i></div>
+        <p>ไม่พบไซต์นี้ หรือไซต์นี้ไม่ใช่ของคุณ</p>
+        <a class="btn btn-outline-secondary mt-2" asp-page="/My/Index">กลับไปหน้าหลัก</a>
+    </div>
+    return;
+}
+
+@* ── Hero gauge ───────────────────────────────────────────────────── *@
+<div class="my-card" style="text-align:center; padding:24px 16px">
+    <div class="my-section-title" style="margin:0 0 4px">@Model.Site.SiteName</div>
+    <div class="text-muted small mb-3">@Model.Site.SystemCapacityKw kWp · @Model.Site.InverterBrand · @Model.Site.Address</div>
+
+    <div class="my-gauge" id="powerGauge">
+        <svg viewBox="0 0 200 200">
+            <circle class="track" cx="100" cy="100" r="86"></circle>
+            <circle class="fill"  cx="100" cy="100" r="86"
+                    stroke-dasharray="540" stroke-dashoffset="540"></circle>
+        </svg>
+        <div class="label">
+            <div class="k">กำลังผลิตขณะนี้</div>
+            <div class="v" id="gaugePower">@Model.CurrentPowerKw.ToString("0.0")</div>
+            <div class="u">kW จาก @Model.Site.SystemCapacityKw kWp</div>
+        </div>
+    </div>
+
+    @if (Model.BatterySoc.HasValue)
+    {
+        <div class="mt-3">
+            🔋 แบตเตอรี่: <strong>@Model.BatterySoc.Value.ToString("0")%</strong>
+        </div>
+    }
+</div>
+
+@* ── Stat grid ────────────────────────────────────────────────────── *@
+<div class="my-section-title">ผลผลิตพลังงาน</div>
+<div class="my-stat-grid">
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-sun icon"></i> วันนี้</div>
+        <div class="v" id="statToday">@Model.TodayKwh.ToString("0.0") <small>kWh</small></div>
+    </div>
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-calendar-week icon"></i> 7 วัน</div>
+        <div class="v">@Model.WeekKwh.ToString("N0") <small>kWh</small></div>
+    </div>
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-calendar-month icon"></i> 30 วัน</div>
+        <div class="v">@Model.MonthKwh.ToString("N0") <small>kWh</small></div>
+    </div>
+    <div class="my-stat">
+        <div class="k"><i class="bi bi-calendar3 icon"></i> ปีนี้</div>
+        <div class="v">@Model.YearKwh.ToString("N0") <small>kWh</small></div>
+    </div>
+</div>
+
+@* ── Savings ──────────────────────────────────────────────────────── *@
+<div class="my-section-title">ประหยัด 30 วัน</div>
+<div class="my-savings">
+    <div class="icon"><i class="bi bi-piggy-bank-fill"></i></div>
+    <div style="flex:1">
+        <div class="v">฿@Model.EstimatedSavingsThbMonth.ToString("N0")</div>
+        <div class="k">ค่าไฟที่ประหยัด (ประมาณการ @((Model.Site.ElectricityRatePerKwh > 0 ? Model.Site.ElectricityRatePerKwh : 4.0m).ToString("0.00")) บาท/kWh)</div>
+        <div class="eco">
+            <span><i class="bi bi-cloud-haze"></i> CO₂ −@Model.Co2SavedKgMonth.ToString("N0") kg</span>
+            <span><i class="bi bi-tree-fill"></i> ≈ @Model.TreesEquivalent ต้นไม้</span>
+        </div>
+    </div>
+</div>
+
+@* ── Today's curve ────────────────────────────────────────────────── *@
+@if (Model.TodayCurve.Any())
+{
+    <div class="my-section-title">กำลังผลิตวันนี้</div>
+    <div class="my-card" style="padding:12px">
+        <div style="position:relative; height:220px"><canvas id="todayChart"></canvas></div>
+    </div>
+}
+
+@* ── 30-day production bars ───────────────────────────────────────── *@
+@if (Model.Last30Days.Any())
+{
+    <div class="my-section-title">ผลิตได้รายวัน 30 วัน</div>
+    <div class="my-card" style="padding:12px">
+        <div style="position:relative; height:220px"><canvas id="dailyChart"></canvas></div>
+    </div>
+}
+
+@* ── Equipment ────────────────────────────────────────────────────── *@
+@if (Model.Equipment.Any())
+{
+    <div class="my-section-title">อุปกรณ์</div>
+    <div class="my-card">
+        @foreach (var e in Model.Equipment)
+        {
+            <div class="my-card-row" style="padding:6px 0; border-bottom:1px solid var(--my-border)">
+                <div>
+                    <div class="my-card-title">@e.Name</div>
+                    <div class="text-muted small">@e.Type @(string.IsNullOrEmpty(e.Model) ? "" : "· " + e.Model)</div>
+                </div>
+                <div>
+                    @if (e.IsOnline) { <span class="status-dot online" style="margin-right:6px"></span> <small>ทำงาน</small> }
+                    else             { <span class="status-dot offline" style="margin-right:6px"></span> <small>ไม่ทำงาน</small> }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@* ── Recent customer-friendly alerts ──────────────────────────────── *@
+<div class="my-section-title">แจ้งเตือนล่าสุด</div>
+@if (Model.RecentAlerts.Any())
+{
+    foreach (var a in Model.RecentAlerts)
+    {
+        var sevClass = a.Severity switch
+        {
+            "critical" => "severity-critical",
+            "high"     => "severity-high",
+            _          => "severity-info",
+        };
+        var icon = a.Resolved ? "bi-check-circle-fill" : "bi-exclamation-triangle-fill";
+        <div class="my-alert @sevClass">
+            <div class="icon"><i class="bi @icon"></i></div>
+            <div style="flex:1">
+                <div class="title">@a.Title @(a.Resolved ? "(แก้ไขแล้ว)" : "")</div>
+                <div class="when">@a.When.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+            </div>
+        </div>
+    }
+}
+else
+{
+    <div class="my-card text-center text-muted">
+        <i class="bi bi-shield-check" style="font-size:1.6rem; color:#10b981"></i><br/>
+        ไม่มีแจ้งเตือนล่าสุด ระบบทำงานปกติ
+    </div>
+}
+
+@section Scripts {
+<script>
+    // Animated gauge: easing fill once on load
+    const gaugeEl = document.getElementById('powerGauge');
+    if (gaugeEl) setTimeout(() => MyPortal.setGauge(gaugeEl, @Json.Serialize(gaugeFraction)), 80);
+
+    // Today curve
+    const todayCanvas = document.getElementById('todayChart');
+    if (todayCanvas) {
+        MyPortal.renderLineChart(
+            todayCanvas,
+            @Json.Serialize(Model.TodayCurve.Select(p => p.Label)),
+            [{ label: 'kW', data: @Json.Serialize(Model.TodayCurve.Select(p => p.Kw)) }],
+            { scales: { y: { ticks: { callback: v => v + ' kW' } } } }
+        );
+    }
+
+    // 30-day bars (using line chart with stepped area — keeps it simple)
+    const dailyCanvas = document.getElementById('dailyChart');
+    if (dailyCanvas) {
+        new Chart(dailyCanvas, {
+            type: 'bar',
+            data: {
+                labels: @Json.Serialize(Model.Last30Days.Select(p => p.Label)),
+                datasets: [{
+                    label: 'kWh',
+                    data: @Json.Serialize(Model.Last30Days.Select(p => p.Kwh)),
+                    backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--my-accent').trim() || '#2fc774',
+                    borderRadius: 4,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: true, grid: { color: 'rgba(127,127,127,0.08)' },
+                         ticks: { callback: v => v + ' kWh' } },
+                },
+            },
+        });
+    }
+
+    // Live update of gauge + today every 30 s
+    MyPortal.poll('/api/my/site/@Model.Site.Id/realtime', 30_000, data => {
+        if (!data) return;
+        const g = document.getElementById('powerGauge');
+        const p = document.getElementById('gaugePower');
+        const t = document.getElementById('statToday');
+        if (g && @Model.Site.SystemCapacityKw > 0) {
+            MyPortal.setGauge(g, data.currentPowerKw / @Model.Site.SystemCapacityKw);
+        }
+        if (p) MyPortal.animateNumber(p, data.currentPowerKw, 1);
+        if (t) {
+            const firstChild = t.childNodes[0];
+            if (firstChild) firstChild.nodeValue = data.todayKwh.toFixed(1) + ' ';
+        }
+    });
+</script>
+}

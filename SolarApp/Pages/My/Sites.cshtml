@@ -1,0 +1,34 @@
+@page
+@model SolarApp.Pages.My.SitesModel
+@{
+    ViewData["Title"] = "ไซต์ทั้งหมด";
+}
+
+@if (Model.Sites.Count == 0)
+{
+    <div class="my-empty">
+        <div class="icon"><i class="bi bi-sun"></i></div>
+        <p>ยังไม่มีไซต์ในบัญชีของคุณ</p>
+    </div>
+    return;
+}
+
+@foreach (var s in Model.Sites)
+{
+    <a class="my-card my-site-card" asp-page="/My/Site" asp-route-id="@s.Id">
+        <div class="my-card-row">
+            <div style="flex:1; min-width:0">
+                <div class="name text-truncate"><span class="status-dot @s.StatusCss"></span>@s.Name</div>
+                <div class="sub">@s.CapacityKw kWp · @s.Brand · @s.StatusLabel</div>
+            </div>
+            <div style="text-align:right">
+                <div class="now">@s.CurrentPowerKw.ToString("0.0")<small> kW</small></div>
+                <div class="sub">วันนี้ @s.TodayKwh.ToString("0.0") kWh</div>
+                @if (s.OpenAlerts > 0)
+                {
+                    <div><span class="badge" style="background:#ef4444; color:#fff; font-size:.65rem">⚠ @s.OpenAlerts</span></div>
+                }
+            </div>
+        </div>
+    </a>
+}
