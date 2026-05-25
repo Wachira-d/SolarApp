@@ -32,21 +32,27 @@ public static class CustomerAlertMessageBuilder
 
         return alert.AlertType switch
         {
+            // Offline = lost cloud contact / inverter not reporting.  We do
+            // NOT actually know the cause yet (usually just internet at the
+            // site; sometimes a real fault).  Frame it cautiously so the
+            // customer doesn't panic — many "outages" turn out to be a
+            // 10-minute ISP blip that resolves itself.  We'll send a
+            // follow-up via BuildRecovery once it's back, with the actual
+            // cause if we found one.
             AlertType.Offline =>
-$@"🚨 ระบบโซลาร์เซลล์หยุดทำงาน
+$@"ℹ️ ระบบโซลาร์ขาดการเชื่อมต่อชั่วคราว
 
 📍 ไซต์: {site}
-🕐 เริ่มหยุด: {when}
+🕐 ตรวจไม่พบสัญญาณตั้งแต่: {when}
 🟢 ทำงานครั้งสุดท้าย: {last}
 
-อาจเกิดจาก:
+ส่วนใหญ่อาจเกิดจาก:
+• อินเทอร์เน็ตที่ไซต์ขัดข้องชั่วคราว (พบบ่อยที่สุด)
 • ไฟดับ (Grid Loss)
-• อินเวอร์เตอร์ขัดข้อง
-• อินเทอร์เน็ตที่ไซต์มีปัญหา
+• อุปกรณ์รับ-ส่งข้อมูล (data logger) มีปัญหา
 
-ทีมงานได้รับการแจ้งเตือนและกำลังตรวจสอบ
-หากท่านอยู่ที่ไซต์ ขอความกรุณาตรวจสอบไฟฟ้าที่ตู้เมน
-สอบถามเพิ่มเติม กรุณาตอบกลับในแชทนี้ครับ",
+ระบบโซลาร์เซลล์อาจยังทำงานปกติอยู่ — เรายังไม่ทราบสาเหตุที่แน่ชัด
+ทีมงานกำลังตรวจสอบและจะแจ้งให้ทราบทันทีเมื่อทราบข้อมูลที่แท้จริง",
 
             AlertType.Error =>
 $@"⚠️ ระบบโซลาร์เซลล์มีปัญหา
@@ -90,6 +96,64 @@ $@"📋 ใกล้หมดประกัน
 กรุณาตอบกลับในแชทนี้ครับ",
 
             _ => $"แจ้งเตือนระบบโซลาร์ ไซต์ {site}: {Truncate(alert.Title, 100)}",
+        };
+    }
+
+    /// <summary>
+    /// Customer-facing recovery message for a previously-notified alert.
+    /// Includes the actual cause when we discovered one during the outage
+    /// (e.g. the operator found a specific Huawei alarm in FusionSolar
+    /// or the next sync round ingested per-alarm records).  When we never
+    /// found a specific cause — common for short network blips — the
+    /// message simply confirms the connection is back and reassures the
+    /// customer that the panels were likely working all along.
+    /// </summary>
+    /// <param name="alert">The original alert that just resolved.</param>
+    /// <param name="installation">Site context.</param>
+    /// <param name="discoveredCauses">
+    /// Alarm titles from sibling alerts that occurred during the outage
+    /// window, e.g. ["Communication interrupted", "Grid voltage abnormal"].
+    /// Pass an empty array when no specific cause was found.
+    /// </param>
+    public static string BuildRecovery(
+        SystemAlert alert,
+        Installation installation,
+        IReadOnlyList<string> discoveredCauses)
+    {
+        var site = installation.SiteName;
+        var downtime = alert.ResolvedAt.HasValue
+            ? alert.ResolvedAt.Value - alert.OccurredAt
+            : TimeSpan.Zero;
+        var downtimeStr = downtime.TotalHours >= 1
+            ? $"{downtime.TotalHours:0.0} ชั่วโมง"
+            : $"{Math.Max(1, downtime.TotalMinutes):0} นาที";
+
+        // When we have a real cause from per-alarm records: name it.
+        // Otherwise frame as "connection blip, probably internet".
+        var causeBlock = discoveredCauses.Count > 0
+            ? "\n\nสาเหตุที่ตรวจพบในช่วงนี้:\n• " + string.Join("\n• ", discoveredCauses)
+            : "\n\nไม่พบ alarm หรือ fault code เฉพาะระหว่างเหตุการณ์ — " +
+              "ส่วนใหญ่หมายความว่าเป็นปัญหาการเชื่อมต่อชั่วคราว (อินเทอร์เน็ต/data logger) " +
+              "ไม่ใช่ความผิดปกติของอุปกรณ์";
+
+        return alert.AlertType switch
+        {
+            AlertType.Offline =>
+$@"✅ ระบบโซลาร์เซลล์กลับมาเชื่อมต่อแล้ว
+
+📍 ไซต์: {site}
+⏱ ขาดการเชื่อมต่อนาน: {downtimeStr}
+
+ขณะนี้ระบบกลับมาส่งข้อมูลและทำงานได้ปกติแล้ว{causeBlock}",
+
+            AlertType.Error =>
+$@"✅ ระบบโซลาร์เซลล์กลับมาทำงานปกติ
+
+📍 ไซต์: {site}
+⏱ ระยะเวลาที่หยุด: {downtimeStr}{causeBlock}",
+
+            _ =>
+$@"✅ {site} กลับมาทำงานปกติแล้ว (หยุดไป {downtimeStr}){causeBlock}",
         };
     }
 

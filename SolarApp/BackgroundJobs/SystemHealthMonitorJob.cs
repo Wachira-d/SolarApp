@@ -691,6 +691,25 @@ public class SystemHealthMonitorJob
             }
         }
 
+        // ── Pre-fetch the "actual cause" alarms per installation ──
+        // For each resolved alert we want to tell the customer WHAT actually
+        // went wrong (e.g. "Communication interrupted" / "Grid voltage abnormal")
+        // rather than the generic "system was down".  Those signals come from
+        // per-alarm SystemAlert rows that the sync job created from
+        // GetAlarmsAsync (Huawei getAlarmList / Solis stationAlarm / …) during
+        // the outage window.  Pull them all in one query keyed by installation
+        // so the inner loop has zero extra round-trips.
+        var installationIds = resolvedAlerts.Select(a => a.InstallationId).Distinct().ToList();
+        var earliestOccurred = resolvedAlerts.Min(a => a.OccurredAt);
+        var siblingAlarms = await _context.SystemAlerts
+            .Where(x => installationIds.Contains(x.InstallationId)
+                && x.AlertType == AlertType.Error
+                && x.OccurredAt >= earliestOccurred
+                && !x.Title.StartsWith("Station Faulty:")        // exclude our own generic alert
+                && !x.Title.StartsWith("Station Abnormal:"))     // (same, post-rename)
+            .Select(x => new { x.InstallationId, x.Title, x.OccurredAt, x.ResolvedAt })
+            .ToListAsync();
+
         int sent = 0;
         foreach (var alert in resolvedAlerts)
         {
@@ -703,15 +722,35 @@ public class SystemHealthMonitorJob
             var downtimeStr = downtime.TotalHours >= 1
                 ? $"{downtime.TotalHours:0.0} ชั่วโมง"
                 : $"{downtime.TotalMinutes:0} นาที";
-            var recoveryMsg = $"{alert.Installation.SiteName} กลับมาทำงานปกติแล้ว หลังจาก offline {downtimeStr}";
 
-            async Task SendRecoveryToAsync(string lineId)
+            // Causes: per-alarm rows that overlapped this alert's downtime
+            // window — those are the actual vendor alarm names, not our
+            // guesses.  Take up to 5 distinct titles to keep the message
+            // short.
+            var causes = siblingAlarms
+                .Where(s => s.InstallationId == alert.InstallationId
+                    && s.OccurredAt <= alert.ResolvedAt!.Value
+                    && (s.OccurredAt >= alert.OccurredAt
+                        || (s.ResolvedAt == null || s.ResolvedAt >= alert.OccurredAt)))
+                .Select(s => s.Title)
+                .Distinct()
+                .Take(5)
+                .ToList();
+
+            // Technical recovery message — for the operator alert group and
+            // partner staff.  Uses the existing flex-card formatter so the
+            // dashboard summary stays consistent with what it always was.
+            var techMsg = $"{alert.Installation.SiteName} กลับมาทำงานปกติแล้ว หลังจาก offline {downtimeStr}";
+            if (causes.Count > 0)
+                techMsg += "\nสาเหตุที่พบ: " + string.Join(", ", causes);
+
+            async Task SendTechRecoveryToAsync(string lineId)
             {
                 if (string.IsNullOrWhiteSpace(lineId) || sent >= 100) return;
                 try
                 {
                     await _lineService.SendRecoveryNotificationAsync(
-                        lineId, alert.Installation.SiteName, alert.Title, recoveryMsg, downtime);
+                        lineId, alert.Installation.SiteName, alert.Title, techMsg, downtime);
                     sent++;
                 }
                 catch (Exception ex)
@@ -720,12 +759,37 @@ public class SystemHealthMonitorJob
                 }
             }
 
-            await SendRecoveryToAsync(alertGroupId ?? "");
-            await SendRecoveryToAsync(alert.Installation.Customer?.LineUserId ?? "");
+            // 1. Operator alert group (technical)
+            await SendTechRecoveryToAsync(alertGroupId ?? "");
+
+            // 2. Customer — plain-Thai recovery message that names the actual
+            //    cause when we found one.  Only sent if the customer would have
+            //    received the original alert (same gating as the down-message)
+            //    so we don't surprise customers who opted out.
+            var customerLineId = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
+                .PickRecipient(alert.Installation);
+            var customerNotifyAllowed = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
+                .ShouldNotifyCustomer(alert.Installation, alert.AlertType);
+            if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed && sent < 100)
+            {
+                try
+                {
+                    var customerMsg = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
+                        .BuildRecovery(alert, alert.Installation, causes);
+                    await _lineService.SendMessageAsync(customerLineId, customerMsg);
+                    sent++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed customer recovery LINE for alert {AlertId}", alert.Id);
+                }
+            }
+
+            // 3. Partner staff (technical, same as alert group)
             if (alert.Installation.PartnerId.HasValue
                 && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var pIds))
             {
-                foreach (var lineId in pIds) await SendRecoveryToAsync(lineId);
+                foreach (var lineId in pIds) await SendTechRecoveryToAsync(lineId);
             }
         }
 
