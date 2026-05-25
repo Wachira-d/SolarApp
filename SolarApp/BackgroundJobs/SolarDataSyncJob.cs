@@ -335,11 +335,15 @@ public class SolarDataSyncJob
 
                 if (realtime.Health == Services.InverterApi.Models.HealthState.Faulty)
                 {
-                    // Station is in FAULT state (Grid Loss / OverTemp / Insulation / etc.)
-                    // Cloud is reachable, but the inverter is reporting a hard fault.
-                    // Surface this as a Critical alert so LINE notifies + dashboard turns red.
+                    // Huawei NBI reports real_health_state=1 ("abnormal"). This
+                    // bucket actually covers several distinct conditions —
+                    // inverter hardware fault, grid issue, network/data-logger
+                    // disconnect, cloud reporting glitch — and Huawei doesn't
+                    // tell us which from this field alone.  Surface as Critical
+                    // so the dashboard turns red and LINE notifies; the actual
+                    // cause must be read from getAlarmList / FusionSolar.
                     installation.Status = InstallationStatus.Maintenance;                    LogApiCall(installation, "GetRealtimeData", 200, true,
-                        $"[FAULTY] {installation.InverterBrand} reports station faulty. " +
+                        $"[FAULTY] {installation.InverterBrand} reports station abnormal. " +
                         $"Reason: {realtime.FaultReason ?? "unknown"}. " +
                         $"Today={realtime.TodayEnergyKwh:0.0}kWh");
 
@@ -388,16 +392,22 @@ public class SolarDataSyncJob
                             // insulation" diagnostics on a site that actually had a network
                             // disconnection alarm.  Only the real alarm titles from
                             // getAlarmList belong in the visible message.
-                            Message = $"[{installation.InverterBrand}] {installation.SiteName} รายงานสถานะ FAULTY ผ่าน real_health_state=1. " +
-                                "กรุณาเปิดแอป FusionSolar เพื่อดูรหัส alarm จริงและเข้าตรวจสอบหน้างาน" +
+                            Message = $"[{installation.InverterBrand}] {installation.SiteName} รายงานสถานะผิดปกติ (real_health_state=1). " +
+                                "อาจเป็นปัญหาที่ inverter, ฝั่งไฟฟ้า, หรือ comms ระหว่าง inverter↔cloud — " +
+                                "ต้องดูจากรหัส alarm ใน FusionSolar เพื่อระบุสาเหตุที่แท้จริง" +
                                 alarmSummary,
-                            RootCauseAnalysis = "⚠ STATION-LEVEL FAULT detected via Huawei NBI real_health_state=1.\n" +
-                                "Cloud API ปกติ แต่ inverter รายงานว่ามีปัญหา " +
-                                "(สาเหตุที่แท้จริงให้ดูจากรหัส alarm ที่ Huawei รายงานข้างต้น — อย่าเดาจากรายการตัวอย่าง).\n" +
-                                "การตรวจสอบเบื้องต้น:\n" +
-                                "  1. เปิดแอป FusionSolar → ดูรายการ Alarm ของไซต์นี้เพื่อทราบสาเหตุที่แท้จริง\n" +
-                                "  2. ตรวจ AC breaker / DC isolator\n" +
-                                "  3. ตรวจหน้าจอ inverter หาเลข error",
+                            RootCauseAnalysis = "⚠ STATION-LEVEL ABNORMAL STATE detected via Huawei NBI real_health_state=1.\n" +
+                                "Cloud API ตอบกลับได้ปกติ แต่ Huawei รายงานว่าไซต์อยู่ในสถานะผิดปกติ\n" +
+                                "สถานะนี้ครอบคลุมหลายกรณี ห้ามเดาจากตัวอย่าง — ต้องอ่านชื่อ alarm จริง:\n" +
+                                "  • ความผิดปกติของ inverter เอง (hardware fault)\n" +
+                                "  • ปัญหาฝั่งระบบไฟฟ้า (utility/grid)\n" +
+                                "  • Inverter↔cloud comms ขาด (data logger, internet ที่ไซต์)\n" +
+                                "  • Cloud-side reporting glitch (Huawei รายงานผิดเอง)\n" +
+                                "การตรวจสอบ:\n" +
+                                "  1. เปิด FusionSolar → ดู Alarm list ของไซต์นี้เพื่อทราบสาเหตุที่แท้จริง\n" +
+                                "  2. ถ้า alarm บอก comms/network → ตรวจอินเทอร์เน็ตที่ไซต์ + data logger\n" +
+                                "  3. ถ้า alarm บอก grid/voltage → ตรวจไฟฟ้าและ MCB\n" +
+                                "  4. ถ้า alarm บอก insulation/arc/temp → ตามขั้นตอนของ alarm นั้น ๆ",
                             OccurredAt = DateTime.UtcNow,
                             IsNotified = false
                         });
