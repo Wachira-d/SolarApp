@@ -166,11 +166,32 @@ $@"✅ {site} กลับมาทำงานปกติแล้ว (หย�
     {
         AlertType.Offline           => install.NotifyOnGridLoss,
         AlertType.Error             => install.NotifyOnGridLoss,
-        AlertType.LowPerformance     => install.NotifyOnLowProduction,
+        AlertType.LowPerformance    => install.NotifyOnLowProduction,
         AlertType.MaintenanceDue    => install.NotifyOnCleaningDue,
         AlertType.WarrantyExpiring  => install.NotifyOnWarrantyExpiry,
         _                           => false,
     };
+
+    /// <summary>
+    /// Whether the customer is currently in a "do-not-disturb" window
+    /// (e.g. 22:00 → 07:00 local).  Critical-severity alerts ignore this
+    /// — a Critical fault is worth waking someone up for, but a
+    /// Medium/High Offline blip at 3 AM is not.  Operator alert group
+    /// and partner channels never honour quiet hours; this gates the
+    /// customer LINE channel only.
+    /// </summary>
+    public static bool IsInCustomerQuietHours(Installation install, DateTime utcNow, AlertSeverity severity)
+    {
+        if (severity == AlertSeverity.Critical) return false;
+        if (!install.QuietHoursStart.HasValue || !install.QuietHoursEnd.HasValue) return false;
+        var localNow = TimeOnly.FromDateTime(utcNow.ToLocalTime());
+        var start = install.QuietHoursStart.Value;
+        var end = install.QuietHoursEnd.Value;
+        // Window can wrap midnight: 22:00→07:00 means "22:00-23:59 OR 00:00-07:00".
+        return start <= end
+            ? localNow >= start && localNow < end
+            : localNow >= start || localNow < end;
+    }
 
     /// <summary>
     /// LINE recipient for customer-facing alerts.  Prefers the per-installation

@@ -638,6 +638,14 @@ public class Startup
              Sql: "ALTER TABLE [Installations] ADD [NotifyOnCleaningDue] bit NOT NULL DEFAULT 0"),
             (Table: "Installations", Column: "NotifyOnWarrantyExpiry",
              Sql: "ALTER TABLE [Installations] ADD [NotifyOnWarrantyExpiry] bit NOT NULL DEFAULT 0"),
+
+            // Customer-managed notification refinements
+            (Table: "Installations", Column: "QuietHoursStart",
+             Sql: "ALTER TABLE [Installations] ADD [QuietHoursStart] time NULL"),
+            (Table: "Installations", Column: "QuietHoursEnd",
+             Sql: "ALTER TABLE [Installations] ADD [QuietHoursEnd] time NULL"),
+            (Table: "Installations", Column: "NotifyOnRecovery",
+             Sql: "ALTER TABLE [Installations] ADD [NotifyOnRecovery] bit NOT NULL DEFAULT 1"),
         };
 
         var indexUpgrades = new (string Name, string Table, string Columns)[]
@@ -1121,6 +1129,42 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         }).RequireAuthorization();
 
         // Refresh device info / inverter metadata from cloud for an installation
+        // Send a one-off test message to the LINE channel configured on the
+        // installation (LineGroupId override → falls back to Customer.LineUserId).
+        // Operator-only, so the admin can verify the recipient resolves and
+        // the channel token is valid without waiting for a real alert.
+        app.MapPost("/api/installations/{id:int}/notify-test", async (
+            int id,
+            System.Security.Claims.ClaimsPrincipal user,
+            Services.Authorization.IInstallationAccessHelper access,
+            Data.ApplicationDbContext db,
+            Services.LineApi.ILineMessagingService line) =>
+        {
+            if (!await access.CanAccessAsync(id, user)) return Results.Forbid();
+            var install = await db.Installations
+                .Include(i => i.Customer)
+                .FirstOrDefaultAsync(i => i.Id == id);
+            if (install == null) return Results.NotFound();
+
+            var recipient = Services.LineApi.CustomerAlertMessageBuilder.PickRecipient(install);
+            if (string.IsNullOrWhiteSpace(recipient))
+                return Results.Json(new { success = false, message = "ไม่มี LineGroupId หรือ Customer.LineUserId ที่จะส่ง — กรอกในการตั้งค่าก่อน" });
+
+            var msg = $"🧪 ทดสอบการแจ้งเตือนจากระบบ SolarApp\n\n" +
+                      $"📍 ไซต์: {install.SiteName}\n" +
+                      $"🕐 เวลา: {DateTime.UtcNow.ToLocalTime():dd/MM/yyyy HH:mm}\n\n" +
+                      $"ถ้าคุณได้รับข้อความนี้ = การตั้งค่าถูกต้อง ✅";
+            try
+            {
+                await line.SendMessageAsync(recipient, msg);
+                return Results.Json(new { success = true, message = $"ส่งทดสอบแล้วไปยัง {recipient[..Math.Min(8, recipient.Length)]}…" });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { success = false, message = $"ส่งล้มเหลว: {ex.Message}" });
+            }
+        }).RequireAuthorization();
+
         app.MapPost("/api/installations/{id:int}/refresh-devices", async (
             int id,
             System.Security.Claims.ClaimsPrincipal user,

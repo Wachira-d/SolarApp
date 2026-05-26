@@ -162,6 +162,27 @@ public class Installation
     /// <summary>Remind when warranty expiry is approaching.</summary>
     public bool NotifyOnWarrantyExpiry { get; set; } = false;
 
+    /// <summary>
+    /// "Do-not-disturb" window for customer notifications (24-h local time).
+    /// When the start &lt; end (e.g. 22:00 → 07:00) notifications between
+    /// those hours go to the operator alert group only — the customer's
+    /// LINE is quiet so they aren't woken up at 3 AM for a Grid Loss that
+    /// resolved itself in 20 minutes.  Null in either field = quiet hours
+    /// disabled.  Critical alerts ignore quiet hours by design.
+    /// </summary>
+    public TimeOnly? QuietHoursStart { get; set; }
+
+    /// <summary>Local-time end of the customer LINE do-not-disturb window.</summary>
+    public TimeOnly? QuietHoursEnd { get; set; }
+
+    /// <summary>
+    /// Forward recovery ("✅ ระบบกลับมาแล้ว") messages to the same
+    /// channels that received the original alert.  Default ON — most
+    /// customers want closure, but some prefer "tell me only when it
+    /// breaks, not when it comes back".
+    /// </summary>
+    public bool NotifyOnRecovery { get; set; } = true;
+
     // Financial
     public decimal? ContractValue { get; set; }
     public decimal ElectricityRatePerKwh { get; set; } = 4.0m;

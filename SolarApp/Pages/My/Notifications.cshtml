@@ -1,0 +1,124 @@
+@page
+@model SolarApp.Pages.My.NotificationsModel
+@{
+    ViewData["Title"] = "การแจ้งเตือน";
+}
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="my-alert severity-info" style="margin-bottom: 12px">
+        <div class="icon"><i class="bi bi-check-circle-fill"></i></div>
+        <div style="flex:1"><div class="title">@Model.StatusMessage</div></div>
+    </div>
+}
+
+@if (Model.Items.Count == 0)
+{
+    <div class="my-empty">
+        <div class="icon"><i class="bi bi-bell-slash"></i></div>
+        <p>ยังไม่มีไซต์ในบัญชีของคุณ</p>
+    </div>
+    return;
+}
+
+<form method="post">
+    <p class="text-muted small px-2">
+        เลือกได้ว่าจะรับแจ้งเตือนเรื่องอะไรบ้างผ่าน LINE ของคุณ
+        Critical alerts (เหตุฉุกเฉิน) จะยังส่งเสมอแม้อยู่ในช่วงห้ามรบกวน
+    </p>
+
+    @for (var i = 0; i < Model.Items.Count; i++)
+    {
+        var item = Model.Items[i];
+        <div class="my-card">
+            <div class="my-card-row" style="margin-bottom: 8px">
+                <div class="my-card-title">@item.SiteName</div>
+                <i class="bi bi-sun" style="color: var(--my-accent)"></i>
+            </div>
+            <input type="hidden" name="items[@i].Id" value="@item.Id" />
+
+            <div class="mb-3">
+                <label class="text-muted small d-block mb-1">LINE Group / User ID (ไม่บังคับ)</label>
+                <input type="text" class="form-control form-control-sm" name="items[@i].LineGroupId"
+                       value="@item.LineGroupId" placeholder="C1234... หรือ U1234..." />
+                <small class="text-muted">ถ้าเว้นว่าง — จะใช้ LineUserId ของลูกค้า</small>
+            </div>
+
+            <div class="row g-2 mb-2">
+                <div class="col-12">
+                    <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
+                        <input type="hidden" name="items[@i].NotifyOnGridLoss" value="false" />
+                        <input class="form-check-input mt-0" type="checkbox" name="items[@i].NotifyOnGridLoss"
+                               value="true" @(item.NotifyOnGridLoss ? "checked" : "") />
+                        <div style="flex:1">
+                            <strong class="text-danger">🚨 ระบบดับ / ไม่ผลิตไฟฟ้า</strong>
+                            <div class="text-muted small">เช่น ไฟดับ inverter ออฟไลน์ Grid loss</div>
+                        </div>
+                    </label>
+                </div>
+                <div class="col-12">
+                    <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
+                        <input type="hidden" name="items[@i].NotifyOnLowProduction" value="false" />
+                        <input class="form-check-input mt-0" type="checkbox" name="items[@i].NotifyOnLowProduction"
+                               value="true" @(item.NotifyOnLowProduction ? "checked" : "") />
+                        <div style="flex:1">
+                            ⚡ ผลิตไฟต่ำกว่าปกติ
+                            <div class="text-muted small">production ต่ำกว่ากราฟปกติของวันนั้น ๆ</div>
+                        </div>
+                    </label>
+                </div>
+                <div class="col-12">
+                    <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
+                        <input type="hidden" name="items[@i].NotifyOnCleaningDue" value="false" />
+                        <input class="form-check-input mt-0" type="checkbox" name="items[@i].NotifyOnCleaningDue"
+                               value="true" @(item.NotifyOnCleaningDue ? "checked" : "") />
+                        <div style="flex:1">💧 ครบรอบล้างแผง</div>
+                    </label>
+                </div>
+                <div class="col-12">
+                    <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
+                        <input type="hidden" name="items[@i].NotifyOnWarrantyExpiry" value="false" />
+                        <input class="form-check-input mt-0" type="checkbox" name="items[@i].NotifyOnWarrantyExpiry"
+                               value="true" @(item.NotifyOnWarrantyExpiry ? "checked" : "") />
+                        <div style="flex:1">📋 ใกล้หมดประกัน</div>
+                    </label>
+                </div>
+                <div class="col-12">
+                    <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
+                        <input type="hidden" name="items[@i].NotifyOnRecovery" value="false" />
+                        <input class="form-check-input mt-0" type="checkbox" name="items[@i].NotifyOnRecovery"
+                               value="true" @(item.NotifyOnRecovery ? "checked" : "") />
+                        <div style="flex:1">
+                            ✅ แจ้งเมื่อระบบกลับมาทำงาน
+                            <div class="text-muted small">ข้อความ closure เมื่อปัญหาคลี่คลาย</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <hr />
+            <div class="my-card-title small mb-2"><i class="bi bi-moon"></i> ช่วงห้ามรบกวน (Quiet Hours)</div>
+            <div class="row g-2">
+                <div class="col-6">
+                    <label class="form-label small text-muted mb-1">เริ่ม</label>
+                    <input type="time" class="form-control form-control-sm" name="items[@i].QuietHoursStart"
+                           value="@(item.QuietHoursStart?.ToString("HH:mm"))" />
+                </div>
+                <div class="col-6">
+                    <label class="form-label small text-muted mb-1">สิ้นสุด</label>
+                    <input type="time" class="form-control form-control-sm" name="items[@i].QuietHoursEnd"
+                           value="@(item.QuietHoursEnd?.ToString("HH:mm"))" />
+                </div>
+            </div>
+            <small class="text-muted d-block mt-1">เช่น 22:00 → 07:00 จะเงียบช่วงดึก (Critical แจ้งเสมอ)</small>
+        </div>
+    }
+
+    <button type="submit" class="btn w-100" style="background: var(--my-accent); color: #fff; border: none; padding: 12px; border-radius: var(--my-radius); font-weight: 600">
+        <i class="bi bi-check2-circle"></i> บันทึกการตั้งค่า
+    </button>
+</form>
+
+<div class="text-muted small text-center mt-3" style="padding: 8px">
+    <i class="bi bi-info-circle"></i> Operator/ผู้ติดตั้งสามารถปรับการตั้งค่าเดียวกันได้ผ่านหน้า Edit Installation
+</div>

@@ -588,7 +588,9 @@ public class SystemHealthMonitorJob
                 .PickRecipient(alert.Installation);
             var customerNotifyAllowed = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
                 .ShouldNotifyCustomer(alert.Installation, alert.AlertType);
-            if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed
+            var inQuietHours = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
+                .IsInCustomerQuietHours(alert.Installation, DateTime.UtcNow, alert.Severity);
+            if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed && !inQuietHours
                 && sentInThisCycle < maxSendsPerCycle)
             {
                 attempted++;
@@ -768,8 +770,14 @@ public class SystemHealthMonitorJob
             //    so we don't surprise customers who opted out.
             var customerLineId = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
                 .PickRecipient(alert.Installation);
+            // Recovery messages also honour the customer toggle (so opting
+            // out of "down" alerts opts out of recovery too) AND the new
+            // NotifyOnRecovery flag (some customers want down-alerts but
+            // not closure messages).  Quiet hours never block recovery
+            // messages — the "all clear" is short and welcome.
             var customerNotifyAllowed = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
-                .ShouldNotifyCustomer(alert.Installation, alert.AlertType);
+                .ShouldNotifyCustomer(alert.Installation, alert.AlertType)
+                && alert.Installation.NotifyOnRecovery;
             if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed && sent < 100)
             {
                 try

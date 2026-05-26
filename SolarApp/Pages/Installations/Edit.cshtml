@@ -389,12 +389,19 @@
                         เลือกได้ว่าจะส่งเรื่องอะไรบ้าง — ปล่อยว่างถ้าไม่ต้องการส่ง
                     </p>
                     <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-8">
                             <label asp-for="Input.LineGroupId" class="form-label">LINE Group / User ID</label>
-                            <input asp-for="Input.LineGroupId" class="form-control" placeholder="C1234... หรือ U1234..." />
+                            <div class="input-group">
+                                <input asp-for="Input.LineGroupId" class="form-control" placeholder="C1234... หรือ U1234..." />
+                                <button type="button" id="lineTestBtn" class="btn btn-outline-success">
+                                    <i class="bi bi-send"></i> ส่งทดสอบ
+                                </button>
+                            </div>
                             <small class="text-muted">
-                                ถ้าเว้นว่าง — ระบบจะใช้ LineUserId ของลูกค้าใน Customer แทน
+                                ถ้าเว้นว่าง — ระบบจะใช้ LineUserId ของลูกค้าใน Customer แทน.
+                                ปุ่ม "ส่งทดสอบ" จะใช้ค่าที่บันทึกแล้วใน DB (กด Save Changes ก่อนถ้าเพิ่งแก้)
                             </small>
+                            <div id="lineTestResult" class="mt-2 small"></div>
                         </div>
                     </div>
                     <div class="row g-2 mb-2">
@@ -558,6 +565,30 @@
                 }
             } catch (e) {
                 result.innerHTML = '<div class="alert alert-danger mt-2 mb-0 p-2"><i class="bi bi-x-circle-fill"></i> Test failed: ' + e.message + '</div>';
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // ─── LINE test-send button ───────────────────────────────────────────
+        document.getElementById('lineTestBtn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('lineTestBtn');
+            const result = document.getElementById('lineTestResult');
+            btn.disabled = true;
+            result.innerHTML = '<span class="text-muted"><i class="bi bi-hourglass-split"></i> กำลังส่ง...</span>';
+            try {
+                const r = await fetch(`/api/installations/@Model.Input.Id/notify-test`, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' }
+                });
+                const data = await r.json();
+                if (data.success) {
+                    result.innerHTML = `<span class="text-success"><i class="bi bi-check-circle-fill"></i> ${data.message}</span>`;
+                } else {
+                    result.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ${data.message}</span>`;
+                }
+            } catch (e) {
+                result.innerHTML = `<span class="text-danger">❌ Error: ${e.message}</span>`;
             } finally {
                 btn.disabled = false;
             }
