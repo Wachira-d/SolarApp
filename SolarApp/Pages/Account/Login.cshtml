@@ -35,7 +35,13 @@
                         <label asp-for="Input.RememberMe" class="form-check-label">จดจำการเข้าสู่ระบบ</label>
                     </div>
 
-                    <button type="submit" class="btn btn-warning w-100 mb-3">เข้าสู่ระบบ</button>
+                    <button type="submit" class="btn btn-warning w-100 mb-2">เข้าสู่ระบบ</button>
+
+                    <div class="text-center mb-3">
+                        <a asp-page="/Account/ForgotPassword" class="small text-muted">
+                            <i class="bi bi-question-circle"></i> ลืมรหัสผ่าน?
+                        </a>
+                    </div>
                 </form>
 
                 @if (Model.ExternalProviders.Any())

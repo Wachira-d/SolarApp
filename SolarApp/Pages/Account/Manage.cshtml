@@ -30,6 +30,50 @@
         </div>
 
         <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h6 class="mb-0">
+                    <i class="bi bi-key"></i>
+                    @(Model.HasLocalPassword ? "เปลี่ยนรหัสผ่าน" : "ตั้งรหัสผ่าน")
+                </h6>
+            </div>
+            <div class="card-body">
+                @if (!Model.HasLocalPassword)
+                {
+                    <div class="alert alert-info py-2 small mb-3">
+                        <i class="bi bi-info-circle"></i>
+                        บัญชีของคุณยังไม่มีรหัสผ่านท้องถิ่น
+                        — ตั้งครั้งแรกเพื่อให้เข้าระบบด้วย email + password ได้ (เพิ่มเติมจาก LINE / Microsoft)
+                    </div>
+                }
+                <form method="post" asp-page-handler="ChangePassword">
+                    <div asp-validation-summary="ModelOnly" class="text-danger small mb-2"></div>
+                    @if (Model.HasLocalPassword)
+                    {
+                        <div class="mb-2">
+                            <label asp-for="Password.CurrentPassword" class="form-label">รหัสผ่านปัจจุบัน</label>
+                            <input asp-for="Password.CurrentPassword" type="password" class="form-control" autocomplete="current-password" />
+                        </div>
+                    }
+                    <div class="mb-2">
+                        <label asp-for="Password.NewPassword" class="form-label">รหัสผ่านใหม่</label>
+                        <input asp-for="Password.NewPassword" type="password" class="form-control" autocomplete="new-password" />
+                        <span asp-validation-for="Password.NewPassword" class="text-danger small"></span>
+                        <small class="text-muted">อย่างน้อย 8 ตัวอักษร</small>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Password.ConfirmPassword" class="form-label">ยืนยันรหัสผ่านใหม่</label>
+                        <input asp-for="Password.ConfirmPassword" type="password" class="form-control" autocomplete="new-password" />
+                        <span asp-validation-for="Password.ConfirmPassword" class="text-danger small"></span>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check2-circle"></i>
+                        @(Model.HasLocalPassword ? "บันทึกรหัสใหม่" : "ตั้งรหัสผ่าน")
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mb-3">
             <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-link-45deg"></i> Linked External Logins</h6></div>
             <div class="list-group list-group-flush">
                 @if (!Model.LinkedLogins.Any())
