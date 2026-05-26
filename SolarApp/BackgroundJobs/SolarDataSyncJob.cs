@@ -347,101 +347,122 @@ public class SolarDataSyncJob
                         $"Reason: {realtime.FaultReason ?? "unknown"}. " +
                         $"Today={realtime.TodayEnergyKwh:0.0}kWh");
 
-                    // De-dup: only one open Fault alert per installation per day
+                    // De-dup: find any open Faulty row (regardless of day) so
+                    // we can promote/upgrade it as the situation evolves.
                     var faultTitle = $"Station Faulty: {installation.SiteName}";
-                    var faultDedupSince = DateTime.UtcNow.Date;
-                    var existingFault = await _context.SystemAlerts.AnyAsync(a =>
-                        a.InstallationId == installation.Id
-                        && a.AlertType == AlertType.Error
-                        && a.ResolvedAt == null
-                        && a.Title == faultTitle
-                        && a.OccurredAt >= faultDedupSince);
+                    var existingFault = await _context.SystemAlerts
+                        .Where(a => a.InstallationId == installation.Id
+                            && a.Title == faultTitle
+                            && a.ResolvedAt == null)
+                        .OrderByDescending(a => a.OccurredAt)
+                        .FirstOrDefaultAsync();
 
-                    if (!existingFault)
+                    // Pull recent confirming alarms from prior sync rounds
+                    var since = DateTime.UtcNow.AddHours(-24);
+                    var openAlarmTitles = await _context.SystemAlerts
+                        .Where(a => a.InstallationId == installation.Id
+                            && a.AlertType == AlertType.Error
+                            && a.ResolvedAt == null
+                            && a.OccurredAt >= since
+                            && a.Title != faultTitle)
+                        .OrderByDescending(a => a.OccurredAt)
+                        .Take(5)
+                        .Select(a => a.Title)
+                        .ToListAsync();
+                    var hasConfirmingAlarm = openAlarmTitles.Count > 0;
+
+                    // ── State-machine for Station Faulty alerts ──────────────────
+                    //
+                    //   sync   confirming?   age          → row state             → LINE?
+                    //   ────   ───────────   ──────       ────────────────────    ──────
+                    //   1st    yes           —            Critical / Error        ✓ (cause)
+                    //   1st    no            —            Medium / Error          ✗ (silent)
+                    //   2nd+   no            ≥ 2 × sync   High / Offline          ✓ (offline)
+                    //   any    yes (NEW)     —            promote → Critical      ✓ (cause)
+                    //
+                    // Why promote to Offline (not just upgrade severity):
+                    // a customer who sees real_health_state=1 persisting for two
+                    // sync rounds with no FusionSolar alarm is — empirically —
+                    // experiencing Grid Loss or comms loss.  Grid Loss alarms
+                    // don't appear in getAlarmList until power returns (the
+                    // inverter can't report what it can't power), so we must
+                    // notify the customer NOW using the cautious Offline
+                    // wording instead of waiting indefinitely for an alarm
+                    // that may only arrive minutes after the fact.
+                    var syncMin = installation.SyncIntervalMinutes <= 0
+                        ? 15
+                        : installation.SyncIntervalMinutes;
+                    var persistenceThreshold = TimeSpan.FromMinutes(syncMin * 2);
+
+                    var commsMessage = $"[{installation.InverterBrand}] {installation.SiteName} รายงานสถานะผิดปกติ (real_health_state=1). " +
+                        "อาจเป็นปัญหาที่ inverter, ฝั่งไฟฟ้า, หรือ comms ระหว่าง inverter↔cloud — " +
+                        "ต้องดูจากรหัส alarm ใน FusionSolar เพื่อระบุสาเหตุที่แท้จริง";
+                    var commsRca = "⚠ STATION-LEVEL ABNORMAL STATE detected via Huawei NBI real_health_state=1.\n" +
+                        "Cloud API ตอบกลับได้ปกติ แต่ Huawei รายงานว่าไซต์อยู่ในสถานะผิดปกติ\n" +
+                        "สถานะนี้ครอบคลุมหลายกรณี ห้ามเดาจากตัวอย่าง — ต้องอ่านชื่อ alarm จริง:\n" +
+                        "  • ความผิดปกติของ inverter เอง (hardware fault)\n" +
+                        "  • ปัญหาฝั่งระบบไฟฟ้า (utility/grid)\n" +
+                        "  • Inverter↔cloud comms ขาด (data logger, internet ที่ไซต์)\n" +
+                        "  • Cloud-side reporting glitch (Huawei รายงานผิดเอง)\n" +
+                        "การตรวจสอบ:\n" +
+                        "  1. เปิด FusionSolar → ดู Alarm list ของไซต์นี้เพื่อทราบสาเหตุที่แท้จริง\n" +
+                        "  2. ถ้า alarm บอก comms/network → ตรวจอินเทอร์เน็ตที่ไซต์ + data logger\n" +
+                        "  3. ถ้า alarm บอก grid/voltage → ตรวจไฟฟ้าและ MCB\n" +
+                        "  4. ถ้า alarm บอก insulation/arc/temp → ตามขั้นตอนของ alarm นั้น ๆ";
+
+                    if (existingFault == null)
                     {
-                        // Pull the most recent OPEN per-alarm records so the
-                        // generic Station Faulty alert references the actual
-                        // Huawei alarm(s) — not our placeholder text.  Anything
-                        // ingested by GetAlarmsAsync in a previous sync round
-                        // is in SystemAlerts already.
-                        var since = DateTime.UtcNow.AddHours(-24);
-                        var openAlarmTitles = await _context.SystemAlerts
-                            .Where(a => a.InstallationId == installation.Id
-                                && a.AlertType == AlertType.Error
-                                && a.ResolvedAt == null
-                                && a.OccurredAt >= since
-                                && a.Title != faultTitle)         // exclude the previous-day Station Faulty itself
-                            .OrderByDescending(a => a.OccurredAt)
-                            .Take(5)
-                            .Select(a => a.Title)
-                            .ToListAsync();
-
-                        // ── Confirmation gate ────────────────────────────────────────
-                        // Huawei's real_health_state=1 alone is unreliable — observed
-                        // in production: FusionSolar's Active Alarms list shows zero
-                        // open alarms while the field still reports 1 (the inverter
-                        // is just powered off / data-logger offline / Huawei state
-                        // mismatch).  Without a confirming alarm in getAlarmList,
-                        // firing a "Critical: Station Faulty" alert to the team's
-                        // LINE group is false alarm.
-                        //
-                        // Policy:
-                        //   * No confirming alarm + first time we see it
-                        //     → create the row at lower severity (Medium) with
-                        //       IsNotified=true so it appears on the dashboard for
-                        //       investigation but does NOT push to LINE.  Next sync
-                        //       round will pick up real alarms via getAlarmList and
-                        //       those individual rows trigger their own properly-
-                        //       categorised LINE alerts.
-                        //   * Confirming alarm present (≥1 open Error alert from
-                        //     getAlarmList in the last 24h) → escalate to Critical
-                        //     with LINE notification, like before, because we now
-                        //     have a real cause to report.
-                        var hasConfirmingAlarm = openAlarmTitles.Count > 0;
-                        var severity = hasConfirmingAlarm ? AlertSeverity.Critical : AlertSeverity.Medium;
-                        var suppressLine = !hasConfirmingAlarm;
-
+                        // First sync seeing the faulty state — create row.
                         var alarmSummary = hasConfirmingAlarm
                             ? "\n\nรหัส alarm ที่ Huawei รายงานล่าสุด:\n• " + string.Join("\n• ", openAlarmTitles)
                             : "\n\n⚠ ยังไม่มี alarm ใน FusionSolar's getAlarmList ที่ยืนยันสถานะนี้ — " +
-                              "อาจเป็นเครื่อง off / data logger ขาดการเชื่อมต่อ / Huawei reporting glitch " +
-                              "(ระบบจะไม่แจ้ง LINE จนกว่ามี alarm จริงยืนยัน)";
+                              "ระบบจะรอ " + persistenceThreshold.TotalMinutes + " นาทีก่อนแจ้งเตือน เผื่อเป็น Huawei reporting glitch ชั่วคราว";
 
                         _context.SystemAlerts.Add(new SystemAlert
                         {
                             InstallationId = installation.Id,
                             AlertType = AlertType.Error,
-                            Severity = severity,
+                            Severity = hasConfirmingAlarm ? AlertSeverity.Critical : AlertSeverity.Medium,
                             Title = faultTitle,
-                            // No "(Grid Loss / Insulation / OverTemp / ฯลฯ)" enumeration here —
-                            // it was getting matched by InverterKnowledgeBase.MatchFaultCode
-                            // as evidence of those faults, producing fake "Huawei 2063 DC
-                            // insulation" diagnostics on a site that actually had a network
-                            // disconnection alarm.  Only the real alarm titles from
-                            // getAlarmList belong in the visible message.
-                            Message = $"[{installation.InverterBrand}] {installation.SiteName} รายงานสถานะผิดปกติ (real_health_state=1). " +
-                                "อาจเป็นปัญหาที่ inverter, ฝั่งไฟฟ้า, หรือ comms ระหว่าง inverter↔cloud — " +
-                                "ต้องดูจากรหัส alarm ใน FusionSolar เพื่อระบุสาเหตุที่แท้จริง" +
-                                alarmSummary,
-                            RootCauseAnalysis = "⚠ STATION-LEVEL ABNORMAL STATE detected via Huawei NBI real_health_state=1.\n" +
-                                "Cloud API ตอบกลับได้ปกติ แต่ Huawei รายงานว่าไซต์อยู่ในสถานะผิดปกติ\n" +
-                                "สถานะนี้ครอบคลุมหลายกรณี ห้ามเดาจากตัวอย่าง — ต้องอ่านชื่อ alarm จริง:\n" +
-                                "  • ความผิดปกติของ inverter เอง (hardware fault)\n" +
-                                "  • ปัญหาฝั่งระบบไฟฟ้า (utility/grid)\n" +
-                                "  • Inverter↔cloud comms ขาด (data logger, internet ที่ไซต์)\n" +
-                                "  • Cloud-side reporting glitch (Huawei รายงานผิดเอง)\n" +
-                                "การตรวจสอบ:\n" +
-                                "  1. เปิด FusionSolar → ดู Alarm list ของไซต์นี้เพื่อทราบสาเหตุที่แท้จริง\n" +
-                                "  2. ถ้า alarm บอก comms/network → ตรวจอินเทอร์เน็ตที่ไซต์ + data logger\n" +
-                                "  3. ถ้า alarm บอก grid/voltage → ตรวจไฟฟ้าและ MCB\n" +
-                                "  4. ถ้า alarm บอก insulation/arc/temp → ตามขั้นตอนของ alarm นั้น ๆ",
+                            Message = commsMessage + alarmSummary,
+                            RootCauseAnalysis = commsRca,
                             OccurredAt = DateTime.UtcNow,
-                            // suppressLine = true → mark as already-notified so
-                            // SystemHealthMonitorJob's LINE pass skips it; the
-                            // row still lights up the dashboard for the operator
-                            // to investigate.
-                            IsNotified = suppressLine
+                            // Silent on first sync when no confirming alarm (dashboard
+                            // only).  If condition persists past persistenceThreshold,
+                            // the next sync's update branch (below) re-fires LINE.
+                            IsNotified = !hasConfirmingAlarm,
                         });
+                    }
+                    else if (hasConfirmingAlarm && existingFault.Severity != AlertSeverity.Critical)
+                    {
+                        // A confirming alarm just appeared in getAlarmList — we
+                        // now know the cause.  Upgrade to Critical/Error and
+                        // re-fire LINE with the real alarm names.
+                        existingFault.Severity = AlertSeverity.Critical;
+                        existingFault.AlertType = AlertType.Error;
+                        existingFault.Message = commsMessage +
+                            "\n\nรหัส alarm ที่ Huawei รายงานล่าสุด:\n• " + string.Join("\n• ", openAlarmTitles);
+                        existingFault.IsNotified = false;
+                    }
+                    else if (!hasConfirmingAlarm
+                             && existingFault.Severity == AlertSeverity.Medium
+                             && (DateTime.UtcNow - existingFault.OccurredAt) >= persistenceThreshold)
+                    {
+                        // Two-or-more sync rounds with real_health_state=1 and
+                        // still no alarm to explain it.  Empirically this is
+                        // Grid Loss / inverter-off / internet-cut at the site
+                        // — Huawei can't report a specific alarm because the
+                        // device can't speak.  Promote to Offline so the
+                        // customer gets the cautious Thai message about
+                        // possible power/internet loss, and fire LINE.
+                        existingFault.AlertType = AlertType.Offline;
+                        existingFault.Severity = AlertSeverity.High;
+                        existingFault.Message = commsMessage +
+                            $"\n\n📡 สถานะค้างมานานกว่า {persistenceThreshold.TotalMinutes:0} นาที — มีโอกาสสูงที่:\n" +
+                            "  • เครื่อง off (ไฟดับ → Grid Loss alarm จะมาภายหลังเมื่อไฟกลับ)\n" +
+                            "  • Data logger / internet ที่ไซต์ขาด\n" +
+                            "  • Inverter ค้าง — ต้องไปดูหน้างาน";
+                        existingFault.IsNotified = false;
                     }
                 }
                 else if (isDeviceOnline)
@@ -451,10 +472,13 @@ public class SolarDataSyncJob
                     LogApiCall(installation, "GetRealtimeData", 200, true,
                         $"[ONLINE] Power={realtime.CurrentPowerKw:0.00}kW, Today={realtime.TodayEnergyKwh:0.0}kWh");
 
-                    // Auto-resolve any open station-fault alerts for this installation
+                    // Auto-resolve any open station-fault alerts for this installation.
+                    // Accept BOTH AlertType.Error (initial Station Faulty rows) AND
+                    // AlertType.Offline (rows we promoted after persistent
+                    // unconfirmed real_health_state=1 — see promotion branch above).
                     var openFaults = await _context.SystemAlerts
                         .Where(a => a.InstallationId == installation.Id
-                            && a.AlertType == AlertType.Error
+                            && (a.AlertType == AlertType.Error || a.AlertType == AlertType.Offline)
                             && a.ResolvedAt == null
                             && a.Title.StartsWith("Station Faulty:"))
                         .ToListAsync();
@@ -481,7 +505,7 @@ public class SolarDataSyncJob
 
                         var openFaults = await _context.SystemAlerts
                             .Where(a => a.InstallationId == installation.Id
-                                && a.AlertType == AlertType.Error
+                                && (a.AlertType == AlertType.Error || a.AlertType == AlertType.Offline)
                                 && a.ResolvedAt == null
                                 && a.Title.StartsWith("Station Faulty:"))
                             .ToListAsync();
