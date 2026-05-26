@@ -152,8 +152,15 @@
                                 API Key
                                 @if (Model.HasApiKey) { <span class="badge bg-success ms-1">Saved</span> }
                             </label>
-                            <input asp-for="Input.CloudApiKey" class="form-control"
-                                   placeholder="@(Model.HasApiKey ? "•••••••••• (saved — leave blank to keep)" : "Enter API Key")" />
+                            <div class="input-group">
+                                <input asp-for="Input.CloudApiKey" class="form-control" type="password"
+                                       placeholder="@(Model.HasApiKey ? "•••••••••• (saved — leave blank to keep)" : "Enter API Key")" />
+                                <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                        data-field="apiKey" data-target="Input.CloudApiKey"
+                                        title="ดู / ซ่อน">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="row mb-3">
@@ -163,16 +170,30 @@
                                 @if (Model.HasUsername) { <span class="badge bg-success ms-1">Saved</span> }
                             </label>
                             @* Username is NOT a secret — show the actual value for verification *@
-                            <input asp-for="Input.CloudUsername" class="form-control"
-                                   placeholder="Enter username (email/phone)" />
+                            <div class="input-group">
+                                <input asp-for="Input.CloudUsername" class="form-control"
+                                       placeholder="Enter username (email/phone)" />
+                                <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                        data-field="username" data-target="Input.CloudUsername"
+                                        title="โหลดค่าที่บันทึกไว้">
+                                    <i class="bi bi-download"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="col-md-6">
                             <label asp-for="Input.CloudPassword" class="form-label">
                                 Cloud Password
                                 @if (Model.HasPassword) { <span class="badge bg-success ms-1">Saved</span> }
                             </label>
-                            <input asp-for="Input.CloudPassword" class="form-control" type="password"
-                                   placeholder="@(Model.HasPassword ? "•••••••••• (saved — leave blank to keep)" : "Enter password")" />
+                            <div class="input-group">
+                                <input asp-for="Input.CloudPassword" class="form-control" type="password"
+                                       placeholder="@(Model.HasPassword ? "•••••••••• (saved — leave blank to keep)" : "Enter password")" />
+                                <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                        data-field="password" data-target="Input.CloudPassword"
+                                        title="ดู / ซ่อน">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -201,8 +222,15 @@
                                 API Secret
                                 @if (Model.HasApiSecret) { <span class="badge bg-success ms-1">Saved</span> }
                             </label>
-                            <input asp-for="Input.CloudApiSecret" class="form-control" type="password"
-                                   placeholder="@(Model.HasApiSecret ? "•••••••••• (saved — leave blank to keep)" : "Enter secret")" />
+                            <div class="input-group">
+                                <input asp-for="Input.CloudApiSecret" class="form-control" type="password"
+                                       placeholder="@(Model.HasApiSecret ? "•••••••••• (saved — leave blank to keep)" : "Enter secret")" />
+                                <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                        data-field="apiSecret" data-target="Input.CloudApiSecret"
+                                        title="ดู / ซ่อน">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="col-md-6 d-flex align-items-end">
                             <button type="button" id="testConnectionBtn" class="btn btn-outline-info">
@@ -571,6 +599,78 @@
             } finally {
                 btn.disabled = false;
             }
+        });
+
+        // ─── Credential reveal toggles (admin-only) ──────────────────────────
+        // Each "eye" button next to a credential field either:
+        //   * If the field has user input (operator just typed a new value) →
+        //     toggle the input's type between password and text so they can
+        //     verify the typed value without re-submitting.
+        //   * Otherwise (input is empty = "keep saved value") → fetch the
+        //     decrypted stored value from /api/installations/{id}/credential/
+        //     {field}, populate the input AND switch to text type.  A second
+        //     click hides again (type=password) but keeps the loaded value.
+        // The server endpoint is Admin-only and audit-logs every reveal.
+        document.querySelectorAll('.credential-reveal').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const fieldKey = btn.dataset.field;       // apiKey / apiSecret / username / password
+                const target = btn.dataset.target;        // "Input.CloudPassword" etc.
+                const input = document.querySelector(`[name="${target}"]`);
+                if (!input) return;
+
+                const icon = btn.querySelector('i');
+                const isPasswordType = input.type === 'password';
+
+                // If already populated → just toggle visibility
+                if (input.value && input.value.length > 0) {
+                    if (isPasswordType) {
+                        input.type = 'text';
+                        icon.className = 'bi bi-eye-slash';
+                    } else if (fieldKey === 'username') {
+                        // username is always plain text — nothing to toggle
+                    } else {
+                        input.type = 'password';
+                        icon.className = 'bi bi-eye';
+                    }
+                    return;
+                }
+
+                // Empty input + Saved value exists → fetch from server
+                btn.disabled = true;
+                icon.className = 'bi bi-hourglass-split';
+                try {
+                    const r = await fetch(`/api/installations/@Model.Input.Id/credential/${fieldKey}`,
+                        { headers: { 'Accept': 'application/json' } });
+                    if (r.status === 403) {
+                        alert('เฉพาะ Admin เท่านั้นที่ดูค่าที่บันทึกไว้ได้');
+                        icon.className = 'bi bi-eye';
+                        return;
+                    }
+                    if (!r.ok) {
+                        alert(`โหลดไม่สำเร็จ (HTTP ${r.status})`);
+                        icon.className = 'bi bi-eye';
+                        return;
+                    }
+                    const data = await r.json();
+                    if (!data.value) {
+                        alert(data.note || '(no value stored)');
+                        icon.className = 'bi bi-eye';
+                        return;
+                    }
+                    input.value = data.value;
+                    if (fieldKey !== 'username') {
+                        input.type = 'text';
+                        icon.className = 'bi bi-eye-slash';
+                    } else {
+                        icon.className = 'bi bi-check2';
+                    }
+                } catch (e) {
+                    alert('ผิดพลาด: ' + e.message);
+                    icon.className = 'bi bi-eye';
+                } finally {
+                    btn.disabled = false;
+                }
+            });
         });
 
         // ─── LINE test-send button ───────────────────────────────────────────

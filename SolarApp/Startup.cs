@@ -1133,6 +1133,68 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         // installation (LineGroupId override → falls back to Customer.LineUserId).
         // Operator-only, so the admin can verify the recipient resolves and
         // the channel token is valid without waiting for a real alert.
+        // Reveal a decrypted credential field for an installation so the
+        // operator can verify (or copy) what's stored without resetting it.
+        // Strictly Admin-only — Partners with edit access can still SAVE new
+        // credentials but should not be able to read existing ones back in
+        // clear text.  Every reveal is logged so the admin audit trail
+        // shows who looked at what and when.
+        app.MapGet("/api/installations/{id:int}/credential/{field}", async (
+            int id,
+            string field,
+            System.Security.Claims.ClaimsPrincipal principal,
+            UserManager<Models.ApplicationUser> userManager,
+            Data.ApplicationDbContext db,
+            Services.Security.ICredentialProtector protector,
+            ILogger<Program> logger) =>
+        {
+            var user = await userManager.GetUserAsync(principal);
+            if (user == null) return Results.Unauthorized();
+            if (!await userManager.IsInRoleAsync(user, "Admin"))
+                return Results.Forbid();
+
+            var inst = await db.Installations.FirstOrDefaultAsync(i => i.Id == id);
+            if (inst == null) return Results.NotFound();
+
+            string? encrypted = field switch
+            {
+                "apiKey"    => inst.CloudApiKey,
+                "apiSecret" => inst.CloudApiSecret,
+                "username"  => inst.CloudUsername,
+                "password"  => inst.CloudPassword,
+                _           => null,
+            };
+            if (field is null
+                || (field != "apiKey" && field != "apiSecret"
+                    && field != "username" && field != "password"))
+                return Results.BadRequest(new { error = "Unknown field" });
+            if (string.IsNullOrEmpty(encrypted))
+                return Results.Json(new { value = "", note = "(empty)" });
+
+            string? plain;
+            try { plain = protector.Unprotect(encrypted); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to decrypt {Field} for installation {Id}", field, id);
+                return Results.Json(new { value = "", note = "(decrypt failed — may be plaintext or wrong key)" });
+            }
+
+            // Audit trail — the same AuditableEntityInterceptor doesn't catch
+            // pure reads, so emit our own row.
+            db.Set<Models.AuditLog>().Add(new Models.AuditLog
+            {
+                UserId = user.Id,
+                UserName = user.UserName,
+                Action = "Reveal",
+                EntityType = "Installation." + field,
+                EntityId = id.ToString(),
+                Timestamp = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+
+            return Results.Json(new { value = plain ?? "" });
+        }).RequireAuthorization();
+
         app.MapPost("/api/installations/{id:int}/notify-test", async (
             int id,
             System.Security.Claims.ClaimsPrincipal user,
