@@ -1,5 +1,6 @@
 @page
 @model SolarApp.Pages.My.SettingsModel
+@inject Microsoft.Extensions.Configuration.IConfiguration Configuration
 @{
     ViewData["Title"] = "ตั้งค่า";
 }
@@ -48,17 +49,75 @@
     </div>
 </div>
 
+@* ── Account shortcuts ──────────────────────────────────────────── *@
+<div class="my-section-title">บัญชีของฉัน</div>
+<div class="my-card">
+    <a asp-page="/My/Profile" class="my-card-row" style="padding: 8px 0; text-decoration: none; color: inherit; border-bottom: 1px solid var(--my-border)">
+        <div>
+            <div class="my-card-title"><i class="bi bi-person"></i> โปรไฟล์</div>
+            <div class="text-muted small">เบอร์โทร · ที่อยู่ · LINE ID · รหัสผ่าน</div>
+        </div>
+        <i class="bi bi-chevron-right text-muted"></i>
+    </a>
+    <a asp-page="/My/Visits" class="my-card-row" style="padding: 8px 0; text-decoration: none; color: inherit">
+        <div>
+            <div class="my-card-title"><i class="bi bi-clipboard-check"></i> ประวัติการเข้าบริการ</div>
+            <div class="text-muted small">ดูประวัติล้างแผง / PM / ซ่อม พร้อมรูปก่อน-หลัง</div>
+        </div>
+        <i class="bi bi-chevron-right text-muted"></i>
+    </a>
+</div>
+
 @* ── Notifications shortcut ─────────────────────────────────────── *@
 <div class="my-section-title">การแจ้งเตือน</div>
 <div class="my-card">
     <a asp-page="/My/Notifications" class="my-card-row" style="padding: 8px 0; text-decoration: none; color: inherit">
         <div>
-            <div class="my-card-title">จัดการการแจ้งเตือนต่อไซต์</div>
+            <div class="my-card-title"><i class="bi bi-bell"></i> จัดการการแจ้งเตือนต่อไซต์</div>
             <div class="text-muted small">เลือกประเภทที่อยากรับ + LINE group + ช่วงห้ามรบกวน</div>
         </div>
         <i class="bi bi-chevron-right text-muted"></i>
     </a>
 </div>
+
+@* ── Contact operator ───────────────────────────────────────────── *@
+@{
+    var contactPhone = Configuration["MySolar:OperatorPhone"];
+    var contactLine  = Configuration["MySolar:OperatorLine"];
+    var contactEmail = Configuration["MySolar:OperatorEmail"];
+    var contactName  = Configuration["MySolar:OperatorName"] ?? "ทีมงาน SolarApp";
+    var anyContact = !string.IsNullOrWhiteSpace(contactPhone)
+                  || !string.IsNullOrWhiteSpace(contactLine)
+                  || !string.IsNullOrWhiteSpace(contactEmail);
+}
+@if (anyContact)
+{
+    <div class="my-section-title">ติดต่อทีมงาน</div>
+    <div class="my-card">
+        <div class="my-card-title" style="margin-bottom: 6px"><i class="bi bi-headset"></i> @contactName</div>
+        @if (!string.IsNullOrWhiteSpace(contactPhone))
+        {
+            <a href="tel:@contactPhone" class="my-card-row" style="padding: 8px 0; text-decoration: none; color: inherit; border-top: 1px solid var(--my-border)">
+                <div><i class="bi bi-telephone-fill text-success"></i> @contactPhone</div>
+                <small class="text-muted">แตะเพื่อโทร</small>
+            </a>
+        }
+        @if (!string.IsNullOrWhiteSpace(contactLine))
+        {
+            <a href="https://line.me/R/ti/p/@contactLine" target="_blank" rel="noopener" class="my-card-row" style="padding: 8px 0; text-decoration: none; color: inherit; border-top: 1px solid var(--my-border)">
+                <div><i class="bi bi-chat-dots-fill text-success"></i> LINE: @contactLine</div>
+                <small class="text-muted">เปิด LINE</small>
+            </a>
+        }
+        @if (!string.IsNullOrWhiteSpace(contactEmail))
+        {
+            <a href="mailto:@contactEmail" class="my-card-row" style="padding: 8px 0; text-decoration: none; color: inherit; border-top: 1px solid var(--my-border)">
+                <div><i class="bi bi-envelope-fill text-primary"></i> @contactEmail</div>
+                <small class="text-muted">ส่งอีเมล</small>
+            </a>
+        }
+    </div>
+}
 
 @* ── About / privacy ─────────────────────────────────────────────── *@
 <div class="my-section-title">ทั่วไป</div>

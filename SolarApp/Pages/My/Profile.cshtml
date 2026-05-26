@@ -1,0 +1,88 @@
+@page
+@model SolarApp.Pages.My.ProfileModel
+@{
+    ViewData["Title"] = "โปรไฟล์";
+}
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="my-alert severity-info" style="margin-bottom: 12px">
+        <div class="icon"><i class="bi bi-check-circle-fill"></i></div>
+        <div style="flex:1"><div class="title">@Model.StatusMessage</div></div>
+    </div>
+}
+
+<div class="my-card text-center" style="padding: 24px 16px">
+    <div style="width: 80px; height: 80px; border-radius: 50%; background: var(--my-accent-soft); display: grid; place-items: center; margin: 0 auto 12px">
+        <i class="bi bi-person-fill" style="font-size: 2.4rem; color: var(--my-accent)"></i>
+    </div>
+    <div class="my-card-title" style="font-size: 1.2rem">@Model.FullName</div>
+    <div class="text-muted small">@Model.Email</div>
+</div>
+
+<form method="post">
+    <div class="my-section-title">ข้อมูลติดต่อ</div>
+    <div class="my-card">
+        <div class="mb-3">
+            <label asp-for="Input.Phone" class="form-label small text-muted">เบอร์โทร</label>
+            <input asp-for="Input.Phone" class="form-control" placeholder="08x-xxx-xxxx" />
+            <span asp-validation-for="Input.Phone" class="text-danger small"></span>
+        </div>
+        <div class="mb-3">
+            <label asp-for="Input.LineUserId" class="form-label small text-muted">LINE User ID (ไม่บังคับ)</label>
+            <input asp-for="Input.LineUserId" class="form-control" placeholder="U1234..." />
+            <small class="text-muted">ใช้ส่งแจ้งเตือนเข้าตรง — ถ้าไม่ทราบให้เพิ่มเพื่อนทีมงานแล้วทีมงานจะแจ้ง ID ให้</small>
+        </div>
+    </div>
+
+    <div class="my-section-title">ที่อยู่</div>
+    <div class="my-card">
+        <div class="mb-2">
+            <label asp-for="Input.Address" class="form-label small text-muted">บ้านเลขที่ / ถนน</label>
+            <input asp-for="Input.Address" class="form-control" />
+        </div>
+        <div class="row g-2">
+            <div class="col-6">
+                <label asp-for="Input.City" class="form-label small text-muted">เขต/อำเภอ</label>
+                <input asp-for="Input.City" class="form-control" />
+            </div>
+            <div class="col-6">
+                <label asp-for="Input.Province" class="form-label small text-muted">จังหวัด</label>
+                <input asp-for="Input.Province" class="form-control" />
+            </div>
+            <div class="col-6">
+                <label asp-for="Input.PostalCode" class="form-label small text-muted">รหัสไปรษณีย์</label>
+                <input asp-for="Input.PostalCode" class="form-control" />
+            </div>
+        </div>
+    </div>
+
+    @if (Model.SiteNames.Any())
+    {
+        <div class="my-section-title">ไซต์ที่เชื่อมโยง (@Model.SiteNames.Count)</div>
+        <div class="my-card">
+            @foreach (var name in Model.SiteNames)
+            {
+                <div class="my-card-row" style="padding: 6px 0; border-bottom: 1px solid var(--my-border)">
+                    <div><i class="bi bi-sun" style="color: var(--my-accent)"></i> @name</div>
+                </div>
+            }
+            <small class="text-muted d-block mt-2">ติดต่อทีมงานหากต้องการเปลี่ยน/เพิ่ม/ลบไซต์</small>
+        </div>
+    }
+
+    <button type="submit" class="btn w-100" style="background: var(--my-accent); color: #fff; border: none; padding: 12px; border-radius: var(--my-radius); font-weight: 600">
+        <i class="bi bi-check2-circle"></i> บันทึกการเปลี่ยนแปลง
+    </button>
+</form>
+
+<div class="my-section-title">ความปลอดภัย</div>
+<div class="my-card">
+    <a asp-page="/Account/Manage" class="my-card-row" style="padding: 8px 0; text-decoration: none; color: inherit">
+        <div>
+            <div class="my-card-title">เปลี่ยนรหัสผ่าน</div>
+            <div class="text-muted small">แก้รหัสผ่านสำหรับเข้าสู่ระบบ</div>
+        </div>
+        <i class="bi bi-chevron-right text-muted"></i>
+    </a>
+</div>

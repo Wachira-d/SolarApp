@@ -1,0 +1,103 @@
+@page
+@model SolarApp.Pages.My.VisitsModel
+@{
+    ViewData["Title"] = "ประวัติการเข้าบริการ";
+}
+
+@if (Model.Upcoming.Count == 0 && Model.Recent.Count == 0)
+{
+    <div class="my-empty">
+        <div class="icon"><i class="bi bi-clipboard"></i></div>
+        <p>ยังไม่มีประวัติการเข้าบริการ<br/>ทีมงานจะนัดวันให้บริการเมื่อถึงรอบ</p>
+    </div>
+    return;
+}
+
+@functions {
+    string VisitMeta(SolarApp.Pages.My.VisitsModel.VisitVm v)
+    {
+        var parts = new List<string> { v.SiteName, v.When.ToLocalTime().ToString("dd/MM/yyyy") };
+        if (!string.IsNullOrEmpty(v.Performer)) parts.Add($"โดย {v.Performer}");
+        return string.Join(" · ", parts);
+    }
+}
+
+@if (Model.Upcoming.Any())
+{
+    <div class="my-section-title">นัดล่วงหน้า (@Model.Upcoming.Count)</div>
+    foreach (var v in Model.Upcoming)
+    {
+        <div class="my-card">
+            <div class="my-card-row" style="margin-bottom: 4px">
+                <div class="my-card-title">@v.Kind</div>
+                <span class="badge" style="background: var(--my-accent); color: #fff">นัด</span>
+            </div>
+            <div class="text-muted small">@VisitMeta(v)</div>
+            @if (!string.IsNullOrEmpty(v.Notes))
+            {
+                <div class="mt-2 small">@v.Notes</div>
+            }
+        </div>
+    }
+}
+
+@if (Model.Recent.Any())
+{
+    <div class="my-section-title">เข้าบริการแล้ว (@Model.Recent.Count)</div>
+    foreach (var v in Model.Recent)
+    {
+        <div class="my-card">
+            <div class="my-card-row" style="margin-bottom: 4px">
+                <div class="my-card-title">@v.Kind</div>
+                @{
+                    var (badge, css) = v.Status switch
+                    {
+                        "Completed" => ("เสร็จสิ้น", "#10b981"),
+                        "InProgress" => ("กำลังทำ", "#f59e0b"),
+                        "Cancelled" => ("ยกเลิก", "#6b7280"),
+                        _ => (v.Status, "#3b82f6"),
+                    };
+                }
+                <span class="badge" style="background: @css; color: #fff">@badge</span>
+            </div>
+            <div class="text-muted small">@VisitMeta(v)</div>
+
+            @if (!string.IsNullOrEmpty(v.Notes))
+            {
+                <div class="mt-2 small" style="white-space: pre-wrap">@v.Notes</div>
+            }
+
+            @if (v.BeforePhotos.Any() || v.AfterPhotos.Any())
+            {
+                <div class="mt-2">
+                    @if (v.BeforePhotos.Any())
+                    {
+                        <div class="text-muted small fw-semibold mb-1">ก่อน</div>
+                        <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px">
+                            @foreach (var url in v.BeforePhotos)
+                            {
+                                <a href="@url" target="_blank" rel="noopener">
+                                    <img src="@url" alt="ก่อนล้าง"
+                                         style="height: 90px; width: 90px; object-fit: cover; border-radius: 10px; flex-shrink: 0" />
+                                </a>
+                            }
+                        </div>
+                    }
+                    @if (v.AfterPhotos.Any())
+                    {
+                        <div class="text-muted small fw-semibold mb-1 mt-2">หลัง</div>
+                        <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px">
+                            @foreach (var url in v.AfterPhotos)
+                            {
+                                <a href="@url" target="_blank" rel="noopener">
+                                    <img src="@url" alt="หลังล้าง"
+                                         style="height: 90px; width: 90px; object-fit: cover; border-radius: 10px; flex-shrink: 0" />
+                                </a>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
