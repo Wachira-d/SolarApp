@@ -344,37 +344,40 @@
                     </p>
                     <div class="row mb-3">
                         <div class="col-md-6">
-                            <label asp-for="Input.ConnectionMethod" class="form-label">วิธีเชื่อมต่อ</label>
-                            <select asp-for="Input.ConnectionMethod" class="form-select">
+                            <label for="Input_ConnectionMethod" class="form-label">วิธีเชื่อมต่อ</label>
+                            <select id="Input_ConnectionMethod" name="Input.ConnectionMethod" class="form-select">
                                 @foreach (var m in cap.SupportedMethods)
                                 {
-                                    <option value="@((int)m)" selected="@(Model.Input.ConnectionMethod == m)">
-                                        @(m switch {
-                                            SolarApp.Models.Enums.ConnectionMethod.OfficialApi  => "Official API (API Key + Secret)",
-                                            SolarApp.Models.Enums.ConnectionMethod.UserPassword => "Username + Password (web-login)",
-                                            SolarApp.Models.Enums.ConnectionMethod.Hybrid       => "Hybrid",
-                                            _ => m.ToString(),
-                                        })
-                                    </option>
+                                    var methodLabel = m == SolarApp.Models.Enums.ConnectionMethod.OfficialApi  ? "Official API (API Key + Secret)"
+                                                    : m == SolarApp.Models.Enums.ConnectionMethod.UserPassword ? "Username + Password (web-login)"
+                                                    : m == SolarApp.Models.Enums.ConnectionMethod.Hybrid       ? "Hybrid"
+                                                                                                                : m.ToString();
+                                    var isSelected = Model.Input.ConnectionMethod == m;
+                                    <option value="@((int)m)" selected="@isSelected">@methodLabel</option>
                                 }
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label asp-for="Input.SyncIntervalMinutes" class="form-label">ความถี่ในการดึงข้อมูล</label>
-                            <select asp-for="Input.SyncIntervalMinutes" class="form-select">
+                            <label for="Input_SyncIntervalMinutes" class="form-label">ความถี่ในการดึงข้อมูล</label>
+                            <select id="Input_SyncIntervalMinutes" name="Input.SyncIntervalMinutes" class="form-select">
                                 @foreach (var v in SolarApp.Services.InverterApi.Common.BrandCapabilities.AllowedIntervalMinutes)
                                 {
-                                    var disabled = v < cap.MinIntervalMinutes;
-                                    var label = v switch {
-                                        < 60   => $"ทุก {v} นาที",
-                                        60     => "ทุก 1 ชั่วโมง",
-                                        < 1440 => $"ทุก {v/60} ชั่วโมง",
-                                        1440   => "วันละครั้ง",
-                                        _      => $"{v} นาที",
-                                    };
-                                    <option value="@v" selected="@(Model.Input.SyncIntervalMinutes == v)" disabled="@disabled">
-                                        @label@(disabled ? " (ต่ำกว่า brand ขั้นต่ำ)" : "")
-                                    </option>
+                                    var isDisabled = (v <= (cap.MinIntervalMinutes - 1));
+                                    var isSelected = (Model.Input.SyncIntervalMinutes == v);
+                                    var intervalLabel = (v == 1440) ? "วันละครั้ง"
+                                                      : (v == 60)   ? "ทุก 1 ชั่วโมง"
+                                                      : (v <= 59)   ? $"ทุก {v} นาที"
+                                                      : (v <= 1439) ? $"ทุก {v / 60} ชั่วโมง"
+                                                                    : $"{v} นาที";
+                                    var displayLabel = intervalLabel + (isDisabled ? " (ต่ำกว่า brand ขั้นต่ำ)" : "");
+                                    if (isDisabled)
+                                    {
+                                        <option value="@v" disabled selected="@isSelected">@displayLabel</option>
+                                    }
+                                    else
+                                    {
+                                        <option value="@v" selected="@isSelected">@displayLabel</option>
+                                    }
                                 }
                             </select>
                         </div>
