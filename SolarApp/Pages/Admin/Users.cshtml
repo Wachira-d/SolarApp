@@ -473,6 +473,68 @@
                 </div>
                 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
             </form>
+
+            @* ── Login account management (out of the Save-Customer form so a
+                  password-set doesn't piggyback on a full customer-save) ────── *@
+            <div class="border-top px-3 py-3 bg-light">
+                <h6 class="mb-2"><i class="bi bi-key"></i> บัญชี Login ของลูกค้ารายนี้</h6>
+
+                @* Linked: show email + buttons (visible only when row has UserId) *@
+                <div id="editCustLoginLinked" style="display:none">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <span class="badge bg-success"><i class="bi bi-check-circle"></i> ผูกกับ account แล้ว</span>
+                            <span class="ms-2 text-muted small" id="editCustLinkedEmail"></span>
+                        </div>
+                    </div>
+                    <form method="post" asp-page-handler="ResetPassword" class="row g-2 align-items-end"
+                          onsubmit="return confirm('รีเซ็ตรหัสผ่านของลูกค้านี้?');">
+                        <input type="hidden" name="PwReset.UserId" id="resetPwdUserId" />
+                        <div class="col-md-7">
+                            <label class="form-label small">รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)</label>
+                            <input type="text" name="PwReset.NewPassword" class="form-control form-control-sm"
+                                   placeholder="ใส่รหัสที่ต้องการ" minlength="8" required />
+                        </div>
+                        <div class="col-md-5">
+                            <button type="submit" class="btn btn-sm btn-warning w-100">
+                                <i class="bi bi-arrow-clockwise"></i> รีเซ็ตรหัสผ่าน
+                            </button>
+                        </div>
+                    </form>
+                    <small class="text-muted d-block mt-1">
+                        รหัสใหม่จะแสดงในข้อความผลลัพธ์ — แจ้งลูกค้าและให้เปลี่ยนเองในหน้า Manage Account
+                    </small>
+                </div>
+
+                @* Has email, not linked: show "create account" with optional pwd *@
+                <div id="editCustLoginCreate" style="display:none">
+                    <div class="alert alert-info py-2 small mb-2">
+                        <i class="bi bi-info-circle"></i>
+                        ลูกค้ารายนี้ยังไม่มี account ใช้ login — สร้างให้ได้ทันที
+                    </div>
+                    <form method="post" asp-page-handler="InviteCustomer" class="row g-2 align-items-end"
+                          onsubmit="return confirm('สร้าง login account ให้ลูกค้านี้?');">
+                        <input type="hidden" name="customerId" id="inviteCustId" />
+                        <div class="col-md-7">
+                            <label class="form-label small">รหัสผ่านตั้งต้น (เว้นว่าง = auto-generate)</label>
+                            <input type="text" name="password" class="form-control form-control-sm"
+                                   placeholder="ขั้นต่ำ 8 ตัวอักษร" minlength="8" />
+                        </div>
+                        <div class="col-md-5">
+                            <button type="submit" class="btn btn-sm btn-success w-100">
+                                <i class="bi bi-person-plus"></i> สร้าง Login Account
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                @* No email: warn *@
+                <div id="editCustLoginNoEmail" class="alert alert-warning py-2 small mb-0" style="display:none">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    ต้องกรอก <strong>Email</strong> ให้ลูกค้าก่อน จึงจะสร้าง login account ได้
+                    (email = username สำหรับ login)
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -601,6 +663,32 @@
                 document.getElementById('editCustUserId').value = btn.dataset.userid || '';
                 document.getElementById('editCustNotes').value = btn.dataset.notes || '';
                 document.getElementById('editCustActive').checked = btn.dataset.active === 'true';
+
+                // Login-account section: show the right state based on what the
+                // customer already has (linked? has email? neither?)
+                const linkedDiv  = document.getElementById('editCustLoginLinked');
+                const createDiv  = document.getElementById('editCustLoginCreate');
+                const noEmailDiv = document.getElementById('editCustLoginNoEmail');
+                const linkedEmailSpan = document.getElementById('editCustLinkedEmail');
+                const resetPwdUserIdInput = document.getElementById('resetPwdUserId');
+                const inviteCustIdInput   = document.getElementById('inviteCustId');
+
+                linkedDiv.style.display = 'none';
+                createDiv.style.display = 'none';
+                noEmailDiv.style.display = 'none';
+
+                const userId = btn.dataset.userid || '';
+                const email  = btn.dataset.email  || '';
+                if (userId) {
+                    linkedDiv.style.display = 'block';
+                    resetPwdUserIdInput.value = userId;
+                    linkedEmailSpan.textContent = email ? `(${email})` : '';
+                } else if (email) {
+                    createDiv.style.display = 'block';
+                    inviteCustIdInput.value = btn.dataset.id;
+                } else {
+                    noEmailDiv.style.display = 'block';
+                }
             });
         });
 
