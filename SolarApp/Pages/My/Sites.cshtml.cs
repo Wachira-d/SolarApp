@@ -39,7 +39,7 @@ public class SitesModel : PageModel
         if (customer == null || customer.Installations.Count == 0) return Page();
 
         var instIds = customer.Installations.Select(i => i.Id).ToList();
-        var today = DateTime.UtcNow.Date;
+        var today = SolarApp.Services.SiteTime.Today;
 
         var todayPer = await _context.EnergyData
             .Where(e => instIds.Contains(e.InstallationId)

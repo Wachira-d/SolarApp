@@ -64,7 +64,7 @@ public class SiteModel : PageModel
             .FirstOrDefaultAsync(i => i.Id == id && i.CustomerId == customer.Id);
         if (Site == null) return NotFound();
 
-        var today = DateTime.UtcNow.Date;
+        var today = SolarApp.Services.SiteTime.Today;
         var weekStart = today.AddDays(-7);
         var monthStart = today.AddDays(-30);
         var yearStart = new DateTime(today.Year, 1, 1);

@@ -37,10 +37,14 @@ public class SolarDataSyncJob
     [DisableConcurrentExecution(timeoutInSeconds: 1800)]
     public async Task ExecuteAsync()
     {
-        // Respect per-site service scope AND per-site sync interval.
-        //   * IncludesMonitoring=false → partner-monitored site, skip entirely.
-        //   * NextSyncDueAt in the future → site is on a longer cadence than
-        //     this Hangfire run; skip until its due time arrives.
+        // The inverter resets its TodayEnergyKwh counter at LOCAL midnight,
+        // not UTC midnight.  For a Thailand deployment (UTC+7) this means
+        // from 00:00-07:00 local Thai time, the inverter has already started
+        // a new day while DateTime.UtcNow.Date still points at the previous
+        // day.  If we keyed daily rows by UtcNow.Date, the post-midnight
+        // sync would overwrite YESTERDAY's row with the new day's tiny
+        // accumulator (~0 kWh) — clobbering the real end-of-day value.
+        // SolarApp.Services.SiteTime.Today handles this centrally.
         var now = DateTime.UtcNow;
         var installations = await _context.Installations
             .Where(i => i.Status != InstallationStatus.Inactive
@@ -543,7 +547,9 @@ public class SolarDataSyncJob
                 }
 
                 // ─── 2. Daily aggregate (upsert today) ───
-                var today = DateTime.UtcNow.Date;
+                // Key by site-local date — see SolarApp.Services.SiteTime
+                // for the timezone-rollover bug this avoids.
+                var today = SolarApp.Services.SiteTime.Today;
                 var todayRecord = await _context.EnergyData.FirstOrDefaultAsync(e =>
                     e.InstallationId == installation.Id
                     && e.Granularity == DataGranularity.Daily
@@ -566,10 +572,23 @@ public class SolarDataSyncJob
                 }
                 else
                 {
-                    todayRecord.EnergyGenerationKwh = realtime.TodayEnergyKwh;
-                    if (realtime.GridExportKw.HasValue) todayRecord.GridExportKwh = realtime.GridExportKw.Value;
-                    if (realtime.GridImportKw.HasValue) todayRecord.GridImportKwh = realtime.GridImportKw.Value;
-                    todayRecord.SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - todayRecord.GridExportKwh);
+                    // Monotonic guard: a daily-energy counter can only go UP
+                    // during the day.  If the new reading is lower than what
+                    // we already have, the inverter has just rolled its day
+                    // over (TodayEnergyKwh reset to ~0) but our local-date
+                    // hasn't ticked yet because of clock skew between us and
+                    // the inverter, or the API returned momentary bad data.
+                    // Either way: don't clobber the bigger value with the
+                    // smaller one — it'd irreversibly lose the day's real
+                    // final reading.
+                    if (realtime.TodayEnergyKwh >= todayRecord.EnergyGenerationKwh)
+                        todayRecord.EnergyGenerationKwh = realtime.TodayEnergyKwh;
+                    if (realtime.GridExportKw.HasValue && realtime.GridExportKw.Value >= todayRecord.GridExportKwh)
+                        todayRecord.GridExportKwh = realtime.GridExportKw.Value;
+                    if (realtime.GridImportKw.HasValue && realtime.GridImportKw.Value >= todayRecord.GridImportKwh)
+                        todayRecord.GridImportKwh = realtime.GridImportKw.Value;
+                    todayRecord.SelfConsumptionKwh = Math.Max(0, todayRecord.EnergyGenerationKwh - todayRecord.GridExportKwh);
+                    // SoC isn't monotonic — accept latest reading
                     todayRecord.BatterySocPercent = realtime.BatterySocPercent;
                 }
 
@@ -802,4 +821,5 @@ public class SolarDataSyncJob
             RequestTime = DateTime.UtcNow
         });
     }
+
 }

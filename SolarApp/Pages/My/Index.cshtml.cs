@@ -73,7 +73,7 @@ public class IndexModel : PageModel
         var instIds = Customer.Installations.Select(i => i.Id).ToList();
         if (instIds.Count == 0) return Page();
 
-        var today = DateTime.UtcNow.Date;
+        var today = SolarApp.Services.SiteTime.Today;
         var monthStart = today.AddDays(-30);
 
         // Per-installation aggregates in one query each — keep the page snappy

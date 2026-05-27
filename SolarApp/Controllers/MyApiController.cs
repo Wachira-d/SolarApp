@@ -54,7 +54,7 @@ public class MyApiController : ControllerBase
             .ToListAsync();
         if (instIds.Count == 0) return Ok(new { totalCurrentPowerKw = 0, totalTodayKwh = 0 });
 
-        var today = DateTime.UtcNow.Date;
+        var today = SolarApp.Services.SiteTime.Today;
         var totalToday = await _context.EnergyData
             .Where(e => instIds.Contains(e.InstallationId)
                 && e.Granularity == DataGranularity.Daily
@@ -93,7 +93,7 @@ public class MyApiController : ControllerBase
             .AnyAsync(i => i.Id == id && i.CustomerId == custId.Value);
         if (!owned) return NotFound();
 
-        var today = DateTime.UtcNow.Date;
+        var today = SolarApp.Services.SiteTime.Today;
         var rt = await _context.EnergyData
             .Where(e => e.InstallationId == id && e.Granularity == DataGranularity.Realtime)
             .OrderByDescending(e => e.Timestamp)
