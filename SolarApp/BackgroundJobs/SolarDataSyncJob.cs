@@ -573,16 +573,33 @@ public class SolarDataSyncJob
                     todayRecord.BatterySocPercent = realtime.BatterySocPercent;
                 }
 
-                // ─── 3. Historical backfill (only once per day) ───
-                var hasYesterday = await _context.EnergyData.AnyAsync(e =>
-                    e.InstallationId == installation.Id
-                    && e.Granularity == DataGranularity.Daily
-                    && e.Timestamp.Date == today.AddDays(-1));
+                // ─── 3. Historical backfill ───
+                // Pull recent history when there are gaps in the last 30 days.
+                // The earlier "only fire when yesterday is missing" heuristic
+                // missed several real cases:
+                //   * Site added days/weeks ago — yesterday's row exists from
+                //     today's sync but everything before is empty.
+                //   * Transient sync failure left a hole mid-week — we never
+                //     filled it because yesterday is fine.
+                // Now: check if ANY of the last 30 days are missing, and if
+                // so request 30 days from the API.  The auto-backfill is
+                // bounded (30 days, daily granularity) so a one-time API
+                // round still respects rate limits; deeper historical
+                // backfill goes through the manual /backfill endpoint.
+                var last30Start = today.AddDays(-30);
+                var existingLast30 = await _context.EnergyData
+                    .Where(e => e.InstallationId == installation.Id
+                        && e.Granularity == DataGranularity.Daily
+                        && e.Timestamp >= last30Start
+                        && e.Timestamp < today)
+                    .CountAsync();
+                var expectedDays = (today - last30Start).Days;
+                var hasGaps = existingLast30 < expectedDays;
 
-                if (!hasYesterday)
+                if (hasGaps)
                 {
                     var historical = await adapter.GetHistoricalDataAsync(credentials,
-                        today.AddDays(-7), today.AddDays(-1));
+                        last30Start, today.AddDays(-1));
 
                     if (historical.Any())
                     {

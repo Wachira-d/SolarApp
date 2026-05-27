@@ -237,10 +237,20 @@ public class Startup
         builder.Services.AddLocalization(opt => opt.ResourcesPath = "Resources");
         builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>(opt =>
         {
-            var supported = new[] { "th", "en" };
-            opt.SetDefaultCulture("th")
-                .AddSupportedCultures(supported)
-                .AddSupportedUICultures(supported);
+            // Force Thai locale to use the Gregorian calendar.  .NET's default
+            // th-TH culture uses ThaiBuddhistCalendar, which formats 2025 as
+            // 2568 (year + 543) in ToString("yyyy") / ToString("dd/MM/yyyy").
+            // That confuses users (every UI date suddenly shows the wrong
+            // year) and breaks date-range queries that compare the displayed
+            // year against the DB which stores Gregorian DateTimes.
+            var thai = new System.Globalization.CultureInfo("th-TH");
+            thai.DateTimeFormat.Calendar = new System.Globalization.GregorianCalendar();
+            var english = new System.Globalization.CultureInfo("en-US");
+
+            var supported = new[] { thai, english };
+            opt.DefaultRequestCulture = new Microsoft.AspNetCore.Localization.RequestCulture(thai);
+            opt.SupportedCultures = supported;
+            opt.SupportedUICultures = supported;
             opt.FallBackToParentCultures = true;
         });
 
@@ -1139,6 +1149,107 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         // credentials but should not be able to read existing ones back in
         // clear text.  Every reveal is logged so the admin audit trail
         // shows who looked at what and when.
+        // Manually pull historical daily-energy data from the inverter
+        // brand's cloud and upsert into [EnergyData].  Useful when:
+        //   * Site was added late and we missed months of production
+        //   * Auto-backfill hit rate-limits and gave up early
+        //   * Vendor's portal shows numbers the customer wants reflected
+        // Returns counts so the UI can show a progress summary.
+        app.MapPost("/api/installations/{id:int}/backfill", async (
+            int id,
+            int? days,
+            System.Security.Claims.ClaimsPrincipal user,
+            Services.Authorization.IInstallationAccessHelper access,
+            Data.ApplicationDbContext db,
+            Services.InverterApi.IInverterApiAdapterFactory adapterFactory,
+            Services.Security.ICredentialProtector protector,
+            ILogger<Program> logger) =>
+        {
+            if (!await access.CanAccessAsync(id, user)) return Results.Forbid();
+            var inst = await db.Installations
+                .Include(i => i.Customer)
+                .FirstOrDefaultAsync(i => i.Id == id);
+            if (inst == null) return Results.NotFound();
+            if (string.IsNullOrEmpty(inst.PlantId))
+                return Results.Json(new { success = false, message = "No PlantId — set it first" });
+
+            // Default: 365 days back.  Cap at 3 years so a misclick can't
+            // walk the entire API rate-limit budget in one request.
+            var requestedDays = Math.Clamp(days ?? 365, 1, 365 * 3);
+            var toDate = DateTime.UtcNow.Date;
+            var fromDate = toDate.AddDays(-requestedDays);
+
+            var creds = new Services.InverterApi.Models.ApiCredentials
+            {
+                ApiKey = protector.Unprotect(inst.CloudApiKey),
+                ApiSecret = protector.Unprotect(inst.CloudApiSecret),
+                Username = protector.Unprotect(inst.CloudUsername),
+                Password = protector.Unprotect(inst.CloudPassword),
+                PlantId = inst.PlantId,
+                ApiBaseUrl = inst.CloudApiBaseUrl,
+            };
+
+            List<Services.InverterApi.Models.EnergyRecord> historical;
+            try
+            {
+                var adapter = adapterFactory.GetAdapter(inst.InverterBrand);
+                historical = await adapter.GetHistoricalDataAsync(creds, fromDate, toDate);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Backfill failed for installation {Id}", id);
+                return Results.Json(new { success = false, message = $"API error: {ex.Message}" });
+            }
+
+            if (historical.Count == 0)
+                return Results.Json(new { success = true, message = "API returned no historical records",
+                    inserted = 0, updated = 0, fromDate, toDate });
+
+            // Batch-load existing dates so we know insert vs update
+            var minDate = historical.Min(h => h.Timestamp.Date);
+            var maxDate = historical.Max(h => h.Timestamp.Date);
+            var existing = await db.EnergyData
+                .Where(e => e.InstallationId == id
+                    && e.Granularity == Models.Enums.DataGranularity.Daily
+                    && e.Timestamp >= minDate && e.Timestamp <= maxDate)
+                .ToDictionaryAsync(e => e.Timestamp.Date, e => e);
+
+            int inserted = 0, updated = 0;
+            foreach (var h in historical)
+            {
+                if (existing.TryGetValue(h.Timestamp.Date, out var row))
+                {
+                    if (row.EnergyGenerationKwh != h.EnergyGenerationKwh) updated++;
+                    row.EnergyGenerationKwh = h.EnergyGenerationKwh;
+                    if (h.GridExportKwh > 0) row.GridExportKwh = h.GridExportKwh;
+                    if (h.GridImportKwh > 0) row.GridImportKwh = h.GridImportKwh;
+                }
+                else
+                {
+                    db.EnergyData.Add(new Models.EnergyData
+                    {
+                        InstallationId = id,
+                        Timestamp = h.Timestamp.Date,
+                        Granularity = Models.Enums.DataGranularity.Daily,
+                        EnergyGenerationKwh = h.EnergyGenerationKwh,
+                        GridExportKwh = h.GridExportKwh,
+                        GridImportKwh = h.GridImportKwh,
+                    });
+                    inserted++;
+                }
+            }
+            await db.SaveChangesAsync();
+
+            return Results.Json(new
+            {
+                success = true,
+                message = $"Backfilled {historical.Count} days from API",
+                inserted, updated,
+                fromDate = fromDate.ToString("yyyy-MM-dd"),
+                toDate = toDate.ToString("yyyy-MM-dd"),
+            });
+        }).RequireAuthorization();
+
         app.MapGet("/api/installations/{id:int}/credential/{field}", async (
             int id,
             string field,
