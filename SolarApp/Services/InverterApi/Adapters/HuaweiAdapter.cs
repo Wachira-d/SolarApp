@@ -701,20 +701,33 @@ public class HuaweiAdapter : IInverterApiAdapter
         {
             var client = _httpClientFactory.CreateClient();
             var token = await LoginAsync(client, credentials);
-            if (token == null) return records;
-
+            if (token == null)
+            {
+                _logger.LogWarning("Huawei GetHistoricalData: login returned null token");
+                return records;
+            }
             client.DefaultRequestHeaders.Add("XSRF-TOKEN", token);
 
-            // Iterate each day in range
-            var cur = from.Date;
-            while (cur <= to.Date)
+            // Use getKpiStationMonth — returns 30 daily-aggregate rows in ONE
+            // call (collectTime = any timestamp within the target month).
+            // Previous version used getKpiStationDay, which returns 24
+            // HOURLY rows for a single day — wrong granularity AND ate the
+            // 1-req/min rate budget at 365 calls per backfill (would take
+            // 6 hours).  Month iteration: 12 calls per year, completes in
+            // 12 minutes even at strict rate limit.
+            //
+            // Reference: Huawei FusionSolar NBI v6 docs §4.2.4
+            //   /getKpiStationMonth → dataItemMap.day_power (kWh per day)
+
+            var cur = new DateTime(from.Year, from.Month, 1);
+            var stop = new DateTime(to.Year, to.Month, 1).AddMonths(1);
+            while (cur < stop)
             {
-                // Per-day rate gate — defer remaining days if quota is busy
                 var (defer, wait) = HuaweiRateGate.Decide(accountKey);
                 if (defer)
                 {
                     _logger.LogInformation(
-                        "Huawei historical: deferring remaining days starting {Date} — rate gate busy ({Wait:0.0}s)",
+                        "Huawei historical: deferring remaining months starting {Date} — rate gate busy ({Wait:0.0}s)",
                         cur, wait.TotalSeconds);
                     break;
                 }
@@ -722,47 +735,87 @@ public class HuaweiAdapter : IInverterApiAdapter
 
                 try
                 {
-                    var collectTime = new DateTimeOffset(cur).ToUnixTimeMilliseconds();
+                    var collectTime = new DateTimeOffset(cur, TimeSpan.Zero).ToUnixTimeMilliseconds();
                     HuaweiRateGate.MarkCalled(accountKey);
-                    var response = await client.PostAsJsonAsync($"{BaseUrl}/getKpiStationDay",
+                    var response = await client.PostAsJsonAsync($"{BaseUrl}/getKpiStationMonth",
                         new { stationCodes = credentials.PlantId, collectTime });
 
-                    if (response.IsSuccessStatusCode)
+                    if (!response.IsSuccessStatusCode)
                     {
-                        var json = await ReadJsonAsync(response);
-                        if (json.HasValue
-                            && json.Value.TryGetProperty("data", out var dataArr)
-                            && dataArr.ValueKind == JsonValueKind.Array)
+                        var body = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning(
+                            "Huawei getKpiStationMonth HTTP {Status} for {Date} body={Body}",
+                            (int)response.StatusCode, cur, Truncate(body, 200));
+                        cur = cur.AddMonths(1);
+                        continue;
+                    }
+
+                    var json = await ReadJsonAsync(response);
+                    if (json == null)
+                    {
+                        cur = cur.AddMonths(1);
+                        continue;
+                    }
+
+                    // failCode 407 = rate limit; extend cooldown and retry next month later
+                    var fail = SafeGetInt(json.Value, "failCode");
+                    if (fail == 407)
+                    {
+                        HuaweiRateGate.RecordRateLimitResponse(accountKey);
+                        _logger.LogInformation("Huawei getKpiStationMonth 407 rate-limit for {Date}", cur);
+                        await Task.Delay(2000);
+                        cur = cur.AddMonths(1);
+                        continue;
+                    }
+                    if (fail.HasValue && fail.Value != 0)
+                    {
+                        var msg = SafeGetString(json.Value, "message")
+                                ?? SafeGetString(json.Value, "data");
+                        _logger.LogWarning("Huawei getKpiStationMonth failCode={Fail} message={Msg} for {Date}",
+                            fail, msg, cur);
+                        cur = cur.AddMonths(1);
+                        continue;
+                    }
+
+                    if (json.Value.TryGetProperty("data", out var dataArr)
+                        && dataArr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in dataArr.EnumerateArray())
                         {
-                            foreach (var item in dataArr.EnumerateArray())
+                            if (item.ValueKind != JsonValueKind.Object) continue;
+                            if (!item.TryGetProperty("dataItemMap", out var kpi)
+                                || kpi.ValueKind != JsonValueKind.Object) continue;
+
+                            var ct = SafeGetLong(item, "collectTime");
+                            if (ct == null) continue;
+
+                            // First non-zero across known kWh aliases.
+                            var energy = SafeGetDecimal(kpi, "day_power");
+                            if (energy == 0m) energy = SafeGetDecimal(kpi, "inverter_power");
+                            if (energy == 0m) energy = SafeGetDecimal(kpi, "energy");
+
+                            records.Add(new EnergyRecord
                             {
-                                if (item.ValueKind != JsonValueKind.Object) continue;
-                                if (!item.TryGetProperty("dataItemMap", out var kpi)
-                                    || kpi.ValueKind != JsonValueKind.Object) continue;
-
-                                var ct = SafeGetLong(item, "collectTime");
-                                if (ct == null) continue;
-
-                                records.Add(new EnergyRecord
-                                {
-                                    Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(ct.Value).UtcDateTime,
-                                    EnergyGenerationKwh = SafeGetDecimal(kpi, "inverter_power"),
-                                    GridExportKwh = SafeGetDecimal(kpi, "ongrid_power"),
-                                    SelfConsumptionKwh = SafeGetDecimal(kpi, "selfuse_power")
-                                });
-                            }
+                                Timestamp = DateTimeOffset.FromUnixTimeMilliseconds(ct.Value).UtcDateTime,
+                                EnergyGenerationKwh = energy,
+                                GridExportKwh = SafeGetDecimal(kpi, "ongrid_power"),
+                                SelfConsumptionKwh = SafeGetDecimal(kpi, "selfuse_power"),
+                            });
                         }
                     }
                 }
-                catch (Exception exDay)
+                catch (Exception exMonth)
                 {
-                    _logger.LogWarning(exDay, "Huawei day {Date} skipped", cur);
+                    _logger.LogWarning(exMonth, "Huawei month {Date} skipped", cur);
                 }
 
-                cur = cur.AddDays(1);
-                // Huawei rate limit: 1 req/min. Use shorter delay since this is historical
+                cur = cur.AddMonths(1);
                 await Task.Delay(500);
             }
+
+            _logger.LogInformation(
+                "Huawei GetHistoricalData: collected {Count} day-records for {Sid} {From} → {To}",
+                records.Count, credentials.PlantId, from.Date, to.Date);
         }
         catch (Exception ex)
         {

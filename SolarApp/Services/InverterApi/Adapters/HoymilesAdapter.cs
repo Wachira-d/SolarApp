@@ -1088,23 +1088,37 @@ public class HoymilesAdapter : IInverterApiAdapter
     /// Fetches a single calendar month of daily kWh from Hoymiles via
     /// pvm-data/api/0/station/data/count_eq_by_day_of_month.  Returns one
     /// EnergyRecord per day-of-the-month with non-zero production.
+    ///
+    /// Body shape comes from reverse-engineering the production S-Miles JS
+    /// bundle (account.hoymiles.com main bundle):
+    ///     request(url, { data: { sid, date, pb_ver: 1 } })
+    /// where date is any yyyy-MM-dd inside the target month.  Earlier
+    /// version sent {sid, year, month} which the cloud silently rejects
+    /// with an empty response.
     /// </summary>
     private async Task<List<EnergyRecord>> FetchHoymilesMonthAsync(
         string token, string baseUrl, string sid, int year, int month)
     {
         var records = new List<EnergyRecord>();
+        var dateStr = $"{year:D4}-{month:D2}-01";
         try
         {
             var data = await CallApiAsync(token, baseUrl,
                 "pvm-data/api/0/station/data/count_eq_by_day_of_month",
-                new { sid, year, month });
-            if (data == null) return records;
-
+                new { sid, date = dateStr, pb_ver = 1 });
+            if (data == null)
+            {
+                _logger.LogDebug("Hoymiles count_eq_by_day_of_month {Sid} {Date}: null response", sid, dateStr);
+                return records;
+            }
+            var before = records.Count;
             ParseHoymilesEnergyResponse(data.Value, year, month, records);
+            _logger.LogDebug("Hoymiles count_eq_by_day_of_month {Sid} {Date}: parsed {Count} rows",
+                sid, dateStr, records.Count - before);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Hoymiles count_eq_by_day_of_month failed for {Sid} {Year}-{Month}", sid, year, month);
+            _logger.LogWarning(ex, "Hoymiles count_eq_by_day_of_month failed for {Sid} {Date}", sid, dateStr);
         }
         return records;
     }
@@ -1115,16 +1129,27 @@ public class HoymilesAdapter : IInverterApiAdapter
         var records = new List<EnergyRecord>();
         try
         {
+            // S-Miles JS bundle body for count_eq_by_day / count_playback_power_by_day:
+            //     { sid, date, pb_ver: 1 }     ← date is the END date
+            // Some endpoints also accept startDate/endDate; try the
+            // single-date shape first (matches the live bundle) and fall
+            // back to range shape if that returned empty.
             var data = await CallApiAsync(token, baseUrl, path,
-                new
-                {
-                    sid,
-                    start_date = from.ToString("yyyy-MM-dd"),
-                    end_date = to.ToString("yyyy-MM-dd"),
-                    type = 1,
-                });
-            if (data == null) return records;
-            ParseHoymilesEnergyResponse(data.Value, anchorYear: 0, anchorMonth: 0, records);
+                new { sid, date = to.ToString("yyyy-MM-dd"), pb_ver = 1 });
+            if (data != null) ParseHoymilesEnergyResponse(data.Value, anchorYear: 0, anchorMonth: 0, records);
+
+            if (records.Count == 0)
+            {
+                var data2 = await CallApiAsync(token, baseUrl, path,
+                    new
+                    {
+                        sid,
+                        start_date = from.ToString("yyyy-MM-dd"),
+                        end_date = to.ToString("yyyy-MM-dd"),
+                        pb_ver = 1,
+                    });
+                if (data2 != null) ParseHoymilesEnergyResponse(data2.Value, anchorYear: 0, anchorMonth: 0, records);
+            }
         }
         catch (Exception ex)
         {
