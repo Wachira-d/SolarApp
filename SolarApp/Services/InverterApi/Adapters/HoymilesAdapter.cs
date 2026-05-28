@@ -1046,9 +1046,12 @@ public class HoymilesAdapter : IInverterApiAdapter
                                ?? SafeGetString(item, "day");
                     if (dateStr == null || !DateTime.TryParse(dateStr, out var date)) continue;
 
-                    var energy = SafeGetDecimal(item, "eq")
-                              + SafeGetDecimal(item, "energy")
-                              + SafeGetDecimal(item, "day_eq");
+                    // First-non-zero fallback (NEVER sum aliases — same
+                    // bug pattern as the realtime path that produced 2,000
+                    // kWh on a 5 kWp site).
+                    var energy = SafeGetDecimal(item, "eq");
+                    if (energy == 0m) energy = SafeGetDecimal(item, "energy");
+                    if (energy == 0m) energy = SafeGetDecimal(item, "day_eq");
                     if (energy > 10000) energy /= 1000m; // Wh → kWh
 
                     records.Add(new EnergyRecord
