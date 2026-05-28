@@ -194,7 +194,30 @@
                     `<small><a href="">รีโหลดหน้าเพื่อดูตัวเลขใหม่</a></small>`;
             } else {
                 result.classList.replace('alert-light', 'alert-danger');
-                result.innerHTML = `<i class="bi bi-x-circle-fill"></i> ${data.message}`;
+                // Build a diagnostic block so the operator (or the support
+                // team copying it back into Slack/LINE) can see exactly
+                // what went wrong: brand, station id, login result, what
+                // the adapter said.  Server-side details with no PII leaks.
+                let html = `<i class="bi bi-x-circle-fill"></i> <strong>${data.message || 'ดึงข้อมูลไม่สำเร็จ'}</strong>`;
+                const rows = [];
+                if (data.brand)        rows.push(`Brand: <code>${data.brand}</code>`);
+                if (data.plantId)      rows.push(`Plant ID: <code>${data.plantId}</code>`);
+                if (typeof data.authOk === 'boolean')
+                    rows.push(`Auth check: ${data.authOk
+                        ? '<span class="text-success">✓ OK</span>'
+                        : '<span class="text-danger">✗ failed</span>'}`);
+                if (data.authMessage)  rows.push(`Auth message: <code>${escapeHtml(data.authMessage)}</code>`);
+                if (data.diagnostic)   rows.push(`Diagnostic: ${escapeHtml(data.diagnostic)}`);
+                if (data.inner)        rows.push(`Inner exception: <code>${escapeHtml(data.inner)}</code>`);
+                if (typeof data.rejected === 'number' && data.rejected > 0)
+                    rows.push(`Rejected (>cap × 18): ${data.rejected} day-records`);
+                if (data.fromDate)     rows.push(`Window: ${data.fromDate} → ${data.toDate}`);
+                if (rows.length > 0)
+                    html += `<div class="small mt-2">${rows.map(r => `<div>${r}</div>`).join('')}</div>`;
+                html += '<div class="small mt-2 text-muted">' +
+                    'ตรวจ server log ดู WARN ที่ขึ้นต้นด้วย <code>Hoymiles GetHistoricalData</code> / ' +
+                    '<code>Backfill failed</code> เพื่อดูรายละเอียดเพิ่มเติม</div>';
+                result.innerHTML = html;
             }
         } catch (e) {
             result.classList.replace('alert-light', 'alert-danger');
@@ -203,6 +226,11 @@
             btn.disabled = false;
         }
     });
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }[c]));
+    }
 </script>
 <script>
 (function(){

@@ -1198,15 +1198,51 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             };
 
             List<Services.InverterApi.Models.EnergyRecord> historical;
+            string? diagnostic = null;
+            string? authMessage = null;
+            bool authOk = false;
             try
             {
                 var adapter = adapterFactory.GetAdapter(inst.InverterBrand);
+
+                // Pre-flight: did login + a baseline API call actually work?
+                // When historical returns empty list it's usually an auth
+                // problem (token expired, password reset on the vendor
+                // portal, region wrong) — but the adapter swallows the
+                // exception and returns empty.  TestConnectionAsync uses
+                // the same login path AND a real endpoint, so its result
+                // tells us whether the credentials work at all.
+                try
+                {
+                    var test = await adapter.TestConnectionAsync(creds);
+                    authOk = test.Success;
+                    authMessage = test.Message;
+                }
+                catch (Exception authEx)
+                {
+                    authOk = false;
+                    authMessage = $"TestConnection threw {authEx.GetType().Name}: {authEx.Message}";
+                }
+
                 historical = await adapter.GetHistoricalDataAsync(creds, fromDate, toDate);
+
+                if (historical.Count == 0 && !authOk)
+                    diagnostic = "Auth check failed — " + (authMessage ?? "no detail");
+                else if (historical.Count == 0)
+                    diagnostic = $"Adapter returned empty list but auth check OK ({authMessage}). " +
+                                 "The vendor cloud may not have data for this window, or the per-brand historical endpoint " +
+                                 "is unsupported on this account.  Check server log for adapter-specific WARN entries.";
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Backfill failed for installation {Id}", id);
-                return Results.Json(new { success = false, message = $"API error: {ex.Message}" });
+                return Results.Json(new
+                {
+                    success = false,
+                    message = $"{ex.GetType().Name}: {ex.Message}",
+                    inner = ex.InnerException?.Message,
+                    diagnostic = "Adapter threw an unhandled exception — see server log",
+                });
             }
 
             // Sanity ceiling — reject implausibly high rows from a buggy
@@ -1230,8 +1266,18 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             }).ToList();
 
             if (historical.Count == 0)
-                return Results.Json(new { success = true, message = $"API returned no usable historical records (rejected {rejected} implausible)",
-                    inserted = 0, updated = 0, fromDate, toDate, rejected });
+                return Results.Json(new {
+                    success = false,
+                    message = $"ดึงไม่ได้ — adapter คืน 0 records (rejected {rejected} implausible)",
+                    inserted = 0, updated = 0, deleted = 0, rejected,
+                    fromDate = fromDate.ToString("yyyy-MM-dd"),
+                    toDate = toDate.ToString("yyyy-MM-dd"),
+                    authOk,
+                    authMessage,
+                    diagnostic,
+                    brand = inst.InverterBrand.ToString(),
+                    plantId = inst.PlantId,
+                });
 
             // Clean-first mode: wipe every existing row in the requested
             // window so the API result becomes the source of truth.
