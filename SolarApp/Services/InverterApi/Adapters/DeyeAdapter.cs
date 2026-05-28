@@ -126,38 +126,73 @@ public class DeyeAdapter : IInverterApiAdapter
             var client = await CreateAuthenticatedClientAsync(credentials);
             if (client == null) return records;
 
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/device/originalData",
+            // Previous version called /device/originalData with deviceSn —
+            // wrong endpoint (returns raw 5-min telemetry, not daily kWh
+            // aggregates) and wrong field (Deye PlantId is the stationId,
+            // not the device SN).  Use /station/history with dateType=2
+            // (day) which returns one row per calendar day with
+            // generationValue / gridSell / gridBuy fields.
+            var response = await client.PostAsJsonAsync($"{BaseUrl}/station/history",
                 new
                 {
-                    deviceSn = credentials.PlantId,
-                    startDay = from.ToString("yyyy-MM-dd"),
-                    endDay = to.ToString("yyyy-MM-dd")
+                    stationId = credentials.PlantId,
+                    dateType = 2,   // 1=hour, 2=day, 3=month, 4=year
+                    startDate = from.ToString("yyyy-MM-dd"),
+                    endDate = to.ToString("yyyy-MM-dd")
                 });
-            if (!response.IsSuccessStatusCode) return records;
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Deye /station/history returned HTTP {Status}", (int)response.StatusCode);
+                return records;
+            }
 
             var json = await ReadJsonAsync(response);
             if (json == null) return records;
 
-            if (!json.Value.TryGetProperty("data", out var data)
-                || data.ValueKind != JsonValueKind.Array) return records;
+            // Tolerate Deye's two documented response shapes:
+            //   { data: [ {...}, {...} ] }
+            //   { data: { stationDataItems: [ ... ] } }
+            JsonElement arr;
+            if (!json.Value.TryGetProperty("data", out var data)) return records;
+            if (data.ValueKind == JsonValueKind.Array)
+                arr = data;
+            else if (data.ValueKind == JsonValueKind.Object
+                && data.TryGetProperty("stationDataItems", out var items)
+                && items.ValueKind == JsonValueKind.Array)
+                arr = items;
+            else
+                return records;
 
-            foreach (var item in data.EnumerateArray())
+            // First non-zero across the known field-name aliases.
+            decimal Pick(JsonElement el, params string[] keys)
+            {
+                foreach (var k in keys)
+                {
+                    var v = SafeGetDecimal(el, k);
+                    if (v != 0m) return v;
+                }
+                return 0m;
+            }
+
+            foreach (var item in arr.EnumerateArray())
             {
                 try
                 {
                     if (item.ValueKind != JsonValueKind.Object) continue;
-                    var dateStr = SafeGetString(item, "date");
+                    var dateStr = SafeGetString(item, "dateTime")
+                               ?? SafeGetString(item, "date")
+                               ?? SafeGetString(item, "day");
                     if (dateStr == null || !DateTime.TryParse(dateStr, out var date)) continue;
 
                     records.Add(new EnergyRecord
                     {
                         Timestamp = date,
-                        EnergyGenerationKwh = SafeGetDecimal(item, "generation"),
-                        GridExportKwh = SafeGetDecimal(item, "gridExport"),
-                        GridImportKwh = SafeGetDecimal(item, "gridImport"),
-                        SelfConsumptionKwh = SafeGetDecimal(item, "selfConsumption"),
-                        BatteryChargeKwh = SafeGetNullableDecimal(item, "batteryCharge"),
-                        BatteryDischargeKwh = SafeGetNullableDecimal(item, "batteryDischarge")
+                        EnergyGenerationKwh   = Pick(item, "generationValue", "generation", "energy"),
+                        GridExportKwh         = Pick(item, "gridSell", "gridExport", "feedin"),
+                        GridImportKwh         = Pick(item, "gridBuy", "gridImport", "purchase"),
+                        SelfConsumptionKwh    = Pick(item, "selfUse", "selfConsumption"),
+                        BatteryChargeKwh      = SafeGetNullableDecimal(item, "chargeBattery") ?? SafeGetNullableDecimal(item, "batteryCharge"),
+                        BatteryDischargeKwh   = SafeGetNullableDecimal(item, "dischargeBattery") ?? SafeGetNullableDecimal(item, "batteryDischarge"),
                     });
                 }
                 catch (Exception itemEx)
