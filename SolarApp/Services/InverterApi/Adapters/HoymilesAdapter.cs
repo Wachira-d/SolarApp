@@ -1011,69 +1011,272 @@ public class HoymilesAdapter : IInverterApiAdapter
         if (string.IsNullOrEmpty(credentials.PlantId)) return records;
         var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return records;
+        var baseUrl = apiBase ?? DefaultApiBase;
 
+        // Hoymiles' V3 cloud has two endpoints that return daily kWh: one
+        // per-month (count_eq_by_day_of_month, the FusionSolar-style chart
+        // backing the calendar view) and one per-range (count_eq_by_day,
+        // covering arbitrary windows).  We try both because:
+        //   * count_eq_by_day_of_month is the most reliable — every JS
+        //     bundle calls it and the response is straight kWh values.
+        //   * count_eq_by_day exists on some tenants but not others.
+        //   * count_playback_power_by_day is W-scale data; we keep it as
+        //     last-resort fallback in case the others reject.
+        //
+        // Each endpoint can return one of three response shapes:
+        //   1. data: [ {date, eq}, ... ]                (flat list)
+        //   2. data: { list: [ {date, eq}, ... ] }      (paginated wrapper)
+        //   3. data: { x: ["d1","d2"], y: [v1, v2] }   (parallel arrays —
+        //      chart format).  We parse all three.
+
+        // ── Try 1: per-month chunked, count_eq_by_day_of_month ──────────
+        var cur = new DateTime(from.Year, from.Month, 1);
+        var stop = new DateTime(to.Year, to.Month, 1).AddMonths(1);
+        while (cur < stop)
+        {
+            var monthRecords = await FetchHoymilesMonthAsync(
+                token, baseUrl, credentials.PlantId!, cur.Year, cur.Month);
+            records.AddRange(monthRecords.Where(r => r.Timestamp >= from.Date && r.Timestamp <= to.Date));
+            cur = cur.AddMonths(1);
+        }
+
+        if (records.Count == 0)
+        {
+            // ── Try 2: range, count_eq_by_day ───────────────────────────
+            _logger.LogInformation(
+                "Hoymiles per-month historical returned empty for {Sid} {From} → {To}; trying range endpoint",
+                credentials.PlantId, from.Date, to.Date);
+            records.AddRange(await FetchHoymilesRangeAsync(
+                token, baseUrl, credentials.PlantId!, from, to,
+                "pvm-data/api/0/station/data/count_eq_by_day"));
+        }
+
+        if (records.Count == 0)
+        {
+            // ── Try 3: original playback_power_by_day ───────────────────
+            _logger.LogInformation(
+                "Hoymiles count_eq_by_day returned empty for {Sid}; trying count_playback_power_by_day",
+                credentials.PlantId);
+            records.AddRange(await FetchHoymilesRangeAsync(
+                token, baseUrl, credentials.PlantId!, from, to,
+                "pvm-data/api/0/station/data/count_playback_power_by_day"));
+        }
+
+        if (records.Count == 0)
+        {
+            _logger.LogWarning(
+                "Hoymiles GetHistoricalData: ALL endpoints returned 0 records for {Sid} {From} → {To}. " +
+                "Check station ownership, API region, or whether the cloud actually has historical data for this window.",
+                credentials.PlantId, from.Date, to.Date);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Hoymiles GetHistoricalData: collected {Count} day-records for {Sid}",
+                records.Count, credentials.PlantId);
+        }
+
+        // De-duplicate (in case multiple endpoints returned overlapping dates)
+        return records
+            .GroupBy(r => r.Timestamp.Date)
+            .Select(g => g.OrderByDescending(r => r.EnergyGenerationKwh).First())
+            .OrderBy(r => r.Timestamp)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Fetches a single calendar month of daily kWh from Hoymiles via
+    /// pvm-data/api/0/station/data/count_eq_by_day_of_month.  Returns one
+    /// EnergyRecord per day-of-the-month with non-zero production.
+    /// </summary>
+    private async Task<List<EnergyRecord>> FetchHoymilesMonthAsync(
+        string token, string baseUrl, string sid, int year, int month)
+    {
+        var records = new List<EnergyRecord>();
         try
         {
-            var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm-data/api/0/station/data/count_playback_power_by_day",
-                new
-                {
-                    sid = credentials.PlantId,
-                    start_date = from.ToString("yyyy-MM-dd"),
-                    end_date = to.ToString("yyyy-MM-dd"),
-                    type = 1 // daily
-                });
-
+            var data = await CallApiAsync(token, baseUrl,
+                "pvm-data/api/0/station/data/count_eq_by_day_of_month",
+                new { sid, year, month });
             if (data == null) return records;
 
-            // Try to find array in response
-            JsonElement arr;
-            if (data.Value.ValueKind == JsonValueKind.Array)
-                arr = data.Value;
-            else if (data.Value.TryGetProperty("list", out var l) && l.ValueKind == JsonValueKind.Array)
-                arr = l;
-            else if (data.Value.TryGetProperty("data", out var d2) && d2.ValueKind == JsonValueKind.Array)
-                arr = d2;
-            else
-                return records;
-
-            foreach (var item in arr.EnumerateArray())
-            {
-                try
-                {
-                    if (item.ValueKind != JsonValueKind.Object) continue;
-                    var dateStr = SafeGetString(item, "date")
-                               ?? SafeGetString(item, "time")
-                               ?? SafeGetString(item, "day");
-                    if (dateStr == null || !DateTime.TryParse(dateStr, out var date)) continue;
-
-                    // First-non-zero fallback (NEVER sum aliases — same
-                    // bug pattern as the realtime path that produced 2,000
-                    // kWh on a 5 kWp site).
-                    var energy = SafeGetDecimal(item, "eq");
-                    if (energy == 0m) energy = SafeGetDecimal(item, "energy");
-                    if (energy == 0m) energy = SafeGetDecimal(item, "day_eq");
-                    if (energy > 10000) energy /= 1000m; // Wh → kWh
-
-                    records.Add(new EnergyRecord
-                    {
-                        Timestamp = date,
-                        EnergyGenerationKwh = energy,
-                        GridExportKwh = SafeGetDecimal(item, "grid_sell_eq"),
-                        GridImportKwh = SafeGetDecimal(item, "grid_buy_eq"),
-                        SelfConsumptionKwh = SafeGetDecimal(item, "self_use_eq"),
-                    });
-                }
-                catch (Exception itemEx)
-                {
-                    _logger.LogWarning(itemEx, "Hoymiles: skipping malformed history record");
-                }
-            }
+            ParseHoymilesEnergyResponse(data.Value, year, month, records);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Hoymiles GetHistoricalData failed");
+            _logger.LogWarning(ex, "Hoymiles count_eq_by_day_of_month failed for {Sid} {Year}-{Month}", sid, year, month);
         }
         return records;
+    }
+
+    private async Task<List<EnergyRecord>> FetchHoymilesRangeAsync(
+        string token, string baseUrl, string sid, DateTime from, DateTime to, string path)
+    {
+        var records = new List<EnergyRecord>();
+        try
+        {
+            var data = await CallApiAsync(token, baseUrl, path,
+                new
+                {
+                    sid,
+                    start_date = from.ToString("yyyy-MM-dd"),
+                    end_date = to.ToString("yyyy-MM-dd"),
+                    type = 1,
+                });
+            if (data == null) return records;
+            ParseHoymilesEnergyResponse(data.Value, anchorYear: 0, anchorMonth: 0, records);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Hoymiles {Path} failed for {Sid}", path, sid);
+        }
+        return records;
+    }
+
+    /// <summary>
+    /// Parses the three Hoymiles daily-kWh response shapes (flat array,
+    /// list-wrapper, parallel x/y arrays) and appends EnergyRecord rows.
+    /// anchorYear/Month are used to reconstruct full dates when the chart-
+    /// style response only carries day-of-month strings.
+    /// </summary>
+    private static void ParseHoymilesEnergyResponse(
+        JsonElement root, int anchorYear, int anchorMonth, List<EnergyRecord> sink)
+    {
+        decimal Pick(JsonElement el, params string[] keys)
+        {
+            foreach (var k in keys)
+            {
+                var v = SafeGetDecimal(el, k);
+                if (v != 0m) return v;
+            }
+            return 0m;
+        }
+
+        // Shape A: top-level array of {date, eq}
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            AppendFromObjectArray(root, sink);
+            return;
+        }
+        if (root.ValueKind != JsonValueKind.Object) return;
+
+        // Shape B: { list: [...] }
+        if (root.TryGetProperty("list", out var listEl) && listEl.ValueKind == JsonValueKind.Array)
+        {
+            AppendFromObjectArray(listEl, sink);
+            return;
+        }
+        // Shape B2: { data: [...] } – CallApiAsync usually unwraps "data"
+        // already, but some endpoints nest it twice.
+        if (root.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.Array)
+        {
+            AppendFromObjectArray(dataEl, sink);
+            return;
+        }
+
+        // Shape C: chart-style parallel arrays { x: [...], y: [...] } —
+        // also { xData / yData } or { date: [...], eq: [...] }.
+        JsonElement xs = default, ys = default;
+        foreach (var (xKey, yKey) in new[] {
+            ("x", "y"), ("xAxis", "yAxis"), ("xData", "yData"),
+            ("dates", "values"), ("date", "eq"),
+        })
+        {
+            if (root.TryGetProperty(xKey, out var xv) && xv.ValueKind == JsonValueKind.Array
+                && root.TryGetProperty(yKey, out var yv) && yv.ValueKind == JsonValueKind.Array)
+            {
+                xs = xv; ys = yv; break;
+            }
+        }
+        if (xs.ValueKind == JsonValueKind.Array && ys.ValueKind == JsonValueKind.Array)
+        {
+            var xArr = xs.EnumerateArray().ToArray();
+            var yArr = ys.EnumerateArray().ToArray();
+            var n = Math.Min(xArr.Length, yArr.Length);
+            for (int i = 0; i < n; i++)
+            {
+                DateTime? date = null;
+                if (xArr[i].ValueKind == JsonValueKind.String)
+                {
+                    var s = xArr[i].GetString();
+                    if (DateTime.TryParse(s, out var d)) date = d;
+                    else if (int.TryParse(s, out var dom) && anchorYear > 0 && anchorMonth > 0
+                             && dom >= 1 && dom <= 31)
+                        date = new DateTime(anchorYear, anchorMonth, Math.Min(dom, DateTime.DaysInMonth(anchorYear, anchorMonth)));
+                }
+                else if (xArr[i].ValueKind == JsonValueKind.Number && xArr[i].TryGetInt32(out var dayN)
+                         && anchorYear > 0 && anchorMonth > 0 && dayN >= 1 && dayN <= 31)
+                {
+                    date = new DateTime(anchorYear, anchorMonth, Math.Min(dayN, DateTime.DaysInMonth(anchorYear, anchorMonth)));
+                }
+                if (date == null) continue;
+
+                decimal val = 0;
+                if (yArr[i].ValueKind == JsonValueKind.Number && yArr[i].TryGetDecimal(out var dn)) val = dn;
+                else if (yArr[i].ValueKind == JsonValueKind.String
+                         && decimal.TryParse(yArr[i].GetString(), System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out var dp)) val = dp;
+
+                if (val > 10000m) val /= 1000m;        // Wh → kWh
+                sink.Add(new EnergyRecord { Timestamp = date.Value, EnergyGenerationKwh = val });
+            }
+            return;
+        }
+
+        // Shape D: { yData: { generation: [...], feedin: [...] } } —
+        // multi-series chart.
+        if (root.TryGetProperty("yData", out var yData) && yData.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("xData", out var xData) && xData.ValueKind == JsonValueKind.Array)
+        {
+            JsonElement? gen = null;
+            foreach (var key in new[] { "generation", "eq", "energy", "pv", "production" })
+                if (yData.TryGetProperty(key, out var g) && g.ValueKind == JsonValueKind.Array) { gen = g; break; }
+            if (gen != null)
+            {
+                var xArr = xData.EnumerateArray().ToArray();
+                var yArr = gen.Value.EnumerateArray().ToArray();
+                var n = Math.Min(xArr.Length, yArr.Length);
+                for (int i = 0; i < n; i++)
+                {
+                    if (xArr[i].ValueKind != JsonValueKind.String) continue;
+                    if (!DateTime.TryParse(xArr[i].GetString(), out var date)) continue;
+                    if (!yArr[i].TryGetDecimal(out var val)) continue;
+                    if (val > 10000m) val /= 1000m;
+                    sink.Add(new EnergyRecord { Timestamp = date, EnergyGenerationKwh = val });
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds rows from a JSON array of objects, picking first-non-zero field
+    /// across known kWh aliases (eq / energy / day_eq).
+    /// </summary>
+    private static void AppendFromObjectArray(JsonElement arr, List<EnergyRecord> sink)
+    {
+        foreach (var item in arr.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            var dateStr = SafeGetString(item, "date")
+                       ?? SafeGetString(item, "time")
+                       ?? SafeGetString(item, "day");
+            if (dateStr == null || !DateTime.TryParse(dateStr, out var date)) continue;
+
+            var energy = SafeGetDecimal(item, "eq");
+            if (energy == 0m) energy = SafeGetDecimal(item, "energy");
+            if (energy == 0m) energy = SafeGetDecimal(item, "day_eq");
+            if (energy == 0m) energy = SafeGetDecimal(item, "value");
+            if (energy > 10000m) energy /= 1000m;
+
+            sink.Add(new EnergyRecord
+            {
+                Timestamp = date,
+                EnergyGenerationKwh = energy,
+                GridExportKwh = SafeGetDecimal(item, "grid_sell_eq"),
+                GridImportKwh = SafeGetDecimal(item, "grid_buy_eq"),
+                SelfConsumptionKwh = SafeGetDecimal(item, "self_use_eq"),
+            });
+        }
     }
 
     public async Task<List<AlarmRecord>> GetAlarmsAsync(
