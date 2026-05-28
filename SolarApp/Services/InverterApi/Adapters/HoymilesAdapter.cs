@@ -1004,6 +1004,78 @@ public class HoymilesAdapter : IInverterApiAdapter
         };
     }
 
+    /// <summary>
+    /// Admin diagnostic: hit each plausible Hoymiles historical endpoint
+    /// with both common body shapes and return what the server sent back
+    /// (or the exception we got).  Used by /api/installations/{id}/
+    /// hoymiles-probe to figure out which endpoint actually returns
+    /// daily kWh for this tenant — vendor varies by region/firmware so
+    /// the only reliable test is to try.
+    /// </summary>
+    public async Task<List<object>> ProbeHistoricalEndpointsAsync(
+        ApiCredentials credentials, string monthStart, int year)
+    {
+        var results = new List<object>();
+        if (string.IsNullOrEmpty(credentials.PlantId))
+        {
+            results.Add(new { skipped = "no PlantId" });
+            return results;
+        }
+        var (token, apiBase, loginMsg) = await LoginAsync(credentials);
+        if (token == null)
+        {
+            results.Add(new { skipped = "login failed", loginMsg });
+            return results;
+        }
+        var baseUrl = apiBase ?? DefaultApiBase;
+
+        var endpointsToProbe = new (string Path, string Body, object Payload)[]
+        {
+            // Primary (chart endpoint — possibly binary)
+            ("pvm-data/api/0/station/data/count_eq_by_day_of_month",      "sid+date+pb_ver",
+                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
+            // data3 family (newer firmware)
+            ("pvm-data/api/0/station/data3/count_eq_by_day_of_month",     "sid+date+pb_ver",
+                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
+            // Year breakdown (likely JSON — no LineChart buffer in JS)
+            ("pvm-data/api/0/station/data/count_eq_by_day_of_year",       "sid+date+pb_ver",
+                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
+            ("pvm-data/api/0/station/data3/count_eq_by_day_of_year",      "sid+date+pb_ver",
+                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
+            // Month-of-year breakdown
+            ("pvm-data/api/0/station/data/count_eq_by_month_of_year",     "sid+date+pb_ver",
+                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
+            // Report endpoints — typically JSON
+            ("pvm-report/api/0/station/report/count_eq_by_station",       "sid+date",
+                new { sid = credentials.PlantId, date = monthStart }),
+            ("pvm-report/api/0/station/es_report/count_eq_by_station",    "sid+date",
+                new { sid = credentials.PlantId, date = monthStart }),
+        };
+
+        foreach (var (path, bodyDesc, payload) in endpointsToProbe)
+        {
+            try
+            {
+                var data = await CallApiAsync(token, baseUrl, path, payload);
+                if (data == null)
+                {
+                    results.Add(new { path, body = bodyDesc, result = "null (HTTP non-200 or non-JSON)" });
+                }
+                else
+                {
+                    var raw = data.Value.GetRawText();
+                    if (raw.Length > 2000) raw = raw[..2000] + "…(truncated)";
+                    results.Add(new { path, body = bodyDesc, result = "ok", raw });
+                }
+            }
+            catch (Exception ex)
+            {
+                results.Add(new { path, body = bodyDesc, result = "exception", error = $"{ex.GetType().Name}: {ex.Message}" });
+            }
+        }
+        return results;
+    }
+
     public async Task<List<EnergyRecord>> GetHistoricalDataAsync(
         ApiCredentials credentials, DateTime from, DateTime to)
     {

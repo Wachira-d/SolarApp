@@ -1143,6 +1143,53 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         // installation (LineGroupId override → falls back to Customer.LineUserId).
         // Operator-only, so the admin can verify the recipient resolves and
         // the channel token is valid without waiting for a real alert.
+        // Diagnostic: dump raw Hoymiles historical responses for a site
+        // so we can finally see what each endpoint actually returns.
+        // Reveals whether responses are JSON / binary / 404 / wrong shape
+        // — when standard backfill keeps returning 0 records.
+        // Admin-only because it exposes raw API payload.
+        app.MapGet("/api/installations/{id:int}/hoymiles-probe", async (
+            int id,
+            System.Security.Claims.ClaimsPrincipal principal,
+            UserManager<Models.ApplicationUser> userManager,
+            Data.ApplicationDbContext db,
+            Services.InverterApi.IInverterApiAdapterFactory adapterFactory,
+            Services.Security.ICredentialProtector protector) =>
+        {
+            var user = await userManager.GetUserAsync(principal);
+            if (user == null) return Results.Unauthorized();
+            if (!await userManager.IsInRoleAsync(user, "Admin")) return Results.Forbid();
+
+            var inst = await db.Installations.FirstOrDefaultAsync(i => i.Id == id);
+            if (inst == null) return Results.NotFound();
+            if (inst.InverterBrand != Models.Enums.InverterBrand.Hoymiles)
+                return Results.BadRequest(new { error = "Hoymiles only" });
+
+            var adapter = adapterFactory.GetAdapter(inst.InverterBrand);
+            if (adapter is not Services.InverterApi.Adapters.HoymilesAdapter h)
+                return Results.BadRequest(new { error = "adapter is not HoymilesAdapter" });
+
+            var creds = new Services.InverterApi.Models.ApiCredentials
+            {
+                ApiKey = protector.Unprotect(inst.CloudApiKey),
+                ApiSecret = protector.Unprotect(inst.CloudApiSecret),
+                Username = protector.Unprotect(inst.CloudUsername),
+                Password = protector.Unprotect(inst.CloudPassword),
+                PlantId = inst.PlantId,
+                ApiBaseUrl = inst.CloudApiBaseUrl,
+            };
+            var today = DateTime.UtcNow.Date;
+            var monthStart = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd");
+            var probes = await h.ProbeHistoricalEndpointsAsync(creds, monthStart, today.Year);
+            return Results.Json(new
+            {
+                brand = "Hoymiles",
+                plantId = inst.PlantId,
+                today = today.ToString("yyyy-MM-dd"),
+                probes,
+            });
+        }).RequireAuthorization();
+
         // Reveal a decrypted credential field for an installation so the
         // operator can verify (or copy) what's stored without resetting it.
         // Strictly Admin-only — Partners with edit access can still SAVE new

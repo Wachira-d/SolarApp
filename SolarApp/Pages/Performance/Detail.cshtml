@@ -39,9 +39,16 @@
         <button type="button" id="resyncBtn" class="btn btn-outline-success btn-sm" title="ดึงข้อมูลจาก cloud มาเทียบและเขียนทับ (clean + refetch)">
             <i class="bi bi-cloud-download"></i> ดึงข้อมูลใหม่จาก Cloud
         </button>
+        @if (User.IsInRole("Admin") && inst.InverterBrand == SolarApp.Models.Enums.InverterBrand.Hoymiles)
+        {
+            <button type="button" id="probeBtn" class="btn btn-outline-warning btn-sm" title="ทดสอบ Hoymiles historical endpoints เพื่อ debug">
+                <i class="bi bi-search"></i> Probe (admin)
+            </button>
+        }
     </div>
 </div>
 <div id="resyncResult" class="alert alert-light small d-none mb-3"></div>
+<div id="probeResult" class="card border-warning d-none mb-3"></div>
 
 <!-- KPI Cards -->
 <div class="row g-2 mb-3">
@@ -231,6 +238,52 @@
             '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
         }[c]));
     }
+
+    // Hoymiles endpoint probe — admin-only diagnostic.  Hits every
+    // plausible historical endpoint with both common body shapes and
+    // shows what the server actually returned so we can tell which
+    // endpoint works on this tenant.
+    document.getElementById('probeBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('probeBtn');
+        const box = document.getElementById('probeResult');
+        btn.disabled = true;
+        box.classList.remove('d-none');
+        box.innerHTML = '<div class="card-body"><i class="bi bi-hourglass-split"></i> กำลังทดสอบ Hoymiles endpoints…</div>';
+        try {
+            const r = await fetch(`/api/installations/@inst.Id/hoymiles-probe`,
+                { headers: { 'Accept': 'application/json' } });
+            const data = await r.json();
+            if (!r.ok) {
+                box.innerHTML = `<div class="card-body text-danger">${escapeHtml(data.error || ('HTTP ' + r.status))}</div>`;
+                return;
+            }
+            let html =
+                '<div class="card-header bg-warning bg-opacity-25"><strong>Hoymiles endpoint probe</strong>' +
+                ` — ${escapeHtml(data.brand)} · sid <code>${escapeHtml(data.plantId)}</code> · today ${escapeHtml(data.today)}</div>` +
+                '<div class="card-body small">';
+            for (const p of data.probes || []) {
+                const status = p.result === 'ok'
+                    ? '<span class="badge bg-success">ok</span>'
+                    : `<span class="badge bg-danger">${escapeHtml(p.result)}</span>`;
+                html +=
+                    `<details class="mb-2"><summary>${status} <code>${escapeHtml(p.path)}</code>` +
+                    ` <small class="text-muted">body=${escapeHtml(p.body)}</small></summary>`;
+                if (p.error) html += `<div class="text-danger mt-1">${escapeHtml(p.error)}</div>`;
+                if (p.raw)
+                    html += `<pre class="bg-light p-2 mt-1" style="white-space:pre-wrap;max-height:300px;overflow:auto;font-size:.78rem">` +
+                            `${escapeHtml(p.raw)}</pre>`;
+                if (p.loginMsg) html += `<div class="text-muted mt-1">${escapeHtml(p.loginMsg)}</div>`;
+                html += '</details>';
+            }
+            html += '<div class="text-muted">หา block ที่ <code>ok</code> และมี date+kWh ในตัวอย่าง raw → คือ endpoint ที่ใช้ได้กับ tenant นี้ ส่ง response มาผมเพื่อ map field names</div>';
+            html += '</div>';
+            box.innerHTML = html;
+        } catch (e) {
+            box.innerHTML = `<div class="card-body text-danger">${escapeHtml(e.message)}</div>`;
+        } finally {
+            btn.disabled = false;
+        }
+    });
 </script>
 <script>
 (function(){
