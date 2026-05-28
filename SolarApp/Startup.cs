@@ -1154,10 +1154,20 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         //   * Site was added late and we missed months of production
         //   * Auto-backfill hit rate-limits and gave up early
         //   * Vendor's portal shows numbers the customer wants reflected
+        //   * Bad rows from earlier adapter bugs need replacement
         // Returns counts so the UI can show a progress summary.
+        //
+        // Query params:
+        //   days       1 — 1095, default 365
+        //   cleanFirst true → delete every existing row in [from, to]
+        //              before writing the API result.  Use this to
+        //              recover from inflated readings produced by the
+        //              old sum-fallback bug.  Default false (safer:
+        //              upsert-merge).
         app.MapPost("/api/installations/{id:int}/backfill", async (
             int id,
             int? days,
+            bool? cleanFirst,
             System.Security.Claims.ClaimsPrincipal user,
             Services.Authorization.IInstallationAccessHelper access,
             Data.ApplicationDbContext db,
@@ -1173,8 +1183,6 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             if (string.IsNullOrEmpty(inst.PlantId))
                 return Results.Json(new { success = false, message = "No PlantId — set it first" });
 
-            // Default: 365 days back.  Cap at 3 years so a misclick can't
-            // walk the entire API rate-limit budget in one request.
             var requestedDays = Math.Clamp(days ?? 365, 1, 365 * 3);
             var toDate = DateTime.UtcNow.Date;
             var fromDate = toDate.AddDays(-requestedDays);
@@ -1201,11 +1209,46 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 return Results.Json(new { success = false, message = $"API error: {ex.Message}" });
             }
 
-            if (historical.Count == 0)
-                return Results.Json(new { success = true, message = "API returned no historical records",
-                    inserted = 0, updated = 0, fromDate, toDate });
+            // Sanity ceiling — reject implausibly high rows from a buggy
+            // adapter so backfill never poisons the dataset with values it
+            // would then refuse to lower (monotonic guard).
+            var plausibleMax = inst.SystemCapacityKw > 0
+                ? inst.SystemCapacityKw * 18m
+                : decimal.MaxValue;
+            int rejected = 0;
+            historical = historical.Where(h =>
+            {
+                if (h.EnergyGenerationKwh > plausibleMax)
+                {
+                    logger.LogWarning(
+                        "Backfill rejected implausible {Energy} kWh on {Date} for {Site} (cap {Cap} kWp, max {Max})",
+                        h.EnergyGenerationKwh, h.Timestamp.Date, inst.SiteName, inst.SystemCapacityKw, plausibleMax);
+                    rejected++;
+                    return false;
+                }
+                return true;
+            }).ToList();
 
-            // Batch-load existing dates so we know insert vs update
+            if (historical.Count == 0)
+                return Results.Json(new { success = true, message = $"API returned no usable historical records (rejected {rejected} implausible)",
+                    inserted = 0, updated = 0, fromDate, toDate, rejected });
+
+            // Clean-first mode: wipe every existing row in the requested
+            // window so the API result becomes the source of truth.
+            int deleted = 0;
+            if (cleanFirst == true)
+            {
+                var doomed = await db.EnergyData
+                    .Where(e => e.InstallationId == id
+                        && e.Granularity == Models.Enums.DataGranularity.Daily
+                        && e.Timestamp >= fromDate && e.Timestamp <= toDate)
+                    .ToListAsync();
+                deleted = doomed.Count;
+                db.EnergyData.RemoveRange(doomed);
+                await db.SaveChangesAsync();
+            }
+
+            // Batch-load remaining existing dates so we know insert vs update
             var minDate = historical.Min(h => h.Timestamp.Date);
             var maxDate = historical.Max(h => h.Timestamp.Date);
             var existing = await db.EnergyData
@@ -1243,8 +1286,10 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             return Results.Json(new
             {
                 success = true,
-                message = $"Backfilled {historical.Count} days from API",
-                inserted, updated,
+                message = cleanFirst == true
+                    ? $"Cleaned + backfilled — deleted {deleted}, inserted {inserted}, updated {updated}, rejected {rejected} implausible"
+                    : $"Backfilled {historical.Count} days — inserted {inserted}, updated {updated}, rejected {rejected} implausible",
+                inserted, updated, deleted, rejected,
                 fromDate = fromDate.ToString("yyyy-MM-dd"),
                 toDate = toDate.ToString("yyyy-MM-dd"),
             });
