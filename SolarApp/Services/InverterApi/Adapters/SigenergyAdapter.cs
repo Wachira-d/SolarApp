@@ -174,7 +174,11 @@ public class SigenergyAdapter : IInverterApiAdapter
             {
                 PlantId = sysId,
                 PlantName = SafeGetString(sys, "systemName") ?? SafeGetString(sys, "name") ?? "",
-                CapacityKw = SafeGetDecimal(sys, "pvCapacity") + SafeGetDecimal(sys, "capacity"),
+                // First non-zero — NEVER sum two field-name aliases for the
+                // same metric (would double the capacity).
+                CapacityKw = SafeGetDecimal(sys, "pvCapacity") is var pvCap and not 0
+                    ? pvCap
+                    : SafeGetDecimal(sys, "capacity"),
                 Address = SafeGetString(sys, "address"),
                 Latitude = SafeGetDouble(sys, "latitude"),
                 Longitude = SafeGetDouble(sys, "longitude"),
@@ -194,21 +198,32 @@ public class SigenergyAdapter : IInverterApiAdapter
         if (data == null || data.Value.ValueKind != JsonValueKind.Object) return null;
         var d = data.Value;
 
-        var pvPower = SafeGetDecimal(d, "pvPower") + SafeGetDecimal(d, "pv_power");
-        var gridPower = SafeGetDecimal(d, "gridPower") + SafeGetDecimal(d, "grid_power");
-        var battSoc = SafeGetNullableDecimal(d, "batterySoc") ?? SafeGetNullableDecimal(d, "soc");
-        var loadPower = SafeGetDecimal(d, "loadPower") + SafeGetDecimal(d, "home_load");
-        var battPower = SafeGetDecimal(d, "batteryPower") + SafeGetDecimal(d, "battery_power");
+        // Sigenergy returns the same metric under camelCase / snake_case
+        // depending on firmware; fall back to the first non-zero value
+        // instead of summing them (which doubles the reading whenever both
+        // forms are populated — the bug responsible for HoymilesAdapter's
+        // 2000-kWh-on-a-5kW-system incident).
+        decimal FirstNonZero(params string[] keys)
+        {
+            foreach (var k in keys)
+            {
+                var v = SafeGetDecimal(d, k);
+                if (v != 0m) return v;
+            }
+            return 0m;
+        }
+
+        var pvPower   = FirstNonZero("pvPower", "pv_power");
+        var gridPower = FirstNonZero("gridPower", "grid_power");
+        var battSoc   = SafeGetNullableDecimal(d, "batterySoc") ?? SafeGetNullableDecimal(d, "soc");
+        var loadPower = FirstNonZero("loadPower", "home_load");
+        var battPower = FirstNonZero("batteryPower", "battery_power");
 
         if (pvPower > 500) pvPower /= 1000m;
         if (Math.Abs(gridPower) > 500) gridPower /= 1000m;
 
-        var todayKwh = SafeGetDecimal(d, "dailyPvEnergy")
-                     + SafeGetDecimal(d, "daily_pv_energy")
-                     + SafeGetDecimal(d, "todayEnergy");
-        var totalKwh = SafeGetDecimal(d, "totalPvEnergy")
-                     + SafeGetDecimal(d, "total_pv_energy")
-                     + SafeGetDecimal(d, "totalEnergy");
+        var todayKwh = FirstNonZero("dailyPvEnergy", "daily_pv_energy", "todayEnergy");
+        var totalKwh = FirstNonZero("totalPvEnergy", "total_pv_energy", "totalEnergy");
 
         return new RealtimeData
         {
@@ -252,14 +267,20 @@ public class SigenergyAdapter : IInverterApiAdapter
                 var dateStr = SafeGetString(item, "date") ?? SafeGetString(item, "time");
                 if (!DateTime.TryParse(dateStr, out var date)) continue;
 
+                // First non-zero — never sum aliases (would double the daily kWh).
+                decimal Pick(string a, string b)
+                {
+                    var v = SafeGetDecimal(item, a);
+                    return v != 0m ? v : SafeGetDecimal(item, b);
+                }
                 records.Add(new EnergyRecord
                 {
                     Timestamp = date,
-                    EnergyGenerationKwh = SafeGetDecimal(item, "pvEnergy") + SafeGetDecimal(item, "pv_energy"),
-                    GridExportKwh = SafeGetDecimal(item, "gridExportEnergy") + SafeGetDecimal(item, "export"),
-                    GridImportKwh = SafeGetDecimal(item, "gridImportEnergy") + SafeGetDecimal(item, "import"),
-                    SelfConsumptionKwh = SafeGetDecimal(item, "selfConsumption") + SafeGetDecimal(item, "self_use"),
-                    BatteryChargeKwh = SafeGetDecimal(item, "batteryChargeEnergy"),
+                    EnergyGenerationKwh = Pick("pvEnergy", "pv_energy"),
+                    GridExportKwh       = Pick("gridExportEnergy", "export"),
+                    GridImportKwh       = Pick("gridImportEnergy", "import"),
+                    SelfConsumptionKwh  = Pick("selfConsumption", "self_use"),
+                    BatteryChargeKwh    = SafeGetDecimal(item, "batteryChargeEnergy"),
                     BatteryDischargeKwh = SafeGetDecimal(item, "batteryDischargeEnergy"),
                 });
             }

@@ -960,25 +960,39 @@ public class HoymilesAdapter : IInverterApiAdapter
         if (data == null || data.Value.ValueKind != JsonValueKind.Object) return null;
 
         var d = data.Value;
-        var currentPower = SafeGetDecimal(d, "real_power")
-                        + SafeGetDecimal(d, "power")
-                        + SafeGetDecimal(d, "last_data_power");
-        var todayEnergy = SafeGetDecimal(d, "today_eq")
-                       + SafeGetDecimal(d, "day_eq")
-                       + SafeGetDecimal(d, "today_energy");
-        var totalEnergy = SafeGetDecimal(d, "total_eq")
-                       + SafeGetDecimal(d, "month_eq_total")
-                       + SafeGetDecimal(d, "total_energy");
+        // Hoymiles returns the same metric under different field names across
+        // endpoints / firmware versions.  Fall back through the list and take
+        // the FIRST non-zero value — never sum.  The old code did
+        //     SafeGetDecimal(...) + SafeGetDecimal(...) + SafeGetDecimal(...)
+        // which silently summed multiple fields when more than one was
+        // populated, producing 2× / 3× inflated kWh on installations where
+        // Hoymiles happened to return both `today_eq` and `day_eq`.
+        decimal FirstNonZero(params string[] keys)
+        {
+            foreach (var k in keys)
+            {
+                var v = SafeGetDecimal(d, k);
+                if (v != 0m) return v;
+            }
+            return 0m;
+        }
+
+        var currentPower = FirstNonZero("real_power", "power", "last_data_power");
+        var todayEnergy  = FirstNonZero("today_eq", "day_eq", "today_energy");
+        var totalEnergy  = FirstNonZero("total_eq", "month_eq_total", "total_energy");
         var capacityW = SafeGetDecimal(d, "installed_capacity");
 
         // Online detection: power > 0 or explicit status field
         var statusVal = SafeGetInt(d, "status") ?? SafeGetInt(d, "connect_status") ?? -1;
         var isOnline = statusVal == 1 || currentPower > 0;
 
-        // Power might be in watts from some endpoints
-        if (currentPower > 500) currentPower /= 1000m; // likely watts
-        if (todayEnergy > 10000) todayEnergy /= 1000m; // likely Wh
-        if (totalEnergy > 10000000) totalEnergy /= 1000m; // likely Wh
+        // Unit normalisation.  Hoymiles' V2 endpoint reports power in watts
+        // and energy in Wh; V3 reports kW and kWh.  No flag tells us which —
+        // sniff by magnitude.  Thresholds picked well above any plausible
+        // kW/kWh value but well below the same value in W/Wh.
+        if (currentPower > 500)        currentPower /= 1000m; // ≥500 kW = impossible residential → was Watts
+        if (todayEnergy > 10000)       todayEnergy  /= 1000m; // ≥10,000 kWh/day impossible → was Wh
+        if (totalEnergy > 10000000)    totalEnergy  /= 1000m; // ≥10M kWh lifetime impossible → was Wh
 
         return new RealtimeData
         {

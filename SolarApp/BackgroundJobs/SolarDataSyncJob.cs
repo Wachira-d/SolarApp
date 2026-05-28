@@ -550,6 +550,30 @@ public class SolarDataSyncJob
                 // Key by site-local date — see SolarApp.Services.SiteTime
                 // for the timezone-rollover bug this avoids.
                 var today = SolarApp.Services.SiteTime.Today;
+
+                // Defense layer — physical-plausibility ceiling.  A solar
+                // system can produce at MOST capacity × 24 h kWh in a day
+                // (and that's only at theoretical peak sun all day, which
+                // never actually happens).  If the adapter returns more, the
+                // adapter is misreading units / fields and we must not
+                // persist it — doing so triggers the monotonic guard which
+                // then refuses to lower the value when the adapter is fixed.
+                // Real-world ceiling: 18 × capacity gives ~13 PSH headroom
+                // for any optimistic numerics; anything above is bogus.
+                var plausibleDailyMax = installation.SystemCapacityKw > 0
+                    ? installation.SystemCapacityKw * 18m
+                    : 1_000_000m; // no capacity set → don't enforce
+                if (realtime.TodayEnergyKwh > plausibleDailyMax)
+                {
+                    _logger.LogWarning(
+                        "Implausibly high TodayEnergyKwh={Value} for {SiteName} (capacity={Cap} kWp, max plausible={Max}). " +
+                        "Adapter likely misreading units; skipping daily upsert.",
+                        realtime.TodayEnergyKwh, installation.SiteName,
+                        installation.SystemCapacityKw, plausibleDailyMax);
+                    // Skip the daily upsert below; preserve any existing row
+                    goto SkipDailyUpsert;
+                }
+
                 var todayRecord = await _context.EnergyData.FirstOrDefaultAsync(e =>
                     e.InstallationId == installation.Id
                     && e.Granularity == DataGranularity.Daily
@@ -591,6 +615,7 @@ public class SolarDataSyncJob
                     // SoC isn't monotonic — accept latest reading
                     todayRecord.BatterySocPercent = realtime.BatterySocPercent;
                 }
+                SkipDailyUpsert: ;       // <-- empty statement required after label
 
                 // ─── 3. Historical backfill ───
                 // Pull recent history when there are gaps in the last 30 days.
