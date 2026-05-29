@@ -116,7 +116,7 @@ public class GoodWeAdapter : IInverterApiAdapter
         {
             var stations = await ListStationsAsync(session);
             var match = stations.FirstOrDefault(s => StationIdMatches(s.Id, credentials.PlantId));
-            if (match != null)
+            if (!string.IsNullOrEmpty(match.Id))
             {
                 _logger.LogInformation(
                     "GoodWe: PlantId '{Stored}' resolved to '{Found}' from user's station list",
@@ -313,7 +313,7 @@ public class GoodWeAdapter : IInverterApiAdapter
         {
             var stations = await ListStationsAsync(session);
             var match = stations.FirstOrDefault(s => StationIdMatches(s.Id, resolvedPlantId));
-            if (match != null) resolvedPlantId = match.Id;
+            if (!string.IsNullOrEmpty(match.Id)) resolvedPlantId = match.Id;
         }
 
         // Endpoint catalog — try each in order until one returns rows.
