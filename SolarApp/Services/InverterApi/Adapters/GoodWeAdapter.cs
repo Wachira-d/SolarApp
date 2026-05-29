@@ -40,6 +40,21 @@ public class GoodWeAdapter : IInverterApiAdapter
 
     public InverterBrand Brand => InverterBrand.GoodWe;
 
+    // AsyncLocal scratch pad — internal data-fetch methods write a
+    // human-readable "why did I return null/empty?" string here so the
+    // *ResultAsync wrappers can surface it as ApiResult.TechnicalDetail.
+    // Surfaces things like "API returned data:null + here are the
+    // powerstation IDs your account CAN see: A,B,C" so the operator
+    // can fix a typo'd PlantId from the probe output.
+    private static readonly AsyncLocal<string?> _lastDiagDetail = new();
+    private static void SetDiag(string s) => _lastDiagDetail.Value = s;
+    private static string? TakeDiag()
+    {
+        var s = _lastDiagDetail.Value;
+        _lastDiagDetail.Value = null;
+        return s;
+    }
+
     public GoodWeAdapter(IHttpClientFactory httpClientFactory, ILogger<GoodWeAdapter> logger)
     {
         _httpClientFactory = httpClientFactory;
@@ -86,10 +101,49 @@ public class GoodWeAdapter : IInverterApiAdapter
 
         var json = await PostAsync(session, "v2/PowerStation/GetMonitorDetailByPowerstationId",
             new { powerStationId = credentials.PlantId });
-        if (json == null) return null;
 
+        // When the by-id call fails OR comes back with no usable data,
+        // pull the user's actual station list and try to match.  Helps
+        // the operator spot a typo'd PlantId AND auto-recovers when the
+        // stored ID just has different casing / hyphens than SEMS expects.
+        bool noUsableData = json == null
+            || !json.Value.TryGetProperty("data", out var probeData)
+            || probeData.ValueKind == JsonValueKind.Undefined
+            || probeData.ValueKind == JsonValueKind.Null
+            || !probeData.TryGetProperty("info", out _);
+
+        if (noUsableData)
+        {
+            var stations = await ListStationsAsync(session);
+            var match = stations.FirstOrDefault(s => StationIdMatches(s.Id, credentials.PlantId));
+            if (match != null)
+            {
+                _logger.LogInformation(
+                    "GoodWe: PlantId '{Stored}' resolved to '{Found}' from user's station list",
+                    credentials.PlantId, match.Id);
+                var json2 = await PostAsync(session,
+                    "v2/PowerStation/GetMonitorDetailByPowerstationId",
+                    new { powerStationId = match.Id });
+                if (json2 != null && json2.Value.TryGetProperty("data", out var d2)
+                    && d2.ValueKind == JsonValueKind.Object)
+                {
+                    json = json2;
+                }
+            }
+            else
+            {
+                var available = stations.Count == 0
+                    ? "(no stations returned by list endpoint either — account may have no power stations)"
+                    : "Available power stations on this account: " +
+                      string.Join(", ", stations.Take(8).Select(s => $"{s.Id} ({s.Name})"));
+                SetDiag($"PlantId '{credentials.PlantId}' not found. {available}");
+                return null;
+            }
+        }
+
+        if (json == null) return null;
         var data = json.Value.TryGetProperty("data", out var d) ? d : default;
-        if (data.ValueKind == JsonValueKind.Undefined) return null;
+        if (data.ValueKind != JsonValueKind.Object) return null;
 
         string? name = null;
         decimal capacity = 0;
@@ -112,6 +166,71 @@ public class GoodWeAdapter : IInverterApiAdapter
             CapacityKw = capacity,
             Address = address
         };
+    }
+
+    /// <summary>
+    /// Fetches the user's full station list via the SEMS portal's
+    /// HistoryPage endpoint (which is what the web UI uses).  Falls back
+    /// through a couple of endpoint names because different SEMS regions
+    /// host this list under slightly different paths.
+    /// Returns an empty list rather than throwing on any error.
+    /// </summary>
+    private async Task<List<(string Id, string Name)>> ListStationsAsync(Session session)
+    {
+        var results = new List<(string Id, string Name)>();
+        var attempts = new (string Path, object Body)[]
+        {
+            ("v2/HistoryData/QueryPowerStationByHistory",
+                new { page_index = 1, page_size = 50, order_by = "", condition = "" }),
+            ("v2/PowerStation/QueryPowerStation",
+                new { page_index = 1, page_size = 50 }),
+            ("v3/PowerStationMonitor/QueryPowerStationMonitor",
+                new { page_index = 1, page_size = 50 }),
+        };
+
+        foreach (var (path, body) in attempts)
+        {
+            var json = await PostAsync(session, path, body);
+            if (json == null) continue;
+            if (!json.Value.TryGetProperty("data", out var d)) continue;
+
+            // Two response shapes: { data: { list: [...] } } or { data: [...] }
+            JsonElement list = default;
+            if (d.ValueKind == JsonValueKind.Array) list = d;
+            else if (d.ValueKind == JsonValueKind.Object
+                     && d.TryGetProperty("list", out var l) && l.ValueKind == JsonValueKind.Array)
+                list = l;
+            else continue;
+
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object) continue;
+                var id = GetString(item, "powerstation_id")
+                      ?? GetString(item, "powerStationId")
+                      ?? GetString(item, "id");
+                if (string.IsNullOrEmpty(id)) continue;
+                var name = GetString(item, "stationname")
+                        ?? GetString(item, "station_name")
+                        ?? GetString(item, "name")
+                        ?? "(unnamed)";
+                results.Add((id, name));
+            }
+            if (results.Count > 0) return results;
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Lenient station-id comparison.  SEMS stores IDs as lower-case
+    /// hyphenated UUIDs ("04acf5fb-3843-4b9f-aff3-c67796bd91c2"); operators
+    /// occasionally store them upper-cased, without hyphens, or with
+    /// surrounding whitespace.  All of those should still match.
+    /// </summary>
+    private static bool StationIdMatches(string? a, string? b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+        static string Normalize(string s) => s.Trim().Replace("-", "").Replace("{", "").Replace("}", "").ToLowerInvariant();
+        return Normalize(a) == Normalize(b);
     }
 
     public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
@@ -176,24 +295,98 @@ public class GoodWeAdapter : IInverterApiAdapter
     {
         var records = new List<EnergyRecord>();
         var session = await LoginAsync(credentials);
-        if (session == null) return records;
+        if (session == null) { SetDiag("Login returned null session"); return records; }
 
-        var json = await PostAsync(session, "v2/PowerStationMonitor/GetPowerStationPowerAndIncomeByDay",
-            new
-            {
-                powerStationId = credentials.PlantId,
-                date = from.ToString("yyyy-MM-dd"),
-                count = Math.Min(365, (to - from).Days + 1)
-            });
-
-        if (json == null) return records;
-
-        if (json.Value.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+        // Resolve PlantId via the user's station list if the stored one
+        // doesn't match (case / hyphens / typo).  Same logic as
+        // GetPlantInfoAsync, just inlined so the historical call uses the
+        // right ID without needing PlantInfo to succeed first.
+        var resolvedPlantId = credentials.PlantId ?? "";
+        var probeJson = await PostAsync(session,
+            "v2/PowerStation/GetMonitorDetailByPowerstationId",
+            new { powerStationId = resolvedPlantId });
+        bool probeOk = probeJson != null
+            && probeJson.Value.TryGetProperty("data", out var probeData)
+            && probeData.ValueKind == JsonValueKind.Object
+            && probeData.TryGetProperty("info", out _);
+        if (!probeOk)
         {
-            foreach (var item in data.EnumerateArray())
+            var stations = await ListStationsAsync(session);
+            var match = stations.FirstOrDefault(s => StationIdMatches(s.Id, resolvedPlantId));
+            if (match != null) resolvedPlantId = match.Id;
+        }
+
+        // Endpoint catalog — try each in order until one returns rows.
+        // The first is what the SEMS web UI uses on EU/global; the others
+        // are alternates used by various regions / older portals.  Each
+        // accepts powerStationId + date and returns daily rollup data.
+        var dateStr = from.ToString("yyyy-MM-dd");
+        var dayCount = Math.Min(365, (to - from).Days + 1);
+        var attempts = new (string Path, object Body)[]
+        {
+            ("v2/PowerStationMonitor/GetPowerStationPowerAndIncomeByDay",
+                new { powerStationId = resolvedPlantId, date = dateStr, count = dayCount }),
+            ("v2/HistoryData/QueryPowerStationByHistory",
+                new { powerStationId = resolvedPlantId, date = dateStr, count = dayCount }),
+            ("v1/PowerStationMonitor/GetPowerStationPowerAndIncomeByDay",
+                new { powerStationId = resolvedPlantId, date = dateStr, count = dayCount }),
+            ("v2/Charts/GetPlantPowerChart",
+                new { id = resolvedPlantId, date = dateStr, full_script = false }),
+        };
+
+        var trace = new List<string>();
+        foreach (var (path, body) in attempts)
+        {
+            var json = await PostAsync(session, path, body);
+            if (json == null) { trace.Add($"{path}:null"); continue; }
+
+            // Pull rows out of any of the known shapes
+            // - { data: [...] }
+            // - { data: { list: [...] } }
+            // - { data: { lines: [{ xy: [{ x, y }] }] } } (Chart endpoint)
+            JsonElement rowsArr = default;
+            bool foundArr = false;
+            if (json.Value.TryGetProperty("data", out var d))
+            {
+                if (d.ValueKind == JsonValueKind.Array) { rowsArr = d; foundArr = true; }
+                else if (d.ValueKind == JsonValueKind.Object)
+                {
+                    if (d.TryGetProperty("list", out var l) && l.ValueKind == JsonValueKind.Array)
+                    { rowsArr = l; foundArr = true; }
+                    else if (d.TryGetProperty("lines", out var lines) && lines.ValueKind == JsonValueKind.Array)
+                    {
+                        // Chart format — flatten lines[].xy[] into our row shape.
+                        var before = records.Count;
+                        foreach (var line in lines.EnumerateArray())
+                        {
+                            if (!line.TryGetProperty("xy", out var xy) || xy.ValueKind != JsonValueKind.Array) continue;
+                            foreach (var pt in xy.EnumerateArray())
+                            {
+                                if (pt.ValueKind != JsonValueKind.Object) continue;
+                                var date = ToDateTime(pt.TryGetProperty("x", out var xv) ? xv : default);
+                                var val = GetDecimal(pt, "y");
+                                if (date == null) continue;
+                                records.Add(new EnergyRecord
+                                {
+                                    Timestamp = date.Value,
+                                    EnergyGenerationKwh = val,
+                                });
+                            }
+                        }
+                        trace.Add($"{path}:chart={records.Count - before}");
+                        if (records.Count > 0) break;
+                        continue;
+                    }
+                }
+            }
+            if (!foundArr) { trace.Add($"{path}:no-rows"); continue; }
+
+            int beforeRows = records.Count;
+            foreach (var item in rowsArr.EnumerateArray())
             {
                 try
                 {
+                    if (item.ValueKind != JsonValueKind.Object) continue;
                     if (!item.TryGetProperty("date", out var dt)) continue;
                     var date = ToDateTime(dt);
                     if (date == null) continue;
@@ -211,11 +404,22 @@ public class GoodWeAdapter : IInverterApiAdapter
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Skipped bad historical item");
+                    _logger.LogWarning(ex, "GoodWe: skipped bad historical item from {Path}", path);
                 }
             }
+            var added = records.Count - beforeRows;
+            trace.Add($"{path}:+{added}");
+            if (added > 0) break;
         }
 
+        if (records.Count == 0)
+        {
+            SetDiag($"All {attempts.Length} historical endpoints returned 0 rows for resolved plantId={resolvedPlantId}. " +
+                    $"Trace: {string.Join(" → ", trace)}");
+        }
+        _logger.LogInformation(
+            "GoodWe GetHistoricalData: collected {Count} rows for {Sid} {From} → {To}. Trace: {Trace}",
+            records.Count, resolvedPlantId, from.Date, to.Date, string.Join(" → ", trace));
         return records;
     }
 
@@ -673,10 +877,12 @@ public class GoodWeAdapter : IInverterApiAdapter
         {
             var info = await GetPlantInfoAsync(credentials);
             sw.Stop();
+            var diag = TakeDiag();
             return info != null
                 ? ApiResult<PlantInfo>.Ok(info, "Plant info retrieved", sw.Elapsed)
                 : ApiResult<PlantInfo>.Fail(ApiResultKind.PlantNotFound,
-                    $"Station '{credentials.PlantId}' not found on GoodWe account.", duration: sw.Elapsed);
+                    $"Station '{credentials.PlantId}' not found on GoodWe account.",
+                    detail: diag, duration: sw.Elapsed);
         }
         catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<PlantInfo>(ex, "GoodWe", sw.Elapsed); }
     }
@@ -707,7 +913,19 @@ public class GoodWeAdapter : IInverterApiAdapter
         {
             var list = await GetHistoricalDataAsync(credentials, from, to);
             sw.Stop();
-            return ApiResult<List<EnergyRecord>>.Ok(list, $"{list.Count} record(s) fetched", sw.Elapsed);
+            var diag = TakeDiag();
+            // Even though we got zero rows, this is not "Fail" — the call
+            // succeeded.  Attach diag as TechnicalDetail so the probe
+            // surfaces the per-endpoint attempt trace.
+            return new ApiResult<List<EnergyRecord>>
+            {
+                Kind = ApiResultKind.Success,
+                Data = list,
+                Message = $"{list.Count} record(s) fetched",
+                Duration = sw.Elapsed,
+                HttpStatusCode = 200,
+                TechnicalDetail = diag,
+            };
         }
         catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<EnergyRecord>>(ex, "GoodWe", sw.Elapsed); }
     }

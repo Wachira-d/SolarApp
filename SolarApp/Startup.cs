@@ -1341,7 +1341,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 brand = inst.InverterBrand.ToString(),
                 plantId = inst.PlantId,
                 today = today.ToString("yyyy-MM-dd"),
-                probeVersion = "v2-2026-05-29-rategate-aware",
+                probeVersion = "v3-2026-05-29-goodwe-discover",
                 steps,
                 extra,
             });
