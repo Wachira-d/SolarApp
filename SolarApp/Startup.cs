@@ -1196,7 +1196,125 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             });
         }).RequireAuthorization();
 
-        // Reveal a decrypted credential field for an installation so the
+        // Brand-agnostic backfill probe.  Runs the live adapter end-to-end
+        // (TestConnection → GetPlantInfo → GetHistorical for current month
+        // / last 30d / last 90d / current year) and reports per-step
+        // ApiResult.Kind, Message, Duration, and a small sample of the
+        // records returned.  This is what we show on the Performance →
+        // Detail page for non-Hoymiles brands so the operator can tell at
+        // a glance whether the backfill button is going to do anything.
+        //
+        // Admin-only — exposes plant id, sample dates, and the technical
+        // error message from the vendor cloud.
+        app.MapGet("/api/installations/{id:int}/backfill-probe", async (
+            int id,
+            System.Security.Claims.ClaimsPrincipal principal,
+            UserManager<Models.ApplicationUser> userManager,
+            Data.ApplicationDbContext db,
+            Services.InverterApi.IInverterApiAdapterFactory adapterFactory,
+            Services.Security.ICredentialProtector protector) =>
+        {
+            var user = await userManager.GetUserAsync(principal);
+            if (user == null) return Results.Unauthorized();
+            if (!await userManager.IsInRoleAsync(user, "Admin")) return Results.Forbid();
+
+            var inst = await db.Installations.FirstOrDefaultAsync(i => i.Id == id);
+            if (inst == null) return Results.NotFound();
+
+            var adapter = adapterFactory.GetAdapter(inst.InverterBrand);
+            var creds = new Services.InverterApi.Models.ApiCredentials
+            {
+                ApiKey = protector.Unprotect(inst.CloudApiKey),
+                ApiSecret = protector.Unprotect(inst.CloudApiSecret),
+                Username = protector.Unprotect(inst.CloudUsername),
+                Password = protector.Unprotect(inst.CloudPassword),
+                PlantId = inst.PlantId,
+                ApiBaseUrl = inst.CloudApiBaseUrl,
+            };
+
+            var today = SolarApp.Services.SiteTime.Today;
+            var steps = new List<object>();
+
+            // ── Step 1: TestConnection ────────────────────────────────
+            var conn = await adapter.TestConnectionResultAsync(creds);
+            steps.Add(new
+            {
+                step = "TestConnection",
+                ok = conn.IsSuccess,
+                kind = conn.Kind.ToString(),
+                message = conn.Message,
+                durationMs = (int)conn.Duration.TotalMilliseconds,
+                httpStatus = conn.HttpStatusCode,
+                technical = conn.TechnicalDetail,
+            });
+
+            // ── Step 2: GetPlantInfo ──────────────────────────────────
+            var plant = await adapter.GetPlantInfoResultAsync(creds);
+            steps.Add(new
+            {
+                step = "GetPlantInfo",
+                ok = plant.IsSuccess,
+                kind = plant.Kind.ToString(),
+                message = plant.Message,
+                durationMs = (int)plant.Duration.TotalMilliseconds,
+                plant = plant.Data == null ? null : new
+                {
+                    plantId = plant.Data.PlantId,
+                    plantName = plant.Data.PlantName,
+                    capacityKw = plant.Data.CapacityKw,
+                },
+                technical = plant.TechnicalDetail,
+            });
+
+            // ── Step 3-6: GetHistorical at 4 windows ──────────────────
+            var windows = new (string Label, DateTime From, DateTime To)[]
+            {
+                ("currentMonth", new DateTime(today.Year, today.Month, 1), today),
+                ("last30d",      today.AddDays(-30), today),
+                ("last90d",      today.AddDays(-90), today),
+                ("currentYear",  new DateTime(today.Year, 1, 1), today),
+            };
+            foreach (var (label, from, to) in windows)
+            {
+                var hist = await adapter.GetHistoricalResultAsync(creds, from, to);
+                var rows = hist.Data ?? new List<Services.InverterApi.Models.EnergyRecord>();
+                steps.Add(new
+                {
+                    step = $"GetHistorical({label})",
+                    ok = hist.IsSuccess,
+                    kind = hist.Kind.ToString(),
+                    message = hist.Message,
+                    durationMs = (int)hist.Duration.TotalMilliseconds,
+                    fromDate = from.ToString("yyyy-MM-dd"),
+                    toDate = to.ToString("yyyy-MM-dd"),
+                    recordCount = rows.Count,
+                    nonZeroDays = rows.Count(r => r.EnergyGenerationKwh > 0m),
+                    totalKwh = rows.Sum(r => r.EnergyGenerationKwh),
+                    sampleFirst = rows.Take(3).Select(r => new
+                    {
+                        d = r.Timestamp.ToString("yyyy-MM-dd"),
+                        kwh = r.EnergyGenerationKwh,
+                    }).ToArray(),
+                    sampleLast = rows.OrderByDescending(r => r.Timestamp).Take(3).Select(r => new
+                    {
+                        d = r.Timestamp.ToString("yyyy-MM-dd"),
+                        kwh = r.EnergyGenerationKwh,
+                    }).ToArray(),
+                    technical = hist.TechnicalDetail,
+                });
+            }
+
+            return Results.Json(new
+            {
+                brand = inst.InverterBrand.ToString(),
+                plantId = inst.PlantId,
+                today = today.ToString("yyyy-MM-dd"),
+                probeVersion = "v1-2026-05-29-generic",
+                steps,
+            });
+        }).RequireAuthorization();
+
+
         // operator can verify (or copy) what's stored without resetting it.
         // Strictly Admin-only — Partners with edit access can still SAVE new
         // credentials but should not be able to read existing ones back in

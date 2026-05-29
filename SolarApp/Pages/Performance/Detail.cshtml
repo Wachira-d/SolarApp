@@ -39,9 +39,12 @@
         <button type="button" id="resyncBtn" class="btn btn-outline-success btn-sm" title="ดึงข้อมูลจาก cloud มาเทียบและเขียนทับ (clean + refetch)">
             <i class="bi bi-cloud-download"></i> ดึงข้อมูลใหม่จาก Cloud
         </button>
-        @if (User.IsInRole("Admin") && inst.InverterBrand == SolarApp.Models.Enums.InverterBrand.Hoymiles)
+        @if (User.IsInRole("Admin"))
         {
-            <button type="button" id="probeBtn" class="btn btn-outline-warning btn-sm" title="ทดสอบ Hoymiles historical endpoints เพื่อ debug">
+            <button type="button" id="probeBtn"
+                    class="btn btn-outline-warning btn-sm"
+                    data-brand="@inst.InverterBrand"
+                    title="ทดสอบ backfill ของ @inst.InverterBrand เพื่อ debug">
                 <i class="bi bi-search"></i> Probe (admin)
             </button>
         }
@@ -239,22 +242,31 @@
         }[c]));
     }
 
-    // Hoymiles endpoint probe — admin-only diagnostic.  Hits every
-    // plausible historical endpoint with both common body shapes and
-    // shows what the server actually returned so we can tell which
-    // endpoint works on this tenant.
+    // Admin probe.  Hoymiles uses the deep endpoint crawler (raw
+    // HTTP body, content-type, hex preview); every other brand uses
+    // the generic backfill probe that runs TestConnection → PlantInfo
+    // → GetHistorical across 4 time windows and shows record counts +
+    // sample rows.
     document.getElementById('probeBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('probeBtn');
         const box = document.getElementById('probeResult');
+        const brand = btn.dataset.brand || '';
+        const isHoymiles = brand === 'Hoymiles';
+        const endpoint = isHoymiles
+            ? `/api/installations/@inst.Id/hoymiles-probe`
+            : `/api/installations/@inst.Id/backfill-probe`;
         btn.disabled = true;
         box.classList.remove('d-none');
-        box.innerHTML = '<div class="card-body"><i class="bi bi-hourglass-split"></i> กำลังทดสอบ Hoymiles endpoints…</div>';
+        box.innerHTML = `<div class="card-body"><i class="bi bi-hourglass-split"></i> กำลังทดสอบ ${escapeHtml(brand)} backfill…</div>`;
         try {
-            const r = await fetch(`/api/installations/@inst.Id/hoymiles-probe`,
-                { headers: { 'Accept': 'application/json' } });
+            const r = await fetch(endpoint, { headers: { 'Accept': 'application/json' } });
             const data = await r.json();
             if (!r.ok) {
                 box.innerHTML = `<div class="card-body text-danger">${escapeHtml(data.error || ('HTTP ' + r.status))}</div>`;
+                return;
+            }
+            if (!isHoymiles) {
+                renderBackfillProbe(box, data);
                 return;
             }
             const EXPECTED_VERSION = 'v4-2026-05-29-protobuf';
@@ -352,6 +364,71 @@
             btn.disabled = false;
         }
     });
+
+    // Renderer for the brand-agnostic backfill probe.  Each step shows
+    // ok/kind badge, duration, and (for GetHistorical) record count +
+    // first/last 3 sample rows so the operator can see whether real
+    // production numbers came back or it's just empty.
+    function renderBackfillProbe(box, data) {
+        let html =
+            '<div class="card-header bg-warning bg-opacity-25"><strong>Backfill probe</strong>' +
+            ` — ${escapeHtml(data.brand)} · plant <code>${escapeHtml(data.plantId || '?')}</code>` +
+            ` · today ${escapeHtml(data.today)}` +
+            ` · <small class="text-muted">v=${escapeHtml(data.probeVersion || '?')}</small></div>` +
+            '<div class="card-body small">';
+        for (const s of (data.steps || [])) {
+            let badge;
+            if (s.ok)               badge = '<span class="badge bg-success">OK</span>';
+            else if (s.kind === 'AuthFailed')           badge = '<span class="badge bg-danger">AUTH</span>';
+            else if (s.kind === 'PlantNotFound')        badge = '<span class="badge bg-danger">404</span>';
+            else if (s.kind === 'RateLimited')          badge = '<span class="badge bg-warning text-dark">RATE</span>';
+            else if (s.kind === 'Timeout')              badge = '<span class="badge bg-warning text-dark">TIMEOUT</span>';
+            else if (s.kind === 'NetworkError')         badge = '<span class="badge bg-warning text-dark">NET</span>';
+            else if (s.kind === 'CloudServerError')     badge = '<span class="badge bg-warning text-dark">5xx</span>';
+            else                                        badge = `<span class="badge bg-danger">${escapeHtml(s.kind || 'FAIL')}</span>`;
+
+            const duration = typeof s.durationMs === 'number' ? ` <small class="text-muted">${s.durationMs}ms</small>` : '';
+            const recChip = typeof s.recordCount === 'number'
+                ? ` <span class="badge bg-info text-dark">${s.recordCount} rec · ${(s.nonZeroDays ?? 0)} non-zero · ${(s.totalKwh ?? 0).toFixed(1)} kWh</span>`
+                : '';
+            const windowChip = s.fromDate
+                ? ` <small class="text-muted">${escapeHtml(s.fromDate)} → ${escapeHtml(s.toDate)}</small>`
+                : '';
+
+            html +=
+                `<details class="mb-2" ${s.ok ? '' : 'open'}>` +
+                `<summary>${badge} <strong>${escapeHtml(s.step)}</strong>${duration}${recChip}${windowChip}` +
+                ` — <span class="text-muted">${escapeHtml(s.message || '')}</span></summary>`;
+
+            let inner = '';
+            if (s.plant) {
+                inner += `<div class="mt-1">Plant: <code>${escapeHtml(s.plant.plantId || '')}</code>` +
+                         ` "${escapeHtml(s.plant.plantName || '')}"` +
+                         ` — ${s.plant.capacityKw ?? '?'} kW</div>`;
+            }
+            if (s.sampleFirst && s.sampleFirst.length) {
+                inner += '<div class="mt-1"><strong>First 3 days:</strong><pre class="bg-light p-2 small mb-1">' +
+                         s.sampleFirst.map(r => `${r.d}  ${(r.kwh ?? 0).toFixed(2)} kWh`).join('\n') +
+                         '</pre></div>';
+            }
+            if (s.sampleLast && s.sampleLast.length) {
+                inner += '<div><strong>Last 3 days:</strong><pre class="bg-light p-2 small mb-1">' +
+                         s.sampleLast.map(r => `${r.d}  ${(r.kwh ?? 0).toFixed(2)} kWh`).join('\n') +
+                         '</pre></div>';
+            }
+            if (s.technical) {
+                inner += `<div class="text-danger mt-1"><strong>Technical:</strong> ${escapeHtml(s.technical)}</div>`;
+            }
+            if (!inner) inner = '<div class="text-muted small mt-1">(no additional detail)</div>';
+            html += inner + '</details>';
+        }
+        html += '<div class="text-muted small mt-2">' +
+            'ถ้า TestConnection ผ่านแต่ GetHistorical ได้ 0 records — แสดงว่า adapter หา endpoint ผลิตย้อนหลังของ brand นี้ไม่เจอ. ' +
+            'ส่ง Technical detail มาเพื่อ map endpoint ใหม่.' +
+            '</div>';
+        html += '</div>';
+        box.innerHTML = html;
+    }
 </script>
 <script>
 (function(){
