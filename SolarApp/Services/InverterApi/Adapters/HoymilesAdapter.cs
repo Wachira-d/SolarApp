@@ -1262,16 +1262,6 @@ public class HoymilesAdapter : IInverterApiAdapter
     private static void ParseHoymilesEnergyResponse(
         JsonElement root, int anchorYear, int anchorMonth, List<EnergyRecord> sink)
     {
-        decimal Pick(JsonElement el, params string[] keys)
-        {
-            foreach (var k in keys)
-            {
-                var v = SafeGetDecimal(el, k);
-                if (v != 0m) return v;
-            }
-            return 0m;
-        }
-
         // Shape A: top-level array of {date, eq}
         if (root.ValueKind == JsonValueKind.Array)
         {

@@ -276,8 +276,9 @@
                 else
                     badge = '<span class="badge bg-secondary">?</span>';
 
+                // "@@" escapes the literal "@" sign in Razor source; rendered as a single "@" in HTML.
                 const baseChip = p.baseUrl
-                    ? `<small class="text-muted"> @ ${escapeHtml(p.baseUrl.replace(/^https?:\/\//, ''))}</small>`
+                    ? `<small class="text-muted"> @@ ${escapeHtml(p.baseUrl.replace(/^https?:\/\//, ''))}</small>`
                     : '';
                 html +=
                     `<details class="mb-2"><summary>${badge} <code>${escapeHtml(p.path)}</code>` +
