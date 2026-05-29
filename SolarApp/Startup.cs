@@ -1191,7 +1191,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 // glance whether the running backend matches the latest
                 // UI expectation.  When the UI sees a value other than
                 // its own expectation, it tells the operator to redeploy.
-                probeVersion = "v4-2026-05-29-protobuf",
+                probeVersion = "v5-2026-05-29-month-merge",
                 probes,
             });
         }).RequireAuthorization();

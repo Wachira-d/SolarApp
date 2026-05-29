@@ -1204,25 +1204,65 @@ public class HoymilesAdapter : IInverterApiAdapter
         var (token, apiBase, _) = await LoginAsync(credentials);
         if (token == null) return records;
         var baseUrl = apiBase ?? DefaultApiBase;
+        var today = SolarApp.Services.SiteTime.Today;
 
-        // ── Try 0: PROTOBUF — count_eq_by_day_of_year ───────────────────
-        // Confirmed working path (probe 2026-05-29): this endpoint returns
-        // application/octet-stream encoded as a LineChart protobuf with one
-        // year of daily pv_eq values per call.  Walk each calendar year that
-        // overlaps the requested window.
+        // ── Try 0a: PROTOBUF — count_eq_by_day_of_year ──────────────────
+        // Confirmed working (probe 2026-05-29): returns one year of daily
+        // pv_eq values as a LineChart protobuf.  Walk each calendar year
+        // that overlaps the requested window.
+        var yearStats = new List<string>();
         for (int yr = from.Year; yr <= to.Year; yr++)
         {
             var yearRecords = await FetchHoymilesYearProtobufAsync(
                 token, baseUrl, credentials.PlantId!, yr);
-            records.AddRange(yearRecords.Where(r => r.Timestamp >= from.Date && r.Timestamp <= to.Date));
+            yearStats.Add($"y{yr}={yearRecords.Count}");
+            records.AddRange(yearRecords.Where(r =>
+                r.Timestamp >= from.Date && r.Timestamp <= to.Date && r.Timestamp <= today));
         }
 
-        if (records.Count == 0)
+        // ── Try 0b: PROTOBUF — count_eq_by_day_of_month (per month) ─────
+        // Even when the year endpoint succeeds, the month endpoint is the
+        // freshest source for the CURRENT month: the year roll-up appears
+        // to lag for some tenants (cloud cache TTL).  Fetch each month
+        // in the window and merge — the dedupe step at the end picks
+        // the highest value per day so a stale 0 won't overwrite real kWh.
+        var monthStats = new List<string>();
+        var monthCursor = new DateTime(from.Year, from.Month, 1);
+        var monthStop = new DateTime(to.Year, to.Month, 1).AddMonths(1);
+        while (monthCursor < monthStop)
         {
-            // ── Try 1: per-month chunked, count_eq_by_day_of_month ──────
+            var monthRecords = await FetchHoymilesMonthProtobufAsync(
+                token, baseUrl, credentials.PlantId!, monthCursor.Year, monthCursor.Month);
+            monthStats.Add($"{monthCursor:yyyy-MM}={monthRecords.Count}");
+            records.AddRange(monthRecords.Where(r =>
+                r.Timestamp >= from.Date && r.Timestamp <= to.Date && r.Timestamp <= today));
+            monthCursor = monthCursor.AddMonths(1);
+        }
+
+        _logger.LogInformation(
+            "Hoymiles protobuf collected: years[{Years}] months[{Months}] total raw {Total}",
+            string.Join(",", yearStats), string.Join(",", monthStats), records.Count);
+
+        // ── Gap fill: if protobuf left holes in the window, also try
+        // the JSON per-month endpoint to cover months where the binary
+        // chart was empty or unparseable.  Triggers when either we have
+        // zero records or fewer distinct days than the window expects.
+        var expectedDays = (int)Math.Min(
+            (today - from.Date).TotalDays + 1,
+            (to.Date - from.Date).TotalDays + 1);
+        if (expectedDays < 1) expectedDays = 1;
+        // Use NON-ZERO days for the gap check.  A 0-kWh placeholder is
+        // indistinguishable from "we never got real data for that day",
+        // so treat both as missing and let the JSON path try to fill it.
+        // Dedupe at the bottom of this method picks the highest kWh per
+        // day, so a real value from JSON will win over the protobuf 0.
+        var distinctSoFar = records.Where(r => r.EnergyGenerationKwh > 0m)
+            .Select(r => r.Timestamp.Date).Distinct().Count();
+        if (distinctSoFar < expectedDays)
+        {
             _logger.LogInformation(
-                "Hoymiles count_eq_by_day_of_year protobuf returned empty for {Sid}; falling back to per-month JSON",
-                credentials.PlantId);
+                "Hoymiles protobuf non-zero coverage {Got}/{Expected} for {Sid}; supplementing with per-month JSON",
+                distinctSoFar, expectedDays, credentials.PlantId);
             var cur = new DateTime(from.Year, from.Month, 1);
             var stop = new DateTime(to.Year, to.Month, 1).AddMonths(1);
             while (cur < stop)
@@ -1279,95 +1319,187 @@ public class HoymilesAdapter : IInverterApiAdapter
     }
 
     /// <summary>
-    /// Fetches one calendar year of daily kWh from Hoymiles via the
-    /// PROTOBUF endpoint pvm-data/api/0/station/data/count_eq_by_day_of_year.
+    /// Fetches one calendar year of daily kWh via the PROTOBUF endpoint
+    /// pvm-data/api/0/station/data/count_eq_by_day_of_year.
     ///
-    /// Body shape (verified by probe 2026-05-29):
-    ///     { sid: <num>, year: "<yyyy>" }                — sid as number, year as string
-    /// Response: Content-Type application/octet-stream containing a
-    ///     LineChart protobuf with:
-    ///         x_axis = [ "yyyy-MM-dd", ... ]
-    ///         series = [ { name="pv_eq", values=[float, ...] },
-    ///                    { name="consumption_eq", ... },  // ignored
-    ///                    { name="self_eq", ... } ]        // ignored
-    /// We pick pv_eq as production kWh per day.
-    ///
-    /// Uses raw HttpClient (NOT CallApiAsync) because CallApiAsync assumes
-    /// JSON and would discard the binary body.
+    /// Body: { sid: <num>, year: "<yyyy>", pb_ver: 1 }
+    /// Response: application/octet-stream, LineChart protobuf with
+    ///     x_axis = [ "yyyy-MM-dd", ... ]
+    ///     series.pv_eq = [ float kWh per day, ... ]
     /// </summary>
     private async Task<List<EnergyRecord>> FetchHoymilesYearProtobufAsync(
         string token, string baseUrl, string sid, int year)
     {
-        var records = new List<EnergyRecord>();
-        var url = $"{baseUrl.TrimEnd('/')}/pvm-data/api/0/station/data/count_eq_by_day_of_year";
         object sidArg = long.TryParse(sid, out var sidL) ? sidL : (object)sid;
+        var bytes = await PostHoymilesProtobufAsync(
+            token, baseUrl, "pvm-data/api/0/station/data/count_eq_by_day_of_year",
+            new { sid = sidArg, year = year.ToString(), pb_ver = 1 },
+            $"year_of {sid}/{year}");
+        return DecodeAndMapProtobuf(bytes, anchorYear: year, anchorMonth: null,
+            label: $"year_of {sid}/{year}");
+    }
 
+    /// <summary>
+    /// Fetches one calendar month of daily kWh via the PROTOBUF endpoint
+    /// pvm-data/api/0/station/data/count_eq_by_day_of_month.
+    ///
+    /// Body: { sid: <num>, date: "yyyy-MM-01", pb_ver: 1 }
+    /// Response: LineChart protobuf — labels are day-of-month numbers
+    ///     ("1".."31") on most tenants; reconstruct full date using
+    ///     the anchor month we passed in.
+    ///
+    /// The month endpoint is the freshest data for the current month;
+    /// the year-roll-up endpoint can lag a day on some tenants.
+    /// </summary>
+    private async Task<List<EnergyRecord>> FetchHoymilesMonthProtobufAsync(
+        string token, string baseUrl, string sid, int year, int month)
+    {
+        object sidArg = long.TryParse(sid, out var sidL) ? sidL : (object)sid;
+        var dateStr = $"{year:D4}-{month:D2}-01";
+        var bytes = await PostHoymilesProtobufAsync(
+            token, baseUrl, "pvm-data/api/0/station/data/count_eq_by_day_of_month",
+            new { sid = sidArg, date = dateStr, pb_ver = 1 },
+            $"month_of {sid}/{year}-{month:D2}");
+        return DecodeAndMapProtobuf(bytes, anchorYear: year, anchorMonth: month,
+            label: $"month_of {sid}/{year}-{month:D2}");
+    }
+
+    /// <summary>
+    /// Shared raw HTTP POST that returns the response body as bytes —
+    /// used for protobuf endpoints that CallApiAsync would discard as
+    /// "non-JSON".  Returns null on any failure; caller treats null as
+    /// "no data, move on to the next endpoint".
+    /// </summary>
+    private async Task<byte[]?> PostHoymilesProtobufAsync(
+        string token, string baseUrl, string path, object body, string label)
+    {
+        var url = $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
         try
         {
             var client = CreateClient();
-            var req = BuildHoymilesRequest(HttpMethod.Post, url,
-                new { sid = sidArg, year = year.ToString() });
+            var req = BuildHoymilesRequest(HttpMethod.Post, url, body);
             req.Headers.TryAddWithoutValidation("Authorization", token);
-            // The protobuf endpoint sends application/octet-stream; tell the
-            // server we accept it as well as JSON (some tiers fall back to
-            // JSON-only when octet-stream isn't advertised).
+            // Advertise that we accept the binary chart format — some tiers
+            // fall back to JSON-only when octet-stream isn't requested.
             req.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/octet-stream"));
 
             var resp = await client.SendAsync(req);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: HTTP {Status}",
-                    sid, year, (int)resp.StatusCode);
-                return records;
+                _logger.LogDebug("Hoymiles {Label}: HTTP {Status}", label, (int)resp.StatusCode);
+                return null;
             }
-
             var bytes = await resp.Content.ReadAsByteArrayAsync();
             if (bytes.Length == 0)
             {
-                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: empty body", sid, year);
-                return records;
+                _logger.LogDebug("Hoymiles {Label}: empty body", label);
+                return null;
             }
-
-            var chart = HoymilesProtobufDecoder.Decode(bytes);
-            if (chart == null || chart.Labels.Count == 0)
-            {
-                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: protobuf decode produced no data (len={Len})",
-                    sid, year, bytes.Length);
-                return records;
-            }
-
-            // Prefer pv_eq; fall back to any series carrying production-like
-            // values if naming differs across firmware revisions.
-            if (!chart.Series.TryGetValue("pv_eq", out var values))
-            {
-                foreach (var key in new[] { "generation_eq", "gen_eq", "eq", "energy" })
-                    if (chart.Series.TryGetValue(key, out values)) break;
-            }
-            if (values == null || values.Count == 0)
-            {
-                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: no pv_eq series (keys=[{Keys}])",
-                    sid, year, string.Join(",", chart.Series.Keys));
-                return records;
-            }
-
-            var n = Math.Min(chart.Labels.Count, values.Count);
-            for (int i = 0; i < n; i++)
-            {
-                if (!DateTime.TryParse(chart.Labels[i], out var date)) continue;
-                var v = (decimal)values[i];
-                if (v < 0m) continue;
-                if (v > 10000m) v /= 1000m; // Wh → kWh sanity
-                records.Add(new EnergyRecord { Timestamp = date.Date, EnergyGenerationKwh = v });
-            }
-            _logger.LogInformation(
-                "Hoymiles count_eq_by_day_of_year {Sid} {Year}: decoded {Count} day rows from protobuf",
-                sid, year, records.Count);
+            return bytes;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Hoymiles count_eq_by_day_of_year protobuf failed for {Sid} {Year}", sid, year);
+            _logger.LogWarning(ex, "Hoymiles {Label}: POST failed", label);
+            return null;
         }
+    }
+
+    /// <summary>
+    /// Decode protobuf bytes into EnergyRecord rows.  Picks pv_eq (or
+    /// production-like fallback series), reconstructs full dates from
+    /// short labels using the anchor year/month when needed, and skips
+    /// future dates so chart placeholders don't pollute the dataset.
+    /// </summary>
+    private List<EnergyRecord> DecodeAndMapProtobuf(byte[]? bytes, int? anchorYear, int? anchorMonth, string label)
+    {
+        var records = new List<EnergyRecord>();
+        if (bytes == null) return records;
+
+        var chart = HoymilesProtobufDecoder.Decode(bytes);
+        if (chart == null || chart.Labels.Count == 0)
+        {
+            _logger.LogDebug("Hoymiles {Label}: protobuf decode produced no labels (len={Len})", label, bytes.Length);
+            return records;
+        }
+
+        // Pick production series: pv_eq first, then known aliases.
+        if (!chart.Series.TryGetValue("pv_eq", out var values))
+        {
+            foreach (var key in new[] { "generation_eq", "gen_eq", "eq", "energy", "production" })
+                if (chart.Series.TryGetValue(key, out values)) break;
+        }
+        if (values == null || values.Count == 0)
+        {
+            _logger.LogDebug("Hoymiles {Label}: no pv_eq series (keys=[{Keys}])",
+                label, string.Join(",", chart.Series.Keys));
+            return records;
+        }
+
+        var today = SolarApp.Services.SiteTime.Today;
+        int parsed = 0, skippedLabel = 0, skippedFuture = 0;
+        var n = Math.Min(chart.Labels.Count, values.Count);
+        for (int i = 0; i < n; i++)
+        {
+            var date = ParseHoymilesProtobufLabel(chart.Labels[i], anchorYear, anchorMonth, i);
+            if (date == null) { skippedLabel++; continue; }
+            if (date.Value > today) { skippedFuture++; continue; }
+
+            var v = (decimal)values[i];
+            if (v < 0m) continue;
+            if (v > 10000m) v /= 1000m; // Wh → kWh sanity
+            records.Add(new EnergyRecord { Timestamp = date.Value, EnergyGenerationKwh = v });
+            parsed++;
+        }
+        _logger.LogInformation(
+            "Hoymiles {Label}: protobuf decoded {Parsed} rows (skipped {SkipLabel} label / {SkipFuture} future, raw labels={Total})",
+            label, parsed, skippedLabel, skippedFuture, chart.Labels.Count);
         return records;
+    }
+
+    /// <summary>
+    /// Convert a Hoymiles LineChart x-axis label into a DateTime.
+    /// Hoymiles uses different label formats per endpoint:
+    ///   * count_eq_by_day_of_year  → "yyyy-MM-dd" (full date)
+    ///   * count_eq_by_day_of_month → "1" .. "31"  (day number, needs anchor month)
+    ///   * count_eq_by_month_of_year → "yyyy-MM" or "1".."12"
+    /// Returns null only when nothing plausible can be reconstructed.
+    /// </summary>
+    private static DateTime? ParseHoymilesProtobufLabel(
+        string? label, int? anchorYear, int? anchorMonth, int positionIndex)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return null;
+        var s = label.Trim();
+
+        // Full ISO date — most common case for year endpoint.
+        if (DateTime.TryParseExact(s, "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var iso))
+            return iso.Date;
+        // Some firmware uses "MM-dd" (no year)
+        if (anchorYear.HasValue && DateTime.TryParseExact(s, "MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var md))
+            return new DateTime(anchorYear.Value, md.Month, md.Day);
+        // Plain day-of-month number ("1".."31") with anchor month
+        if (anchorYear.HasValue && anchorMonth.HasValue
+            && int.TryParse(s, out var dom) && dom >= 1 && dom <= 31)
+        {
+            var maxDay = DateTime.DaysInMonth(anchorYear.Value, anchorMonth.Value);
+            return new DateTime(anchorYear.Value, anchorMonth.Value, Math.Min(dom, maxDay));
+        }
+        // Generic parse fallback — handles "yyyy/MM/dd", "dd MMM yyyy", etc.
+        if (DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var any))
+            return any.Date;
+        // Last resort: when labels are pure positional integers (rare) and we
+        // know the anchor month, treat the position as the day-of-month.
+        if (anchorYear.HasValue && anchorMonth.HasValue && positionIndex >= 0)
+        {
+            var maxDay = DateTime.DaysInMonth(anchorYear.Value, anchorMonth.Value);
+            if (positionIndex < maxDay)
+                return new DateTime(anchorYear.Value, anchorMonth.Value, positionIndex + 1);
+        }
+        return null;
     }
 
     /// <summary>
