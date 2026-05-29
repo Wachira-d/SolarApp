@@ -46,13 +46,21 @@ public class SolisAdapter : IInverterApiAdapter
     }
 
     /// <summary>
-    /// Web-login mode: chosen automatically when the operator leaves
-    /// ApiKey/ApiSecret blank and provides Username+Password instead.
-    /// The legacy explicit sentinel "SOLISWEB" is also accepted for
-    /// installations that were configured before auto-detect existed.
+    /// Web-login mode resolution.  Order of precedence:
+    ///   1. Explicit ConnectionMethod from the operator (set in the UI
+    ///      dropdown) — always wins.  Without this an installation that
+    ///      previously saved an ApiKey but now wants web-login would
+    ///      forever auto-detect as API mode and fail with "API Secret
+    ///      required" no matter how many times the operator re-enters
+    ///      Username/Password.
+    ///   2. Legacy explicit sentinel "SOLISWEB" in ApiKey field.
+    ///   3. Auto-detect: web-login when ApiKey/Secret blank and
+    ///      Username/Password populated.
     /// </summary>
     private static bool IsWebMode(ApiCredentials c)
     {
+        if (c.ConnectionMethod == ConnectionMethod.UserPassword) return true;
+        if (c.ConnectionMethod == ConnectionMethod.OfficialApi)  return false;
         if (string.Equals(c.ApiKey, "SOLISWEB", StringComparison.OrdinalIgnoreCase))
             return true;
         var hasApi = !string.IsNullOrWhiteSpace(c.ApiKey) && !string.IsNullOrWhiteSpace(c.ApiSecret);

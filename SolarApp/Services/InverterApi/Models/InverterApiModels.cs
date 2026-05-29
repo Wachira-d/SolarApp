@@ -14,6 +14,17 @@ public class ApiCredentials
     /// See Installation.CloudApiBaseUrl for the user-facing documentation.
     /// </summary>
     public string? ApiBaseUrl { get; set; }
+
+    /// <summary>
+    /// Operator-selected connection method (Official HMAC API vs.
+    /// Username/Password web login).  When set, adapters that support
+    /// multiple modes (e.g. Solis) MUST honor this instead of auto-
+    /// detecting from which fields are populated — auto-detect produces
+    /// "API Key required" errors when a previously-saved ApiKey lingers
+    /// in storage but the operator now wants to use web-login.
+    /// Null = adapter falls back to its legacy auto-detect.
+    /// </summary>
+    public SolarApp.Models.Enums.ConnectionMethod? ConnectionMethod { get; set; }
 }
 
 public class PlantInfo

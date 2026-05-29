@@ -1908,6 +1908,14 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 var password  = form["password"].ToString();
                 var plantId   = form["plantId"].ToString();
                 var apiBaseUrl = form["apiBaseUrl"].ToString();
+                // ConnectionMethod is sent by the UI dropdown.  When provided,
+                // adapters honor it instead of auto-detecting from which
+                // fields are populated — auto-detect produces the wrong
+                // mode when stored credentials linger from a previous attempt.
+                Models.Enums.ConnectionMethod? connectionMethod = null;
+                if (Enum.TryParse<Models.Enums.ConnectionMethod>(
+                        form["connectionMethod"].ToString(), ignoreCase: true, out var cm))
+                    connectionMethod = cm;
 
                 // Fill any blank field from the stored installation credentials.
                 // Empty input from the form = "use the saved value" (same as Save).
@@ -1939,6 +1947,9 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                             plantId = inst.PlantId ?? "";
                         if (string.IsNullOrEmpty(apiBaseUrl))
                             apiBaseUrl = inst.CloudApiBaseUrl ?? "";
+                        // Fall back to stored ConnectionMethod when the UI
+                        // didn't send one (e.g. older Create page).
+                        connectionMethod ??= inst.ConnectionMethod;
                     }
                 }
 
@@ -1949,7 +1960,8 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                     Username = username,
                     Password = password,
                     PlantId = plantId,
-                    ApiBaseUrl = string.IsNullOrEmpty(apiBaseUrl) ? null : apiBaseUrl
+                    ApiBaseUrl = string.IsNullOrEmpty(apiBaseUrl) ? null : apiBaseUrl,
+                    ConnectionMethod = connectionMethod,
                 };
 
                 var adapter = factory.GetAdapter(brand);

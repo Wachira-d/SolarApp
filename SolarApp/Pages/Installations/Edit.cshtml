@@ -137,6 +137,38 @@
 
                     <!-- Cloud API -->
                     <h6 class="text-muted mb-3 mt-4">Cloud API Connection</h6>
+                    @{
+                        var capTop = SolarApp.Services.InverterApi.Common.BrandCapabilities.Get(Model.Input.InverterBrand);
+                    }
+                    <!-- ConnectionMethod must live right next to the credentials.
+                         When it sat further down the page (next to SyncIntervalMinutes),
+                         the test endpoint received stale auto-detect mode and bounced
+                         the operator with confusing "API Key required" messages even
+                         though they had selected "Username + Password". -->
+                    <div class="row mb-3">
+                        <div class="col-md-12">
+                            <label for="Input_ConnectionMethod" class="form-label">
+                                วิธีเชื่อมต่อ (Connection method)
+                                <span class="text-muted small">— เลือกก่อน, ฟิลด์ด้านล่างจะเปลี่ยนตาม</span>
+                            </label>
+                            <select id="Input_ConnectionMethod" name="Input.ConnectionMethod" class="form-select">
+                                @foreach (var m in capTop.SupportedMethods)
+                                {
+                                    var methodLabel = m == SolarApp.Models.Enums.ConnectionMethod.OfficialApi  ? "Official API (API Key + Secret)"
+                                                    : m == SolarApp.Models.Enums.ConnectionMethod.UserPassword ? "Username + Password (web-login)"
+                                                    : m == SolarApp.Models.Enums.ConnectionMethod.Hybrid       ? "Hybrid (ทั้งสองอย่าง)"
+                                                                                                                : m.ToString();
+                                    var isSelected = Model.Input.ConnectionMethod == m;
+                                    <option value="@((int)m)" selected="@isSelected">@methodLabel</option>
+                                }
+                            </select>
+                            <div class="form-text">
+                                Brand <strong>@Model.Input.InverterBrand</strong> รองรับ:
+                                <code>@string.Join(", ", capTop.SupportedMethods)</code>.
+                                @capTop.Notes
+                            </div>
+                        </div>
+                    </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             @* PlantId is NOT a secret — show actual value for verification *@
@@ -147,7 +179,7 @@
                             <input asp-for="Input.PlantId" class="form-control"
                                    placeholder="Enter Plant/Station ID" />
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-6 cred-api-row">
                             <label asp-for="Input.CloudApiKey" class="form-label">
                                 API Key
                                 @if (Model.HasApiKey) { <span class="badge bg-success ms-1">Saved</span> }
@@ -164,7 +196,7 @@
                         </div>
                     </div>
                     <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-6 cred-userpass-row">
                             <label asp-for="Input.CloudUsername" class="form-label">
                                 Cloud Username
                                 @if (Model.HasUsername) { <span class="badge bg-success ms-1">Saved</span> }
@@ -180,7 +212,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-6 cred-userpass-row">
                             <label asp-for="Input.CloudPassword" class="form-label">
                                 Cloud Password
                                 @if (Model.HasPassword) { <span class="badge bg-success ms-1">Saved</span> }
@@ -217,7 +249,7 @@
                         </div>
                     </div>
                     <div class="row mb-3">
-                        <div class="col-md-6">
+                        <div class="col-md-6 cred-api-row">
                             <label asp-for="Input.CloudApiSecret" class="form-label">
                                 API Secret
                                 @if (Model.HasApiSecret) { <span class="badge bg-success ms-1">Saved</span> }
@@ -372,33 +404,20 @@
 
                     @* ─── End Service Scope ────────────────────────────────────────── *@
 
-                    @* ─── Cloud Connection ─────────────────────────────────────────── *@
+                    @* ─── Sync frequency ──────────────────────────────────────────────
+                       The ConnectionMethod dropdown moved up to the Cloud API
+                       credentials block (right above PlantId).  Only the sync
+                       interval lives in this section now. *@
                     <hr />
-                    <h5 class="mb-3">การเชื่อมต่อ Cloud API</h5>
+                    <h5 class="mb-3">ความถี่ในการดึงข้อมูล Cloud</h5>
                     @{
                         var cap = SolarApp.Services.InverterApi.Common.BrandCapabilities.Get(Model.Input.InverterBrand);
                     }
                     <p class="text-muted small mb-2">
-                        Brand <strong>@Model.Input.InverterBrand</strong> รองรับ:
-                        <code>@string.Join(", ", cap.SupportedMethods)</code>
+                        Brand <strong>@Model.Input.InverterBrand</strong>
                         — ขั้นต่ำ <strong>@cap.MinIntervalMinutes นาที</strong>/รอบ.
-                        @cap.Notes
                     </p>
                     <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label for="Input_ConnectionMethod" class="form-label">วิธีเชื่อมต่อ</label>
-                            <select id="Input_ConnectionMethod" name="Input.ConnectionMethod" class="form-select">
-                                @foreach (var m in cap.SupportedMethods)
-                                {
-                                    var methodLabel = m == SolarApp.Models.Enums.ConnectionMethod.OfficialApi  ? "Official API (API Key + Secret)"
-                                                    : m == SolarApp.Models.Enums.ConnectionMethod.UserPassword ? "Username + Password (web-login)"
-                                                    : m == SolarApp.Models.Enums.ConnectionMethod.Hybrid       ? "Hybrid"
-                                                                                                                : m.ToString();
-                                    var isSelected = Model.Input.ConnectionMethod == m;
-                                    <option value="@((int)m)" selected="@isSelected">@methodLabel</option>
-                                }
-                            </select>
-                        </div>
                         <div class="col-md-6">
                             <label for="Input_SyncIntervalMinutes" class="form-label">ความถี่ในการดึงข้อมูล</label>
                             <select id="Input_SyncIntervalMinutes" name="Input.SyncIntervalMinutes" class="form-select">
@@ -555,6 +574,12 @@
             formData.append('password', document.querySelector('[name="Input.CloudPassword"]').value);
             formData.append('plantId', document.querySelector('[name="Input.PlantId"]').value);
             formData.append('apiBaseUrl', document.querySelector('[name="Input.CloudApiBaseUrl"]').value);
+            // Connection method MUST be sent so the adapter knows which
+            // credentials to use.  Without it, Solis (which supports both
+            // modes) auto-detects from field presence and picks the wrong
+            // mode whenever stale credentials linger from a previous attempt.
+            const methodEl = document.querySelector('[name="Input.ConnectionMethod"]');
+            if (methodEl) formData.append('connectionMethod', methodEl.value);
             // Send installation ID so the endpoint can fall back to stored credentials
             // when fields are left blank (Edit page preserves existing saved values).
             formData.append('installationId', '@Model.Input.Id');
@@ -797,5 +822,29 @@
                 }
             } catch { /* ignore — fields stay as-is */ }
         });
+
+        // ── Connection-method field gating ──────────────────────────────
+        // Dim credential rows that the selected mode doesn't need so the
+        // operator knows where to focus.  We deliberately DON'T disable
+        // the inputs — disabled inputs aren't submitted, which would
+        // accidentally clear stored credentials on Save.  Adapters honor
+        // ConnectionMethod explicitly, so values in dimmed fields are
+        // ignored at runtime anyway.
+        // Enum: OfficialApi=0, UserPassword=1, Hybrid=2.
+        function applyCredentialVisibility() {
+            const sel = document.getElementById('Input_ConnectionMethod');
+            if (!sel) return;
+            const method = parseInt(sel.value, 10);
+            const apiNeeded      = method === 0 || method === 2;
+            const userPassNeeded = method === 1 || method === 2;
+            document.querySelectorAll('.cred-api-row').forEach(el => {
+                el.classList.toggle('opacity-50', !apiNeeded);
+            });
+            document.querySelectorAll('.cred-userpass-row').forEach(el => {
+                el.classList.toggle('opacity-50', !userPassNeeded);
+            });
+        }
+        document.getElementById('Input_ConnectionMethod')?.addEventListener('change', applyCredentialVisibility);
+        applyCredentialVisibility();
     </script>
 }
