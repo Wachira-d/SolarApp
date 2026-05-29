@@ -1006,11 +1006,10 @@ public class HoymilesAdapter : IInverterApiAdapter
 
     /// <summary>
     /// Admin diagnostic: hit each plausible Hoymiles historical endpoint
-    /// with both common body shapes and return what the server sent back
-    /// (or the exception we got).  Used by /api/installations/{id}/
-    /// hoymiles-probe to figure out which endpoint actually returns
-    /// daily kWh for this tenant — vendor varies by region/firmware so
-    /// the only reliable test is to try.
+    /// DIRECTLY (bypassing CallApiAsync's success-status filtering) and
+    /// return the actual HTTP status + raw response body.  Tells us
+    /// exactly what each endpoint sent back — including non-zero status,
+    /// binary payload, 4xx errors — so we can pick the working one.
     /// </summary>
     public async Task<List<object>> ProbeHistoricalEndpointsAsync(
         ApiCredentials credentials, string monthStart, int year)
@@ -1027,50 +1026,74 @@ public class HoymilesAdapter : IInverterApiAdapter
             results.Add(new { skipped = "login failed", loginMsg });
             return results;
         }
-        var baseUrl = apiBase ?? DefaultApiBase;
+        var baseUrl = (apiBase ?? DefaultApiBase).TrimEnd('/');
+
+        var sid = credentials.PlantId;
+        long sidLong = long.TryParse(sid, out var slong) ? slong : 0;
+        object sidObj = sidLong > 0 ? sidLong : (object)sid!;
 
         var endpointsToProbe = new (string Path, string Body, object Payload)[]
         {
-            // Primary (chart endpoint — possibly binary)
-            ("pvm-data/api/0/station/data/count_eq_by_day_of_month",      "sid+date+pb_ver",
-                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
-            // data3 family (newer firmware)
-            ("pvm-data/api/0/station/data3/count_eq_by_day_of_month",     "sid+date+pb_ver",
-                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
-            // Year breakdown (likely JSON — no LineChart buffer in JS)
-            ("pvm-data/api/0/station/data/count_eq_by_day_of_year",       "sid+date+pb_ver",
-                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
-            ("pvm-data/api/0/station/data3/count_eq_by_day_of_year",      "sid+date+pb_ver",
-                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
-            // Month-of-year breakdown
-            ("pvm-data/api/0/station/data/count_eq_by_month_of_year",     "sid+date+pb_ver",
-                new { sid = credentials.PlantId, date = monthStart, pb_ver = 1 }),
-            // Report endpoints — typically JSON
-            ("pvm-report/api/0/station/report/count_eq_by_station",       "sid+date",
-                new { sid = credentials.PlantId, date = monthStart }),
-            ("pvm-report/api/0/station/es_report/count_eq_by_station",    "sid+date",
-                new { sid = credentials.PlantId, date = monthStart }),
+            ("pvm-data/api/0/station/data/count_eq_by_day_of_month", "sid+date+pb_ver(int sid)",
+                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
+            ("pvm-data/api/0/station/data/count_eq_by_day_of_month", "sid string+date",
+                new { sid = sid, date = monthStart }),
+            ("pvm-data/api/0/station/data3/count_eq_by_day_of_month", "sid+date+pb_ver",
+                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
+            ("pvm-data/api/0/station/data/count_eq_by_day_of_year",  "sid+date+pb_ver",
+                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
+            ("pvm-data/api/0/station/data3/count_eq_by_day_of_year", "sid+date+pb_ver",
+                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
+            ("pvm-data/api/0/station/data/count_eq_by_month_of_year", "sid+date+pb_ver",
+                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
+            ("pvm-report/api/0/station/report/count_eq_by_station",  "sid+date",
+                new { sid = sidObj, date = monthStart }),
+            ("pvm-report/api/0/station/es_report/count_eq_by_station", "sid+date",
+                new { sid = sidObj, date = monthStart }),
+            // Try station/find too — known-working endpoint, confirms auth + base URL work
+            ("pvm/api/0/station/find",                                "id",
+                new { id = sidObj }),
         };
 
+        // Also try BOTH base URLs in case the right one differs from the
+        // auto-detected one.
+        var basesToTry = new[] { baseUrl };
+        if (!baseUrl.Contains("global.hoymiles.com"))
+            basesToTry = basesToTry.Append("https://global.hoymiles.com/platform/api/gateway").ToArray();
+
+        foreach (var b in basesToTry)
         foreach (var (path, bodyDesc, payload) in endpointsToProbe)
         {
+            var url = $"{b}/{path}";
             try
             {
-                var data = await CallApiAsync(token, baseUrl, path, payload);
-                if (data == null)
+                var client = CreateClient();
+                var req = BuildHoymilesRequest(HttpMethod.Post, url, payload);
+                req.Headers.TryAddWithoutValidation("Authorization", token);
+                var resp = await client.SendAsync(req);
+                var body = await resp.Content.ReadAsStringAsync();
+                var contentType = resp.Content.Headers.ContentType?.ToString() ?? "(none)";
+                var preview = body.Length > 1500 ? body[..1500] + "…(truncated)" : body;
+                results.Add(new
                 {
-                    results.Add(new { path, body = bodyDesc, result = "null (HTTP non-200 or non-JSON)" });
-                }
-                else
-                {
-                    var raw = data.Value.GetRawText();
-                    if (raw.Length > 2000) raw = raw[..2000] + "…(truncated)";
-                    results.Add(new { path, body = bodyDesc, result = "ok", raw });
-                }
+                    baseUrl = b,
+                    path,
+                    body = bodyDesc,
+                    httpStatus = (int)resp.StatusCode,
+                    contentType,
+                    bodyLength = body.Length,
+                    raw = preview,
+                });
             }
             catch (Exception ex)
             {
-                results.Add(new { path, body = bodyDesc, result = "exception", error = $"{ex.GetType().Name}: {ex.Message}" });
+                results.Add(new
+                {
+                    baseUrl = b,
+                    path,
+                    body = bodyDesc,
+                    error = $"{ex.GetType().Name}: {ex.Message}",
+                });
             }
         }
         return results;

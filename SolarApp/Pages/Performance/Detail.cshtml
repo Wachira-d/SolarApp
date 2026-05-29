@@ -262,12 +262,29 @@
                 ` — ${escapeHtml(data.brand)} · sid <code>${escapeHtml(data.plantId)}</code> · today ${escapeHtml(data.today)}</div>` +
                 '<div class="card-body small">';
             for (const p of data.probes || []) {
-                const status = p.result === 'ok'
-                    ? '<span class="badge bg-success">ok</span>'
-                    : `<span class="badge bg-danger">${escapeHtml(p.result)}</span>`;
+                // Per-endpoint status badge based on HTTP code + body length
+                const code = p.httpStatus || 0;
+                let badge;
+                if (code === 200 && p.bodyLength > 0)
+                    badge = '<span class="badge bg-success">200</span>';
+                else if (code >= 200 && code < 300)
+                    badge = `<span class="badge bg-warning text-dark">${code} empty</span>`;
+                else if (code >= 400)
+                    badge = `<span class="badge bg-danger">${code}</span>`;
+                else if (p.error)
+                    badge = '<span class="badge bg-danger">err</span>';
+                else
+                    badge = '<span class="badge bg-secondary">?</span>';
+
+                const baseChip = p.baseUrl
+                    ? `<small class="text-muted"> @ ${escapeHtml(p.baseUrl.replace(/^https?:\/\//, ''))}</small>`
+                    : '';
                 html +=
-                    `<details class="mb-2"><summary>${status} <code>${escapeHtml(p.path)}</code>` +
-                    ` <small class="text-muted">body=${escapeHtml(p.body)}</small></summary>`;
+                    `<details class="mb-2"><summary>${badge} <code>${escapeHtml(p.path)}</code>` +
+                    `${baseChip} <small class="text-muted">body=${escapeHtml(p.body)}` +
+                    (p.contentType ? ` · ct=${escapeHtml(p.contentType)}` : '') +
+                    (typeof p.bodyLength === 'number' ? ` · ${p.bodyLength}B` : '') +
+                    `</small></summary>`;
                 if (p.error) html += `<div class="text-danger mt-1">${escapeHtml(p.error)}</div>`;
                 if (p.raw)
                     html += `<pre class="bg-light p-2 mt-1" style="white-space:pre-wrap;max-height:300px;overflow:auto;font-size:.78rem">` +
@@ -275,7 +292,7 @@
                 if (p.loginMsg) html += `<div class="text-muted mt-1">${escapeHtml(p.loginMsg)}</div>`;
                 html += '</details>';
             }
-            html += '<div class="text-muted">หา block ที่ <code>ok</code> และมี date+kWh ในตัวอย่าง raw → คือ endpoint ที่ใช้ได้กับ tenant นี้ ส่ง response มาผมเพื่อ map field names</div>';
+            html += '<div class="text-muted small mt-2">หา block <strong>200</strong> ที่ raw มี date+kWh — ส่ง raw มาให้ผมจะ map ให้ตรง</div>';
             html += '</div>';
             box.innerHTML = html;
         } catch (e) {
