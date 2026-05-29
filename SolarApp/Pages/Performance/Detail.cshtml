@@ -262,10 +262,11 @@
                 ` — ${escapeHtml(data.brand)} · sid <code>${escapeHtml(data.plantId)}</code> · today ${escapeHtml(data.today)}</div>` +
                 '<div class="card-body small">';
             for (const p of data.probes || []) {
-                // Per-endpoint status badge based on HTTP code + body length
+                // Status badge — works with both old (result) and new
+                // (httpStatus + bodyLength) probe response shapes.
                 const code = p.httpStatus || 0;
                 let badge;
-                if (code === 200 && p.bodyLength > 0)
+                if (code === 200 && (p.bodyLength || 0) > 0)
                     badge = '<span class="badge bg-success">200</span>';
                 else if (code >= 200 && code < 300)
                     badge = `<span class="badge bg-warning text-dark">${code} empty</span>`;
@@ -273,6 +274,10 @@
                     badge = `<span class="badge bg-danger">${code}</span>`;
                 else if (p.error)
                     badge = '<span class="badge bg-danger">err</span>';
+                else if (p.result === 'ok')
+                    badge = '<span class="badge bg-success">ok</span>';
+                else if (p.result)
+                    badge = `<span class="badge bg-danger">${escapeHtml(p.result)}</span>`;
                 else
                     badge = '<span class="badge bg-secondary">?</span>';
 
@@ -280,17 +285,29 @@
                     ? `<small class="text-muted"> @@ ${escapeHtml(p.baseUrl.replace(/^https?:\/\//, ''))}</small>`
                     : '';
                 html +=
-                    `<details class="mb-2"><summary>${badge} <code>${escapeHtml(p.path)}</code>` +
-                    `${baseChip} <small class="text-muted">body=${escapeHtml(p.body)}` +
+                    `<details class="mb-2"><summary>${badge} <code>${escapeHtml(p.path || '?')}</code>` +
+                    `${baseChip} <small class="text-muted">body=${escapeHtml(p.body || '')}` +
                     (p.contentType ? ` · ct=${escapeHtml(p.contentType)}` : '') +
                     (typeof p.bodyLength === 'number' ? ` · ${p.bodyLength}B` : '') +
                     `</small></summary>`;
-                if (p.error) html += `<div class="text-danger mt-1">${escapeHtml(p.error)}</div>`;
+                // Always render SOMETHING inside the <details> so the
+                // disclosure isn't empty when the backend is older than
+                // expected and didn't include raw / error fields.  Fallback
+                // = full JSON of the probe entry.
+                let inner = '';
+                if (p.error) inner += `<div class="text-danger mt-1">${escapeHtml(p.error)}</div>`;
                 if (p.raw)
-                    html += `<pre class="bg-light p-2 mt-1" style="white-space:pre-wrap;max-height:300px;overflow:auto;font-size:.78rem">` +
-                            `${escapeHtml(p.raw)}</pre>`;
-                if (p.loginMsg) html += `<div class="text-muted mt-1">${escapeHtml(p.loginMsg)}</div>`;
-                html += '</details>';
+                    inner += `<pre class="bg-light p-2 mt-1" style="white-space:pre-wrap;max-height:300px;overflow:auto;font-size:.78rem">` +
+                             `${escapeHtml(p.raw)}</pre>`;
+                if (p.loginMsg) inner += `<div class="text-muted mt-1">${escapeHtml(p.loginMsg)}</div>`;
+                if (!inner) {
+                    // Backend gave us bare metadata; show the whole entry so
+                    // operator can still tell what's going on.
+                    inner = `<div class="text-muted small mt-1">No raw payload in response.  Backend may be older than UI.  Full entry:</div>` +
+                            `<pre class="bg-light p-2 mt-1" style="white-space:pre-wrap;max-height:300px;overflow:auto;font-size:.78rem">` +
+                            `${escapeHtml(JSON.stringify(p, null, 2))}</pre>`;
+                }
+                html += inner + '</details>';
             }
             html += '<div class="text-muted small mt-2">หา block <strong>200</strong> ที่ raw มี date+kWh — ส่ง raw มาให้ผมจะ map ให้ตรง</div>';
             html += '</div>';
