@@ -422,6 +422,14 @@
             if (!inner) inner = '<div class="text-muted small mt-1">(no additional detail)</div>';
             html += inner + '</details>';
         }
+        // Brand-specific extras (e.g. Huawei rate-gate cooldown).
+        if (data.extra && data.extra.huaweiRateGate) {
+            const g = data.extra.huaweiRateGate;
+            const cls = g.cooldownRemainingSeconds > 1 ? 'alert-warning' : 'alert-success';
+            html += `<div class="alert ${cls} mt-2 mb-0 small">` +
+                `<strong>Huawei rate gate:</strong> ${g.cooldownRemainingSeconds}s cooldown remaining. ` +
+                `<br>${escapeHtml(g.explanation)}</div>`;
+        }
         html += '<div class="text-muted small mt-2">' +
             'ถ้า TestConnection ผ่านแต่ GetHistorical ได้ 0 records — แสดงว่า adapter หา endpoint ผลิตย้อนหลังของ brand นี้ไม่เจอ. ' +
             'ส่ง Technical detail มาเพื่อ map endpoint ใหม่.' +

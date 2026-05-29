@@ -46,9 +46,21 @@ public static class HuaweiRateGate
         }
     }
 
+    /// <summary>
+    /// AsyncLocal bypass flag for admin diagnostic probes.  When set on the
+    /// current async flow, Decide() returns no-defer/no-wait so the probe
+    /// can actually exercise the API end-to-end instead of being deferred
+    /// the moment TestConnection burns through the 65s budget.
+    ///
+    /// MarkCalled / RecordRateLimitResponse still update the shared cooldown
+    /// — bypassing only short-circuits the gate's decision for THIS caller.
+    /// </summary>
+    public static readonly AsyncLocal<bool> DiagnosticBypass = new();
+
     /// <summary>Returns the (DeferOnLongWait, EffectiveWait) decision for a caller.</summary>
     public static (bool ShouldDefer, TimeSpan Wait) Decide(string accountKey)
     {
+        if (DiagnosticBypass.Value) return (false, TimeSpan.Zero);
         var wait = GetRequiredWait(accountKey);
         return wait > MaxAcceptableWait ? (true, wait) : (false, wait);
     }

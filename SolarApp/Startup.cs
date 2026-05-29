@@ -1266,13 +1266,17 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 technical = plant.TechnicalDetail,
             });
 
-            // ── Step 3-6: GetHistorical at 4 windows ──────────────────
+            // ── Step 3+: GetHistorical at 2 windows ───────────────────
+            // Two windows are enough: last30d shows recent fetch behaviour,
+            // currentYear shows whether the adapter can pull bulk history.
+            // We deliberately do NOT enable HuaweiRateGate.DiagnosticBypass
+            // here — bypassing would let the probe fire ~10 rapid month
+            // calls and earn an extended 407 cooldown that breaks the real
+            // background sync for normal users.
             var windows = new (string Label, DateTime From, DateTime To)[]
             {
-                ("currentMonth", new DateTime(today.Year, today.Month, 1), today),
-                ("last30d",      today.AddDays(-30), today),
-                ("last90d",      today.AddDays(-90), today),
-                ("currentYear",  new DateTime(today.Year, 1, 1), today),
+                ("last30d",     today.AddDays(-30), today),
+                ("currentYear", new DateTime(today.Year, 1, 1), today),
             };
             foreach (var (label, from, to) in windows)
             {
@@ -1304,13 +1308,42 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 });
             }
 
+            // ── Brand-specific diagnostic chips ──────────────────────
+            // Huawei's NBI throttle is enforced PER ACCOUNT process-wide,
+            // so a probe that ran a few seconds after TestConnection will
+            // see the historical calls defer (0ms response, 0 records).
+            // Surface the rate-gate state so the operator can tell apart
+            // "API returned no rows" from "rate gate hadn't released".
+            object? extra = null;
+            if (inst.InverterBrand == Models.Enums.InverterBrand.Huawei)
+            {
+                var key = Services.InverterApi.Common.HuaweiRateGate
+                    .AccountKey(creds.Username);
+                var waitSec = Services.InverterApi.Common.HuaweiRateGate
+                    .GetRequiredWait(key).TotalSeconds;
+                extra = new
+                {
+                    huaweiRateGate = new
+                    {
+                        cooldownRemainingSeconds = Math.Round(waitSec, 1),
+                        explanation = waitSec > 1
+                            ? $"Huawei NBI is rate-limited PER ACCOUNT to ~1 call/minute. " +
+                              $"GetHistorical calls in this probe were likely deferred " +
+                              $"because of {waitSec:0}s cooldown left.  Real Hangfire sync " +
+                              $"still works — it just spaces calls over time."
+                            : "Rate gate is clear — GetHistorical results above are real.",
+                    },
+                };
+            }
+
             return Results.Json(new
             {
                 brand = inst.InverterBrand.ToString(),
                 plantId = inst.PlantId,
                 today = today.ToString("yyyy-MM-dd"),
-                probeVersion = "v1-2026-05-29-generic",
+                probeVersion = "v2-2026-05-29-rategate-aware",
                 steps,
+                extra,
             });
         }).RequireAuthorization();
 
