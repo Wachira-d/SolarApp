@@ -483,15 +483,27 @@ public class SolisAdapter : IInverterApiAdapter
 
             var passwordMd5 = ComputeMd5(credentials.Password ?? "");
 
-            // Ordered from most-likely-to-work to fallback.
-            // /u/login = actual web portal login (no signature required)
-            // /api/... endpoints require HMAC-SHA1 signature (official API scheme,
-            // not usable for password login). We try them only as a last resort
-            // and expect 403 "Date can not be empty" — that's the signal to
-            // tell the user: switch to official API mode.
+            // Ordered list of plausible SolisCloud web-login paths.  The
+            // historical /u/login that earlier versions hard-coded now
+            // returns 405 (nginx — path stopped accepting POST) on the
+            // current portal.  We try a broader catalog mined from the
+            // SolisCloud SPA bundles + common Ginlong/IAM patterns; the
+            // first one that returns a 2xx JSON body wins.  This is
+            // BEST-EFFORT — when Solis ships another portal update any
+            // of these may flip to 404/405 and we'll fail back to the
+            // Official-API recommendation.
             var endpoints = new[]
             {
-                $"{WebBaseUrl}/u/login",        // Real web-portal login
+                $"{WebBaseUrl}/api/login",
+                $"{WebBaseUrl}/api/user/login",
+                $"{WebBaseUrl}/api/v1/user/login",
+                $"{WebBaseUrl}/api/sysuser/login",
+                $"{WebBaseUrl}/i18n-api/v1/sso/userLogin",
+                $"{WebBaseUrl}/i18n-api/v1/sso/login",
+                $"{WebBaseUrl}/IAM/v1/login",
+                $"{WebBaseUrl}/api/IAM/v1/login",
+                $"{WebBaseUrl}/api/u/login",
+                $"{WebBaseUrl}/u/login",                  // legacy (returns 405 now)
             };
 
             var passwordVariants = new[]
@@ -502,14 +514,24 @@ public class SolisAdapter : IInverterApiAdapter
 
             var fieldVariants = new (string UserField, string PwField)[]
             {
-                ("userInfo", "passWord"),       // soliscloud.com web form
-                ("username", "password"),       // some regional variants
+                ("userInfo", "passWord"),       // soliscloud.com legacy web form
+                ("username", "password"),       // generic
+                ("userName", "passWord"),       // camelCase variant
+                ("account",  "password"),       // newer IAM portal
+                ("email",    "password"),       // some regional portals
             };
 
             foreach (var endpoint in endpoints)
             {
+                // 405 / 404 from nginx means this PATH is wrong — no point
+                // burning 9 more body-shape attempts on the same dead URL.
+                // Skip immediately to the next endpoint on the first attempt
+                // that returns 404/405; only iterate body/password variants
+                // when the path at least answers semantically.
+                bool endpointDead = false;
                 foreach (var (pwLabel, pw) in passwordVariants)
                 {
+                    if (endpointDead) break;
                     foreach (var (userField, pwField) in fieldVariants)
                     {
                         var tag = $"{endpoint.Replace(WebBaseUrl, "")} [{userField}/{pwField}/{pwLabel}]";
@@ -525,6 +547,12 @@ public class SolisAdapter : IInverterApiAdapter
                             var body = await response.Content.ReadAsStringAsync();
                             var code = (int)response.StatusCode;
 
+                            if (code == 404 || code == 405)
+                            {
+                                attemptLog.Add($"{tag} → HTTP {code} (path dead, skipping endpoint)");
+                                endpointDead = true;
+                                break;
+                            }
                             if (!response.IsSuccessStatusCode)
                             {
                                 attemptLog.Add($"{tag} → HTTP {code}: {Truncate(body, 120)}");
