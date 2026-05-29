@@ -1205,31 +1205,33 @@ public class HoymilesAdapter : IInverterApiAdapter
         if (token == null) return records;
         var baseUrl = apiBase ?? DefaultApiBase;
 
-        // Hoymiles' V3 cloud has two endpoints that return daily kWh: one
-        // per-month (count_eq_by_day_of_month, the FusionSolar-style chart
-        // backing the calendar view) and one per-range (count_eq_by_day,
-        // covering arbitrary windows).  We try both because:
-        //   * count_eq_by_day_of_month is the most reliable — every JS
-        //     bundle calls it and the response is straight kWh values.
-        //   * count_eq_by_day exists on some tenants but not others.
-        //   * count_playback_power_by_day is W-scale data; we keep it as
-        //     last-resort fallback in case the others reject.
-        //
-        // Each endpoint can return one of three response shapes:
-        //   1. data: [ {date, eq}, ... ]                (flat list)
-        //   2. data: { list: [ {date, eq}, ... ] }      (paginated wrapper)
-        //   3. data: { x: ["d1","d2"], y: [v1, v2] }   (parallel arrays —
-        //      chart format).  We parse all three.
-
-        // ── Try 1: per-month chunked, count_eq_by_day_of_month ──────────
-        var cur = new DateTime(from.Year, from.Month, 1);
-        var stop = new DateTime(to.Year, to.Month, 1).AddMonths(1);
-        while (cur < stop)
+        // ── Try 0: PROTOBUF — count_eq_by_day_of_year ───────────────────
+        // Confirmed working path (probe 2026-05-29): this endpoint returns
+        // application/octet-stream encoded as a LineChart protobuf with one
+        // year of daily pv_eq values per call.  Walk each calendar year that
+        // overlaps the requested window.
+        for (int yr = from.Year; yr <= to.Year; yr++)
         {
-            var monthRecords = await FetchHoymilesMonthAsync(
-                token, baseUrl, credentials.PlantId!, cur.Year, cur.Month);
-            records.AddRange(monthRecords.Where(r => r.Timestamp >= from.Date && r.Timestamp <= to.Date));
-            cur = cur.AddMonths(1);
+            var yearRecords = await FetchHoymilesYearProtobufAsync(
+                token, baseUrl, credentials.PlantId!, yr);
+            records.AddRange(yearRecords.Where(r => r.Timestamp >= from.Date && r.Timestamp <= to.Date));
+        }
+
+        if (records.Count == 0)
+        {
+            // ── Try 1: per-month chunked, count_eq_by_day_of_month ──────
+            _logger.LogInformation(
+                "Hoymiles count_eq_by_day_of_year protobuf returned empty for {Sid}; falling back to per-month JSON",
+                credentials.PlantId);
+            var cur = new DateTime(from.Year, from.Month, 1);
+            var stop = new DateTime(to.Year, to.Month, 1).AddMonths(1);
+            while (cur < stop)
+            {
+                var monthRecords = await FetchHoymilesMonthAsync(
+                    token, baseUrl, credentials.PlantId!, cur.Year, cur.Month);
+                records.AddRange(monthRecords.Where(r => r.Timestamp >= from.Date && r.Timestamp <= to.Date));
+                cur = cur.AddMonths(1);
+            }
         }
 
         if (records.Count == 0)
@@ -1274,6 +1276,98 @@ public class HoymilesAdapter : IInverterApiAdapter
             .Select(g => g.OrderByDescending(r => r.EnergyGenerationKwh).First())
             .OrderBy(r => r.Timestamp)
             .ToList();
+    }
+
+    /// <summary>
+    /// Fetches one calendar year of daily kWh from Hoymiles via the
+    /// PROTOBUF endpoint pvm-data/api/0/station/data/count_eq_by_day_of_year.
+    ///
+    /// Body shape (verified by probe 2026-05-29):
+    ///     { sid: <num>, year: "<yyyy>" }                — sid as number, year as string
+    /// Response: Content-Type application/octet-stream containing a
+    ///     LineChart protobuf with:
+    ///         x_axis = [ "yyyy-MM-dd", ... ]
+    ///         series = [ { name="pv_eq", values=[float, ...] },
+    ///                    { name="consumption_eq", ... },  // ignored
+    ///                    { name="self_eq", ... } ]        // ignored
+    /// We pick pv_eq as production kWh per day.
+    ///
+    /// Uses raw HttpClient (NOT CallApiAsync) because CallApiAsync assumes
+    /// JSON and would discard the binary body.
+    /// </summary>
+    private async Task<List<EnergyRecord>> FetchHoymilesYearProtobufAsync(
+        string token, string baseUrl, string sid, int year)
+    {
+        var records = new List<EnergyRecord>();
+        var url = $"{baseUrl.TrimEnd('/')}/pvm-data/api/0/station/data/count_eq_by_day_of_year";
+        object sidArg = long.TryParse(sid, out var sidL) ? sidL : (object)sid;
+
+        try
+        {
+            var client = CreateClient();
+            var req = BuildHoymilesRequest(HttpMethod.Post, url,
+                new { sid = sidArg, year = year.ToString() });
+            req.Headers.TryAddWithoutValidation("Authorization", token);
+            // The protobuf endpoint sends application/octet-stream; tell the
+            // server we accept it as well as JSON (some tiers fall back to
+            // JSON-only when octet-stream isn't advertised).
+            req.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/octet-stream"));
+
+            var resp = await client.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: HTTP {Status}",
+                    sid, year, (int)resp.StatusCode);
+                return records;
+            }
+
+            var bytes = await resp.Content.ReadAsByteArrayAsync();
+            if (bytes.Length == 0)
+            {
+                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: empty body", sid, year);
+                return records;
+            }
+
+            var chart = HoymilesProtobufDecoder.Decode(bytes);
+            if (chart == null || chart.Labels.Count == 0)
+            {
+                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: protobuf decode produced no data (len={Len})",
+                    sid, year, bytes.Length);
+                return records;
+            }
+
+            // Prefer pv_eq; fall back to any series carrying production-like
+            // values if naming differs across firmware revisions.
+            if (!chart.Series.TryGetValue("pv_eq", out var values))
+            {
+                foreach (var key in new[] { "generation_eq", "gen_eq", "eq", "energy" })
+                    if (chart.Series.TryGetValue(key, out values)) break;
+            }
+            if (values == null || values.Count == 0)
+            {
+                _logger.LogDebug("Hoymiles count_eq_by_day_of_year {Sid} {Year}: no pv_eq series (keys=[{Keys}])",
+                    sid, year, string.Join(",", chart.Series.Keys));
+                return records;
+            }
+
+            var n = Math.Min(chart.Labels.Count, values.Count);
+            for (int i = 0; i < n; i++)
+            {
+                if (!DateTime.TryParse(chart.Labels[i], out var date)) continue;
+                var v = (decimal)values[i];
+                if (v < 0m) continue;
+                if (v > 10000m) v /= 1000m; // Wh → kWh sanity
+                records.Add(new EnergyRecord { Timestamp = date.Date, EnergyGenerationKwh = v });
+            }
+            _logger.LogInformation(
+                "Hoymiles count_eq_by_day_of_year {Sid} {Year}: decoded {Count} day rows from protobuf",
+                sid, year, records.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Hoymiles count_eq_by_day_of_year protobuf failed for {Sid} {Year}", sid, year);
+        }
+        return records;
     }
 
     /// <summary>

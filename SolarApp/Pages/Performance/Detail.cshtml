@@ -257,7 +257,7 @@
                 box.innerHTML = `<div class="card-body text-danger">${escapeHtml(data.error || ('HTTP ' + r.status))}</div>`;
                 return;
             }
-            const EXPECTED_VERSION = 'v3-2026-05-29-crawler';
+            const EXPECTED_VERSION = 'v4-2026-05-29-protobuf';
             const isStale = (data.probeVersion || 'v1-legacy') !== EXPECTED_VERSION;
             let html =
                 '<div class="card-header bg-warning bg-opacity-25"><strong>Hoymiles endpoint probe</strong>' +
