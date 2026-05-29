@@ -1030,73 +1030,170 @@ public class HoymilesAdapter : IInverterApiAdapter
 
         var sid = credentials.PlantId;
         long sidLong = long.TryParse(sid, out var slong) ? slong : 0;
-        object sidObj = sidLong > 0 ? sidLong : (object)sid!;
+        object sidNum = sidLong > 0 ? sidLong : (object)sid!;
+        object sidStr = sid!;
+        var monthDate = monthStart;                              // "yyyy-MM-01"
+        var yearStr   = year > 0 ? year.ToString() : DateTime.UtcNow.Year.ToString();
+        var monthNum  = DateTime.TryParse(monthStart, out var md) ? md.Month : DateTime.UtcNow.Month;
 
-        var endpointsToProbe = new (string Path, string Body, object Payload)[]
+        // ── Path catalog ─────────────────────────────────────────────────
+        // Every endpoint mined from the production S-Miles JS bundle whose
+        // name suggests "daily energy / total / report" content.  The
+        // crawler tries each with multiple body shapes — we keep what
+        // returns JSON with date-like keys.
+        var paths = new[]
         {
-            ("pvm-data/api/0/station/data/count_eq_by_day_of_month", "sid+date+pb_ver(int sid)",
-                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
-            ("pvm-data/api/0/station/data/count_eq_by_day_of_month", "sid string+date",
-                new { sid = sid, date = monthStart }),
-            ("pvm-data/api/0/station/data3/count_eq_by_day_of_month", "sid+date+pb_ver",
-                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
-            ("pvm-data/api/0/station/data/count_eq_by_day_of_year",  "sid+date+pb_ver",
-                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
-            ("pvm-data/api/0/station/data3/count_eq_by_day_of_year", "sid+date+pb_ver",
-                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
-            ("pvm-data/api/0/station/data/count_eq_by_month_of_year", "sid+date+pb_ver",
-                new { sid = sidObj, date = monthStart, pb_ver = 1 }),
-            ("pvm-report/api/0/station/report/count_eq_by_station",  "sid+date",
-                new { sid = sidObj, date = monthStart }),
-            ("pvm-report/api/0/station/es_report/count_eq_by_station", "sid+date",
-                new { sid = sidObj, date = monthStart }),
-            // Try station/find too — known-working endpoint, confirms auth + base URL work
-            ("pvm/api/0/station/find",                                "id",
-                new { id = sidObj }),
+            // pvm-data data/ family
+            "pvm-data/api/0/station/data/count_eq_by_day_of_month",
+            "pvm-data/api/0/station/data/count_eq_by_day_of_year",
+            "pvm-data/api/0/station/data/count_eq_by_day",
+            "pvm-data/api/0/station/data/count_eq_by_month_of_year",
+            "pvm-data/api/0/station/data/count_eq_by_total_of_year",
+            // pvm-data data3/ family (newer firmware)
+            "pvm-data/api/0/station/data3/count_eq_by_day_of_month",
+            "pvm-data/api/0/station/data3/count_eq_by_day_of_year",
+            "pvm-data/api/0/station/data3/count_eq_by_day",
+            "pvm-data/api/0/station/data3/count_eq_by_month_of_year",
+            "pvm-data/api/0/station/data3/count_eq_by_total_of_year",
+            // pvm-data data_fd (fully-distributed)
+            "pvm-data/api/0/station/data_fd/eq_month_g_c",
+            "pvm-data/api/0/station/data_fd/eq_year_g_c",
+            "pvm-data/api/0/station/data_fd/eq_total_g_c",
+            // pvm-data data_sd (self-distributed)
+            "pvm-data/api/0/station/data_sd/eq_day_g_c",
+            "pvm-data/api/0/station/data_sd/eq_month_g_c",
+            "pvm-data/api/0/station/data_sd/eq_year_g_c",
+            "pvm-data/api/0/station/data_sd/eq_total_g_c",
+            // pvm-report family
+            "pvm-report/api/0/station/report/count_eq_by_station",
+            "pvm-report/api/0/station/report/select_eq_by_station",
+            "pvm-report/api/0/station/report/select_power_by_station",
+            "pvm-report/api/0/station/es_report/count_eq_by_station",
+            "pvm-report/api/0/station/es_report/select_eq_by_station",
+            // lcm-data alternates
+            "lcm-data/api/0/station/data/count_eq_by_day_of_month",
+            "lcm-data/api/0/station/data/count_eq_by_day_of_year",
+            "lcm-data/api/0/station/data/count_eq_by_day",
+            "lcm-data/api/0/station/report/count_eq_g_c",
+            "lcm-data/api/0/station/report/eq_p_c",
         };
 
-        // Also try BOTH base URLs in case the right one differs from the
-        // auto-detected one.
-        var basesToTry = new[] { baseUrl };
-        if (!baseUrl.Contains("global.hoymiles.com"))
-            basesToTry = basesToTry.Append("https://global.hoymiles.com/platform/api/gateway").ToArray();
-
-        foreach (var b in basesToTry)
-        foreach (var (path, bodyDesc, payload) in endpointsToProbe)
+        // ── Body-shape catalog ───────────────────────────────────────────
+        // Multiple combinations because Hoymiles' V3 cloud is inconsistent
+        // about which fields each endpoint expects.  The crawler walks
+        // every (path × shape) combination; an endpoint counts as "match"
+        // when it returns 200 + a JSON body that mentions a date-like
+        // field and a kWh-like number.
+        var bodies = new (string Desc, object Payload)[]
         {
-            var url = $"{b}/{path}";
-            try
+            ("sid(num)+date+pb_ver", new { sid = sidNum, date = monthDate, pb_ver = 1 }),
+            ("sid(str)+date",         new { sid = sidStr, date = monthDate }),
+            ("sid(num)+date",         new { sid = sidNum, date = monthDate }),
+            ("sid(num)+year(str)",    new { sid = sidNum, year = yearStr }),
+            ("sid(num)+year(int)",    new { sid = sidNum, year }),
+            ("sid(num)+year+month",   new { sid = sidNum, year, month = monthNum }),
+            ("sid only",              new { sid = sidNum }),
+            ("id(num)",               new { id  = sidNum }),
+        };
+
+        var basesToTry = new List<string> { baseUrl };
+        if (!baseUrl.Contains("global.hoymiles.com"))
+            basesToTry.Add("https://global.hoymiles.com/platform/api/gateway");
+
+        // Always probe station/find first as a canary so the operator can
+        // tell at a glance whether auth + base URL are good.
+        await ProbeOneAsync(basesToTry[0], "pvm/api/0/station/find", "id(num)",
+            new { id = sidNum }, token, results, isCanary: true);
+
+        // ── Crawl ────────────────────────────────────────────────────────
+        // Bounded by paths × bodies × bases — capped at a few hundred so
+        // we don't hammer the vendor.  Stop early per-path once any body
+        // shape produces a JSON-looking 200 response (still records the
+        // attempt for forensics).
+        foreach (var b in basesToTry)
+        foreach (var path in paths)
+        {
+            bool matched = false;
+            foreach (var (desc, payload) in bodies)
             {
-                var client = CreateClient();
-                var req = BuildHoymilesRequest(HttpMethod.Post, url, payload);
-                req.Headers.TryAddWithoutValidation("Authorization", token);
-                var resp = await client.SendAsync(req);
-                var body = await resp.Content.ReadAsStringAsync();
-                var contentType = resp.Content.Headers.ContentType?.ToString() ?? "(none)";
-                var preview = body.Length > 1500 ? body[..1500] + "…(truncated)" : body;
-                results.Add(new
-                {
-                    baseUrl = b,
-                    path,
-                    body = bodyDesc,
-                    httpStatus = (int)resp.StatusCode,
-                    contentType,
-                    bodyLength = body.Length,
-                    raw = preview,
-                });
+                var entry = await ProbeOneAsync(b, path, desc, payload, token, results);
+                if (entry.LooksLikeMatch) { matched = true; break; }
             }
-            catch (Exception ex)
-            {
-                results.Add(new
-                {
-                    baseUrl = b,
-                    path,
-                    body = bodyDesc,
-                    error = $"{ex.GetType().Name}: {ex.Message}",
-                });
-            }
+            // If nothing matched, also surface the last try so the operator
+            // sees the actual server response, not silence.  (ProbeOneAsync
+            // already added each attempt to results — nothing more to do.)
+            _ = matched;
         }
         return results;
+    }
+
+    /// <summary>
+    /// One-shot endpoint probe.  Issues a raw HTTP POST with the same
+    /// header set CallApiAsync uses, appends a verbose entry to results,
+    /// and returns a flag telling the crawler whether to short-circuit
+    /// (200 + body looks like JSON listing dates + kWh).
+    /// </summary>
+    private async Task<(bool LooksLikeMatch, bool Is2xx)> ProbeOneAsync(
+        string baseUrl, string path, string bodyDesc, object payload,
+        string token, List<object> results, bool isCanary = false)
+    {
+        var url = $"{baseUrl}/{path}";
+        try
+        {
+            var client = CreateClient();
+            var req = BuildHoymilesRequest(HttpMethod.Post, url, payload);
+            req.Headers.TryAddWithoutValidation("Authorization", token);
+            var resp = await client.SendAsync(req);
+            var body = await resp.Content.ReadAsStringAsync();
+            var contentType = resp.Content.Headers.ContentType?.ToString() ?? "(none)";
+            var preview = body.Length > 1500 ? body[..1500] + "…(truncated)" : body;
+            var matched = LooksLikeHistoricalMatch(body);
+            results.Add(new
+            {
+                baseUrl,
+                path,
+                body = bodyDesc,
+                httpStatus = (int)resp.StatusCode,
+                contentType,
+                bodyLength = body.Length,
+                raw = preview,
+                match = matched,
+                canary = isCanary,
+            });
+            return (matched, resp.IsSuccessStatusCode);
+        }
+        catch (Exception ex)
+        {
+            results.Add(new
+            {
+                baseUrl,
+                path,
+                body = bodyDesc,
+                error = $"{ex.GetType().Name}: {ex.Message}",
+                canary = isCanary,
+            });
+            return (false, false);
+        }
+    }
+
+    /// <summary>
+    /// Cheap heuristic: does the response body look like a JSON listing
+    /// of daily kWh? Used by the crawler to short-circuit further body-
+    /// shape attempts once we find one that works.  False positives are
+    /// fine — operator inspects the raw payload anyway.
+    /// </summary>
+    private static bool LooksLikeHistoricalMatch(string body)
+    {
+        if (string.IsNullOrEmpty(body) || body.Length < 20) return false;
+        if (body[0] != '{' && body[0] != '[') return false;            // not JSON
+        // status="0" + at least one date-ish + one kWh-ish field name in
+        // the same payload is a strong signal.
+        var hasStatusOk = body.Contains("\"status\":\"0\"") || body.Contains("\"status\":0");
+        var hasDateField = body.Contains("\"date\"") || body.Contains("\"time\"") || body.Contains("\"day\"");
+        var hasKwhField  = body.Contains("\"eq\"") || body.Contains("\"energy\"")
+                        || body.Contains("\"day_eq\"") || body.Contains("\"value\"")
+                        || body.Contains("\"power\"") || body.Contains("\"y\":");
+        return hasStatusOk && hasDateField && hasKwhField;
     }
 
     public async Task<List<EnergyRecord>> GetHistoricalDataAsync(

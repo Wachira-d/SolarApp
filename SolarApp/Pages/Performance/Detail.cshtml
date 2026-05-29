@@ -257,7 +257,7 @@
                 box.innerHTML = `<div class="card-body text-danger">${escapeHtml(data.error || ('HTTP ' + r.status))}</div>`;
                 return;
             }
-            const EXPECTED_VERSION = 'v2-2026-05-29-raw-http';
+            const EXPECTED_VERSION = 'v3-2026-05-29-crawler';
             const isStale = (data.probeVersion || 'v1-legacy') !== EXPECTED_VERSION;
             let html =
                 '<div class="card-header bg-warning bg-opacity-25"><strong>Hoymiles endpoint probe</strong>' +
@@ -281,12 +281,25 @@
                     new Date().toISOString() + ')' +
                     '</div>';
             }
-            for (const p of data.probes || []) {
+            // Highlight likely matches at the top.  v3 backend tags each
+            // probe entry with .match=true when the body looks like a
+            // JSON listing of dates + kWh.
+            const sorted = (data.probes || []).slice().sort((a, b) => {
+                const ma = a.match ? 1 : 0;
+                const mb = b.match ? 1 : 0;
+                if (ma !== mb) return mb - ma;
+                const ca = a.canary ? 1 : 0;
+                const cb = b.canary ? 1 : 0;
+                return cb - ca;
+            });
+            for (const p of sorted) {
                 // Status badge — works with both old (result) and new
                 // (httpStatus + bodyLength) probe response shapes.
                 const code = p.httpStatus || 0;
                 let badge;
-                if (code === 200 && (p.bodyLength || 0) > 0)
+                if (p.match)
+                    badge = '<span class="badge bg-success">★ match</span>';
+                else if (code === 200 && (p.bodyLength || 0) > 0)
                     badge = '<span class="badge bg-success">200</span>';
                 else if (code >= 200 && code < 300)
                     badge = `<span class="badge bg-warning text-dark">${code} empty</span>`;
@@ -300,6 +313,7 @@
                     badge = `<span class="badge bg-danger">${escapeHtml(p.result)}</span>`;
                 else
                     badge = '<span class="badge bg-secondary">?</span>';
+                if (p.canary) badge = '<span class="badge bg-info text-dark me-1">canary</span>' + badge;
 
                 const baseChip = p.baseUrl
                     ? `<small class="text-muted"> @@ ${escapeHtml(p.baseUrl.replace(/^https?:\/\//, ''))}</small>`
