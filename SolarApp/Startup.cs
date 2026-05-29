@@ -1186,6 +1186,12 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 brand = "Hoymiles",
                 plantId = inst.PlantId,
                 today = today.ToString("yyyy-MM-dd"),
+                // Version stamp — bump this string whenever the probe
+                // payload shape changes so the operator can tell at a
+                // glance whether the running backend matches the latest
+                // UI expectation.  When the UI sees a value other than
+                // its own expectation, it tells the operator to redeploy.
+                probeVersion = "v2-2026-05-29-raw-http",
                 probes,
             });
         }).RequireAuthorization();

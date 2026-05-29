@@ -257,10 +257,30 @@
                 box.innerHTML = `<div class="card-body text-danger">${escapeHtml(data.error || ('HTTP ' + r.status))}</div>`;
                 return;
             }
+            const EXPECTED_VERSION = 'v2-2026-05-29-raw-http';
+            const isStale = (data.probeVersion || 'v1-legacy') !== EXPECTED_VERSION;
             let html =
                 '<div class="card-header bg-warning bg-opacity-25"><strong>Hoymiles endpoint probe</strong>' +
                 ` — ${escapeHtml(data.brand)} · sid <code>${escapeHtml(data.plantId)}</code> · today ${escapeHtml(data.today)}</div>` +
                 '<div class="card-body small">';
+            if (isStale) {
+                html +=
+                    '<div class="alert alert-danger mb-3">' +
+                    '<strong><i class="bi bi-exclamation-triangle-fill"></i> ' +
+                    `Backend probe version <code>${escapeHtml(data.probeVersion || 'v1-legacy')}</code> ` +
+                    `does not match expected <code>${EXPECTED_VERSION}</code>.</strong><br>` +
+                    'The running app on the server is older than the source tree.  The newer probe ' +
+                    'returns httpStatus, contentType, bodyLength, and raw response for each endpoint — ' +
+                    'this older one only returns a string "result".<br><br>' +
+                    '<strong>เพื่อให้ probe ทำงานเต็ม:</strong>' +
+                    '<pre class="bg-light p-2 mt-2 small">' +
+                    'git pull origin claude/fix-bugs-Vb7Ld\n' +
+                    'dotnet publish SolarApp/SolarApp.csproj -c Release -o &lt;publish-path&gt;\n' +
+                    'iisreset                 # หรือ recycle App Pool / restart Kestrel</pre>' +
+                    'ดู <code>SolarApp.dll</code> mtime ใน publish folder ว่าใหม่กว่าตอนนี้ (' +
+                    new Date().toISOString() + ')' +
+                    '</div>';
+            }
             for (const p of data.probes || []) {
                 // Status badge — works with both old (result) and new
                 // (httpStatus + bodyLength) probe response shapes.
