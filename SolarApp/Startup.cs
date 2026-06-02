@@ -903,6 +903,60 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 log($"DB: Schema stage '{stageName}' FAILED: {ex.Message}");
             }
         }
+
+        // ── Per-column verification + emergency retry ────────────────
+        // Even when the batched AlterColumns stage reports success, a
+        // single malformed ALTER in the middle of the batch can quietly
+        // abort the rest on some SQL Server configurations.  Walk the
+        // upgrades list AFTER the batch and verify each column actually
+        // exists; if any are missing, run that ALTER as its own statement.
+        //
+        // This is the safety net for the HasBattery dashboard crash:
+        // the model expects the column, EF SELECTs it, and a missing
+        // column blows up every page that queries Installations.
+        var retried = new List<string>();
+        var stillMissing = new List<string>();
+        foreach (var (table, column, sql) in upgrades)
+        {
+            string? exists = null;
+            try
+            {
+                #pragma warning disable EF1002
+                exists = (await context.Database
+                    .SqlQueryRaw<string>(
+                        $"SELECT TOP 1 CAST(1 AS NVARCHAR(10)) AS Value " +
+                        $"FROM sys.columns WHERE Name = N'{column}' " +
+                        $"AND Object_ID = Object_ID(N'[{table}]')")
+                    .ToListAsync()).FirstOrDefault();
+                #pragma warning restore EF1002
+            }
+            catch
+            {
+                // Table doesn't exist yet (e.g. WorkOrders pre-create) — skip.
+                continue;
+            }
+            if (exists != null) continue;
+
+            try
+            {
+                #pragma warning disable EF1002
+                await context.Database.ExecuteSqlRawAsync(sql);
+                #pragma warning restore EF1002
+                retried.Add($"{table}.{column}");
+                log($"DB: Retried ALTER for missing column {table}.{column} — OK");
+            }
+            catch (Exception ex)
+            {
+                stillMissing.Add($"{table}.{column}: {ex.Message}");
+                log($"DB: Retry of ALTER {table}.{column} FAILED: {ex.Message}");
+            }
+        }
+        if (retried.Count > 0)
+            log($"DB: Recovered {retried.Count} missing column(s): {string.Join(", ", retried)}");
+        if (stillMissing.Count > 0)
+            log($"DB: {stillMissing.Count} column(s) STILL missing after retry — pages that depend on them will throw. " +
+                $"Manual SQL: {string.Join(" | ", stillMissing)}");
+
         totalSw.Stop();
 
         if (failedStages.Count == 0)
