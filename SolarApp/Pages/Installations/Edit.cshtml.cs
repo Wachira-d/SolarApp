@@ -144,6 +144,116 @@ public class EditModel : PageModel
         return Page();
     }
 
+    /// <summary>
+    /// Hard-delete this installation and ALL its child rows (energy data,
+    /// alerts, maintenance, work orders, equipment, documents, tariffs).
+    ///
+    /// Three independent guards before the cascade runs:
+    ///   1. Caller is Admin (Partners can edit but never delete — too
+    ///      easy for a partner-portal compromise to wipe a customer).
+    ///   2. <paramref name="confirmText"/> matches the verbatim Thai
+    ///      phrase the operator typed in the modal.
+    ///   3. <paramref name="captchaAnswer"/> equals the sum of the two
+    ///      digits the modal showed.  The page handles the captcha
+    ///      generation client-side AND posts the operands back, so the
+    ///      server validates the sum against what it was actually shown.
+    ///
+    /// Failure of any guard returns to the Edit page with an error so the
+    /// operator can fix it; only when all three pass do we commit.
+    /// Every deletion (successful or refused) goes into AuditLog with the
+    /// caller's UserId so we can answer "who deleted site X?" forever.
+    /// </summary>
+    public async Task<IActionResult> OnPostDeleteAsync(
+        int id, string? confirmText, int? captchaAnswer, int? captchaA, int? captchaB)
+    {
+        var installation = await _installationService.GetByIdAsync(id);
+        if (installation == null) return NotFound();
+
+        var user = await _userManager.GetUserAsync(User);
+        var isAdmin = user != null && await _userManager.IsInRoleAsync(user, "Admin");
+        if (!isAdmin)
+        {
+            _logger.LogWarning(
+                "Installation {Id} delete refused — caller {UserId} is not Admin",
+                id, user?.Id);
+            TempData["DeleteError"] = "เฉพาะ Admin เท่านั้นที่ลบไซต์ได้.";
+            return RedirectToPage(new { id });
+        }
+
+        const string ExpectedConfirm = "จะลบจริงๆแล้วนะ";
+        if (string.IsNullOrWhiteSpace(confirmText) || confirmText.Trim() != ExpectedConfirm)
+        {
+            TempData["DeleteError"] = $"พิมพ์ข้อความยืนยันให้ตรง: \"{ExpectedConfirm}\"";
+            return RedirectToPage(new { id });
+        }
+
+        if (!captchaA.HasValue || !captchaB.HasValue || !captchaAnswer.HasValue
+            || captchaAnswer.Value != captchaA.Value + captchaB.Value)
+        {
+            TempData["DeleteError"] = "ตอบโจทย์ตัวเลขให้ถูกก่อน (ผลบวกไม่ตรง)";
+            return RedirectToPage(new { id });
+        }
+
+        // Snapshot the data we want to keep in the audit log BEFORE the
+        // installation row vanishes — otherwise the FK would just say
+        // "Installation #42" with no clue what it actually was.
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            installation.Id,
+            installation.SiteCode,
+            installation.SiteName,
+            installation.CustomerId,
+            installation.PartnerId,
+            installation.InverterBrand,
+            installation.SystemCapacityKw,
+            installation.HasBattery,
+            installation.CreatedAt,
+        });
+
+        try
+        {
+            await _installationService.DeleteAsync(id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Installation {Id} delete failed during cascade — see exception. " +
+                "Audit log will record the FAILED attempt.", id);
+            _context.AuditLogs.Add(new SolarApp.Models.AuditLog
+            {
+                UserId = user?.Id,
+                UserName = user?.UserName,
+                Action = "DeleteInstallation:FAILED",
+                EntityType = nameof(Installation),
+                EntityId = id.ToString(),
+                OldValues = snapshot,
+                NewValues = ex.Message,
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            });
+            await _context.SaveChangesAsync();
+            TempData["DeleteError"] = $"ลบไม่สำเร็จ: {ex.Message}";
+            return RedirectToPage(new { id });
+        }
+
+        _context.AuditLogs.Add(new SolarApp.Models.AuditLog
+        {
+            UserId = user?.Id,
+            UserName = user?.UserName,
+            Action = "DeleteInstallation",
+            EntityType = nameof(Installation),
+            EntityId = id.ToString(),
+            OldValues = snapshot,
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+        });
+        await _context.SaveChangesAsync();
+
+        _logger.LogWarning(
+            "Installation {Id} ({Site}) hard-deleted by {UserId}",
+            id, installation.SiteName, user?.Id);
+        TempData["FlashSuccess"] = $"ลบไซต์ \"{installation.SiteName}\" เรียบร้อยแล้ว.";
+        return RedirectToPage("Index");
+    }
+
     public async Task<IActionResult> OnPostAsync(int id)
     {
         var installation = await _installationService.GetByIdAsync(id);

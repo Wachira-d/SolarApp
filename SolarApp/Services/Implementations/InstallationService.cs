@@ -107,12 +107,52 @@ public class InstallationService : IInstallationService
 
     public async Task DeleteAsync(int id)
     {
-        var installation = await _context.Installations.FindAsync(id);
-        if (installation != null)
-        {
-            _context.Installations.Remove(installation);
-            await _context.SaveChangesAsync();
-        }
+        // Hard delete + cascade.  Every Installation FK in the DbContext is
+        // configured with DeleteBehavior.Restrict (intentional — we never
+        // want EF to silently nuke historical energy data on a routine
+        // .Remove call).  So this method removes the dependent rows by
+        // hand, in FK order, inside a transaction so a mid-delete failure
+        // doesn't leave half-deleted state.
+        //
+        // The only FK that's already Cascade is AlertRule.InstallationId,
+        // so we don't have to touch that table — EF deletes those rules
+        // automatically when the Installation row is removed.
+        //
+        // Callers are expected to do permission + 2-step confirmation
+        // upstream; this method just executes.
+        var installation = await _context.Installations
+            .FirstOrDefaultAsync(i => i.Id == id);
+        if (installation == null) return;
+
+        await using var tx = await _context.Database.BeginTransactionAsync();
+
+        // 1) Time-series + log data (largest tables first so we fail fast
+        //    if SQL Server rejects the bulk delete — typically permissions).
+        await _context.EnergyData.Where(e => e.InstallationId == id).ExecuteDeleteAsync();
+        await _context.InverterApiLogs.Where(l => l.InstallationId == id).ExecuteDeleteAsync();
+
+        // 2) Per-site operational records.  WorkOrders may reference an
+        //    Equipment row (cascade), so delete WO before Equipment.
+        await _context.WorkOrders.Where(w => w.InstallationId == id).ExecuteDeleteAsync();
+        await _context.SystemAlerts.Where(a => a.InstallationId == id).ExecuteDeleteAsync();
+        await _context.ServiceTickets.Where(t => t.InstallationId == id).ExecuteDeleteAsync();
+        await _context.MaintenanceRecords.Where(m => m.InstallationId == id).ExecuteDeleteAsync();
+        await _context.CleaningRecords.Where(c => c.InstallationId == id).ExecuteDeleteAsync();
+        await _context.WarrantyRecords.Where(w => w.InstallationId == id).ExecuteDeleteAsync();
+        await _context.InstallationDocuments.Where(d => d.InstallationId == id).ExecuteDeleteAsync();
+        await _context.ElectricityTariffs.Where(t => t.InstallationId == id).ExecuteDeleteAsync();
+
+        // 3) Equipment last among the dependents — other tables may FK
+        //    into it (WarrantyRecord.EquipmentId, etc.) and they've just
+        //    been cleared above.
+        await _context.Equipment.Where(e => e.InstallationId == id).ExecuteDeleteAsync();
+
+        // 4) Finally the Installation row itself.  AlertRule.InstallationId
+        //    is Cascade so SQL Server clears those automatically.
+        _context.Installations.Remove(installation);
+        await _context.SaveChangesAsync();
+
+        await tx.CommitAsync();
     }
 
     public async Task UpdateCleaningAsync(int installationId, DateTime cleaningDate)

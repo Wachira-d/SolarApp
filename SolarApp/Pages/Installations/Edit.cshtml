@@ -595,6 +595,103 @@
                         <button type="submit" class="btn btn-warning">Save Changes</button>
                     </div>
                 </form>
+
+                @* ─── Danger Zone — Admin-only hard delete with 2-step verify ─── *@
+                @if (User.IsInRole("Admin"))
+                {
+                    @if (TempData["DeleteError"] is string deleteError)
+                    {
+                        <div class="alert alert-danger mt-4" role="alert">
+                            <strong>ลบไม่สำเร็จ:</strong> @deleteError
+                        </div>
+                    }
+                    <hr class="mt-5" id="danger-zone" />
+                    <div class="card border-danger mt-4">
+                        <div class="card-header bg-danger text-white">
+                            <strong><i class="bi bi-exclamation-triangle-fill"></i> Danger Zone</strong>
+                        </div>
+                        <div class="card-body">
+                            <h6 class="card-title text-danger">ลบไซต์งานนี้ถาวร</h6>
+                            <p class="card-text small text-muted mb-3">
+                                การลบจะ <strong>ลบทุกข้อมูลของไซต์นี้ทันที</strong> — energy data ย้อนหลัง,
+                                alerts, work orders, maintenance records, equipment, documents, tariffs
+                                ลบหมด ไม่มี soft-delete กู้คืนไม่ได้.
+                                <br>
+                                สำหรับ Admin เท่านั้น และต้องยืนยัน 2 ขั้นตอน.
+                            </p>
+                            <button type="button" class="btn btn-outline-danger"
+                                    data-bs-toggle="modal" data-bs-target="#deleteInstallationModal">
+                                <i class="bi bi-trash"></i> ลบไซต์งานนี้
+                            </button>
+                        </div>
+                    </div>
+
+                    @* ─── Delete confirm modal ─── *@
+                    <div class="modal fade" id="deleteInstallationModal" tabindex="-1"
+                         aria-labelledby="deleteInstallationLabel" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content border-danger">
+                                <form method="post" asp-page-handler="Delete" asp-route-id="@Model.Input.Id">
+                                    <div class="modal-header bg-danger text-white">
+                                        <h5 class="modal-title" id="deleteInstallationLabel">
+                                            <i class="bi bi-exclamation-triangle-fill"></i>
+                                            ยืนยันการลบไซต์ "@Model.Input.SiteName"
+                                        </h5>
+                                        <button type="button" class="btn-close btn-close-white"
+                                                data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <div class="modal-body">
+                                        <div class="alert alert-warning small">
+                                            จะลบไซต์ <strong>@Model.Input.SiteName</strong>
+                                            และข้อมูลทั้งหมดของไซต์นี้ (energy data, alerts,
+                                            equipment, documents) อย่างถาวร — ไม่สามารถกู้คืนได้.
+                                        </div>
+
+                                        @* Step 1: math captcha — server validates A + B = answer.
+                                           Random pair regenerated each modal open via inline JS. *@
+                                        <div class="mb-3">
+                                            <label class="form-label fw-semibold">
+                                                ขั้นที่ 1: บวกเลขให้ถูกก่อน
+                                            </label>
+                                            <div class="input-group">
+                                                <span class="input-group-text">
+                                                    <span id="captchaA-display">3</span> + <span id="captchaB-display">5</span> =
+                                                </span>
+                                                <input type="number" class="form-control"
+                                                       id="captchaAnswerInput" name="captchaAnswer"
+                                                       placeholder="ใส่คำตอบ" required
+                                                       autocomplete="off" />
+                                            </div>
+                                            <input type="hidden" id="captchaA-hidden" name="captchaA" value="3" />
+                                            <input type="hidden" id="captchaB-hidden" name="captchaB" value="5" />
+                                            <small id="captchaFeedback" class="text-muted">รอใส่คำตอบ…</small>
+                                        </div>
+
+                                        @* Step 2: type the Thai confirm phrase verbatim. *@
+                                        <div class="mb-2">
+                                            <label class="form-label fw-semibold">
+                                                ขั้นที่ 2: พิมพ์ข้อความนี้ให้ตรง
+                                            </label>
+                                            <div class="alert alert-secondary py-1 mb-2 font-monospace small">
+                                                จะลบจริงๆแล้วนะ
+                                            </div>
+                                            <input type="text" class="form-control" id="confirmTextInput"
+                                                   name="confirmText" placeholder="พิมพ์ที่นี่"
+                                                   autocomplete="off" required />
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-outline-secondary"
+                                                data-bs-dismiss="modal">ยกเลิก</button>
+                                        <button type="submit" class="btn btn-danger" id="confirmDeleteBtn" disabled>
+                                            <i class="bi bi-trash"></i> ลบถาวร
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -930,5 +1027,65 @@
         }
         document.getElementById('Input_HasBattery')?.addEventListener('change', applyBatteryVisibility);
         applyBatteryVisibility();
+
+        // ── Delete-installation 2-step verify ──────────────────────────
+        // Step 1: random math captcha (1..9 + 1..9).  Operands posted as
+        // hidden inputs so the server validates the sum against what was
+        // shown — prevents a client-only check from being bypassed.
+        // Step 2: exact-match Thai phrase "จะลบจริงๆแล้วนะ".
+        // The submit button stays disabled until BOTH inputs satisfy
+        // both rules.
+        (function setupDeleteConfirm() {
+            const modal = document.getElementById('deleteInstallationModal');
+            if (!modal) return;
+            const aDisplay  = document.getElementById('captchaA-display');
+            const bDisplay  = document.getElementById('captchaB-display');
+            const aHidden   = document.getElementById('captchaA-hidden');
+            const bHidden   = document.getElementById('captchaB-hidden');
+            const ansInput  = document.getElementById('captchaAnswerInput');
+            const feedback  = document.getElementById('captchaFeedback');
+            const textInput = document.getElementById('confirmTextInput');
+            const submitBtn = document.getElementById('confirmDeleteBtn');
+            const EXPECTED  = 'จะลบจริงๆแล้วนะ';
+
+            function randomize() {
+                const a = Math.floor(Math.random() * 9) + 1;
+                const b = Math.floor(Math.random() * 9) + 1;
+                aDisplay.textContent = a;
+                bDisplay.textContent = b;
+                aHidden.value = a;
+                bHidden.value = b;
+                ansInput.value = '';
+                textInput.value = '';
+                feedback.textContent = 'รอใส่คำตอบ…';
+                feedback.className = 'text-muted';
+                submitBtn.disabled = true;
+            }
+
+            function revalidate() {
+                const a = parseInt(aHidden.value, 10);
+                const b = parseInt(bHidden.value, 10);
+                const ans = parseInt(ansInput.value, 10);
+                const mathOk = !isNaN(ans) && ans === a + b;
+                const textOk = textInput.value.trim() === EXPECTED;
+
+                if (ansInput.value === '') {
+                    feedback.textContent = 'รอใส่คำตอบ…';
+                    feedback.className = 'text-muted';
+                } else if (mathOk) {
+                    feedback.textContent = '✓ ถูกต้อง';
+                    feedback.className = 'text-success';
+                } else {
+                    feedback.textContent = '✗ ผิด — ลองอีกครั้ง';
+                    feedback.className = 'text-danger';
+                }
+
+                submitBtn.disabled = !(mathOk && textOk);
+            }
+
+            modal.addEventListener('show.bs.modal', randomize);
+            ansInput.addEventListener('input', revalidate);
+            textInput.addEventListener('input', revalidate);
+        })();
     </script>
 }
