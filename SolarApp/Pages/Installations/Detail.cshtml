@@ -377,10 +377,14 @@
                     if (d.gridImportKw !== null && d.gridImportKw !== undefined) {
                         html += '<div class="col-md-3"><small class="text-muted">Grid Import (buying)</small><br/><strong class="text-danger">' + (d.gridImportKw || 0).toFixed(2) + ' kW</strong></div>';
                     }
-                    if (d.batterySocPercent !== null && d.batterySocPercent !== undefined) {
+                    // Only render battery tiles when the site is flagged as
+                    // having a battery — Razor stamps HAS_BATTERY at render
+                    // time so the JS doesn't need a server roundtrip.
+                    const HAS_BATTERY = @(inst.HasBattery ? "true" : "false");
+                    if (HAS_BATTERY && d.batterySocPercent !== null && d.batterySocPercent !== undefined) {
                         html += '<div class="col-md-3"><small class="text-muted">Battery SOC</small><br/><strong class="text-info">' + d.batterySocPercent + '%</strong></div>';
                     }
-                    if (d.batteryPowerKw !== null && d.batteryPowerKw !== undefined && d.batteryPowerKw !== 0) {
+                    if (HAS_BATTERY && d.batteryPowerKw !== null && d.batteryPowerKw !== undefined && d.batteryPowerKw !== 0) {
                         const bp = d.batteryPowerKw;
                         const bpLabel = bp > 0 ? 'Charging' : 'Discharging';
                         const bpClass = bp > 0 ? 'text-primary' : 'text-warning';

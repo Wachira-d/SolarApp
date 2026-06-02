@@ -34,7 +34,21 @@ public class IndexModel : PageModel
         bool NeedsMaintenance,
         int OpenMaintenanceCount,
         int OpenWorkOrderCount,
-        bool CleaningOverdue);
+        bool CleaningOverdue,
+        // ISO-formatted yyyy-MM-dd of the next scheduled cleaning, or null
+        // when no cleaning is pending.  Surfaces in the popup so the
+        // operator planning a route can see "this site is due in 18 days"
+        // without leaving the map.
+        string? NextCleaningDueDate,
+        // Days from today until the next cleaning.  Negative = overdue.
+        // Null when no cleaning is pending.  Drives the gradient colour:
+        // < 0 → red, 0..7 → orange, 8..30 → yellow, > 30 → green.
+        int? DaysToNextCleaning,
+        // Next pending PM visit (date string + days).  Same gradient
+        // rules so operators can also see "PM due in 12 days" while
+        // driving past, even if the cleaning is months away.
+        string? NextPmDueDate,
+        int? DaysToNextPm);
 
     public List<MapMarker> Markers { get; set; } = new();
     public int TotalSites { get; set; }
@@ -97,6 +111,14 @@ public class IndexModel : PageModel
                 i.InverterBrand,
                 i.SystemCapacityKw,
                 i.NextCleaningDueDate,
+                // Earliest scheduled PM record that's still pending — i.e. the
+                // next visit the field crew has on the books for this site.
+                NextPmDate = i.MaintenanceRecords
+                    .Where(m => m.Status == MaintenanceStatus.Scheduled
+                                && m.ScheduledDate >= now)
+                    .OrderBy(m => m.ScheduledDate)
+                    .Select(m => (DateTime?)m.ScheduledDate)
+                    .FirstOrDefault(),
                 UnresolvedAlerts = i.Alerts.Count(a => a.ResolvedAt == null),
                 OpenMaintenance = i.MaintenanceRecords.Count(m =>
                     m.Status == MaintenanceStatus.Scheduled
@@ -135,11 +157,22 @@ public class IndexModel : PageModel
                     _ => "Active",
                 };
 
+                int? cleaningDays = i.NextCleaningDueDate.HasValue
+                    ? (int)Math.Floor((i.NextCleaningDueDate.Value.Date - today).TotalDays)
+                    : (int?)null;
+                int? pmDays = i.NextPmDate.HasValue
+                    ? (int)Math.Floor((i.NextPmDate.Value.Date - today).TotalDays)
+                    : (int?)null;
+
                 return new MapMarker(
                     i.Id, i.SiteName, i.Latitude!.Value, i.Longitude!.Value,
                     effectiveStatus, i.InverterBrand.ToString(), i.SystemCapacityKw,
                     i.SiteCode, i.UnresolvedAlerts, needsMa,
-                    i.OpenMaintenance, i.OpenWorkOrders, cleaningOverdue);
+                    i.OpenMaintenance, i.OpenWorkOrders, cleaningOverdue,
+                    i.NextCleaningDueDate?.ToString("yyyy-MM-dd"),
+                    cleaningDays,
+                    i.NextPmDate?.ToString("yyyy-MM-dd"),
+                    pmDays);
             })
             .ToList();
 

@@ -106,7 +106,10 @@ public class IndexModel : PageModel
                 UnresolvedAlerts = alerts,
                 IsOnline = inst.Status == InstallationStatus.Active,
                 CurrentPowerKw = latestRealtime?.PowerGenerationKw,
-                BatterySoc = latestRealtime?.BatterySocPercent,
+                // Gate on Installation.HasBattery so customers without
+                // storage don't see a phantom 0% SOC reading from
+                // hybrid-inverter firmware quirks.
+                BatterySoc = inst.HasBattery ? latestRealtime?.BatterySocPercent : null,
                 Performance = perf
             });
         }

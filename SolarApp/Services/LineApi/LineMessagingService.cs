@@ -857,7 +857,11 @@ public class LineMessagingService : ILineMessagingService
                 type = "box", layout = "vertical", spacing = "sm",
                 contents = new object[]
                 {
-                    MakeSummaryRow("Online / Total", $"{s.OnlineSites}/{s.TotalSites} sites"),
+                    // "monitored" here means sites with IncludesMonitoring = true
+                    // (i.e. ones we actually poll).  Cleaning-only / partner-
+                    // monitored sites are excluded so the count reflects what
+                    // SolarApp can vouch for.
+                    MakeSummaryRow("Online / Monitored", $"{s.OnlineSites}/{s.TotalSites} sites"),
                     MakeSummaryRow("Offline", $"{s.OfflineSites} site(s)", s.OfflineSites > 0 ? "#FF0000" : null),
                     MakeSummaryRow("Energy Today", $"{s.TotalEnergyTodayKwh:N1} kWh"),
                     MakeSummaryRow("New Alerts", $"{s.NewAlertsToday}"),

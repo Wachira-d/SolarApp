@@ -19,11 +19,14 @@
         <small class="text-muted">แสดงบนแผนที่ @Model.MappedSites / ทั้งหมด @Model.TotalSites ไซต์</small>
     </div>
     <div class="d-flex gap-3 align-items-center small flex-wrap">
-        <span><span class="legend-dot" style="background:#198754"></span> ใช้งานปกติ</span>
-        <span><span class="legend-dot" style="background:#dc3545"></span> ออฟไลน์</span>
-        <span title="ถูกตั้งเป็นบำรุงรักษา / เลยกำหนดล้างแผง / มี maintenance record / มี work order ที่ค้าง">
-            <span class="legend-dot" style="background:#ffc107"></span> ต้องเข้า MA
+        <span><span class="legend-dot" style="background:#198754"></span> ปกติ (ครั้งต่อไป &gt; 30 วัน)</span>
+        <span title="ใกล้กำหนดเข้าล้าง / PM ภายใน 8-30 วัน — เผื่อวางแผนเส้นทาง">
+            <span class="legend-dot" style="background:#ffc107"></span> ใกล้กำหนด (8-30 วัน)
         </span>
+        <span title="ภายใน 1 สัปดาห์">
+            <span class="legend-dot" style="background:#fd7e14"></span> เร่งด่วน (≤ 7 วัน)
+        </span>
+        <span><span class="legend-dot" style="background:#dc3545"></span> เลยกำหนด / ออฟไลน์</span>
         <span><span class="legend-dot" style="background:#6c757d"></span> ปิดใช้งาน</span>
     </div>
 </div>
@@ -54,18 +57,47 @@ else
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
 
-    function colorFor(status) {
-        return status === 'Active' ? '#198754'
-             : status === 'Offline' ? '#dc3545'
-             : status === 'Maintenance' ? '#ffc107'
-             : '#6c757d';
+    // Pin colour gradient.  We pick the SOONEST of (cleaning, PM) and pick
+    // a band from it.  Offline always wins (red); Inactive always grey.
+    // Within Active, the gradient is purely a "do I need to drive there
+    // soon?" hint — so a perfectly-running site whose cleaning is 12 days
+    // out is yellow even if no MA is needed.
+    function colorFor(m) {
+        if (m.Status === 'Offline') return '#dc3545';
+        if (m.Status === 'Inactive') return '#6c757d';
+
+        const candidates = [];
+        if (m.DaysToNextCleaning !== null && m.DaysToNextCleaning !== undefined) candidates.push(m.DaysToNextCleaning);
+        if (m.DaysToNextPm !== null && m.DaysToNextPm !== undefined) candidates.push(m.DaysToNextPm);
+        const soonest = candidates.length ? Math.min.apply(null, candidates) : null;
+
+        // Open work orders / pending maintenance count as "needs visit now".
+        const hasPendingWork = (m.OpenMaintenanceCount || 0) > 0 || (m.OpenWorkOrderCount || 0) > 0;
+        if (m.CleaningOverdue || hasPendingWork) return '#dc3545';
+
+        if (soonest === null) return '#198754';        // no scheduled visit → green
+        if (soonest < 0)  return '#dc3545';            // overdue → red
+        if (soonest <= 7) return '#fd7e14';            // ≤ 1 week → orange
+        if (soonest <= 30) return '#ffc107';           // 8-30 days → yellow
+        return '#198754';                              // > 30 days → green
+    }
+
+    // Short Thai status descriptor for tooltips ("ใน 12 วัน", "วันนี้",
+    // "เลยมาแล้ว 3 วัน").  Keeps the hover terse — the popup has the
+    // full date.
+    function relativeDay(days) {
+        if (days === null || days === undefined) return null;
+        if (days < 0) return `เลยกำหนด ${-days} วัน`;
+        if (days === 0) return 'วันนี้';
+        if (days === 1) return 'พรุ่งนี้';
+        return `อีก ${days} วัน`;
     }
 
     const group = L.featureGroup();
     markers.forEach(m => {
         const marker = L.circleMarker([m.Lat, m.Lng], {
             radius: Math.max(8, Math.min(20, m.CapacityKw / 5)),
-            fillColor: colorFor(m.Status),
+            fillColor: colorFor(m),
             color: '#fff',
             weight: 2,
             fillOpacity: 0.85
@@ -84,19 +116,34 @@ else
             ? `<div class="alert alert-warning small mt-2 mb-0 py-1 px-2">${maDetails.join('<br>')}</div>`
             : '';
 
+        const cleaningRel = relativeDay(m.DaysToNextCleaning);
+        const pmRel = relativeDay(m.DaysToNextPm);
+
+        // Hover tooltip — fast glance while planning a route.
         const tooltipParts = [m.Name];
-        if (m.NeedsMaintenance) tooltipParts.push('⚠ ต้องเข้า MA');
-        marker.bindTooltip(tooltipParts.join(' — '), { direction: 'top' });
+        if (m.NextCleaningDueDate) tooltipParts.push(`🧽 ล้างแผง: ${m.NextCleaningDueDate}${cleaningRel ? ' (' + cleaningRel + ')' : ''}`);
+        if (m.NextPmDueDate)       tooltipParts.push(`🔧 PM: ${m.NextPmDueDate}${pmRel ? ' (' + pmRel + ')' : ''}`);
+        if (m.NeedsMaintenance && !m.NextCleaningDueDate && !m.NextPmDueDate)
+            tooltipParts.push('⚠ ต้องเข้า MA');
+        marker.bindTooltip(tooltipParts.join('<br>'), { direction: 'top', sticky: false, opacity: 0.95 });
+
+        // Popup — full details on click.
+        const schedRows = [];
+        if (m.NextCleaningDueDate) schedRows.push(`🧽 ล้างแผงครั้งต่อไป: <strong>${m.NextCleaningDueDate}</strong>${cleaningRel ? ` <span class="text-muted">(${cleaningRel})</span>` : ''}`);
+        if (m.NextPmDueDate)       schedRows.push(`🔧 PM ครั้งต่อไป: <strong>${m.NextPmDueDate}</strong>${pmRel ? ` <span class="text-muted">(${pmRel})</span>` : ''}`);
+        const schedHtml = schedRows.length
+            ? `<div class="mt-2 small">${schedRows.join('<br>')}</div>` : '';
 
         marker.bindPopup(`
-            <div style="min-width:200px">
+            <div style="min-width:230px">
                 <strong>${m.Name}</strong>${alertBadge}${maBadge}<br>
                 <small class="text-muted">${m.SiteCode || ''}</small><br>
                 <div class="mt-1">
-                    <span class="badge" style="background:${colorFor(m.Status)}">${m.Status}</span>
+                    <span class="badge" style="background:${colorFor(m)}">${m.Status}</span>
                     <span class="badge bg-info">${m.Brand}</span>
                 </div>
                 <div class="mt-1 small">${m.CapacityKw} kW</div>
+                ${schedHtml}
                 ${maHtml}
                 <a href="/Installations/Detail/${m.Id}" class="btn btn-sm btn-primary mt-2 w-100">
                     เปิดดูไซต์

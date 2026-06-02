@@ -32,37 +32,65 @@ public class DailySummaryJob
         var todayStart = DateTime.UtcNow.Date;
         var todayEnd = todayStart.AddDays(1);
 
-        var installations = await _context.Installations
-            .Where(i => i.Status != InstallationStatus.Inactive)
+        // Only count sites we actually MONITOR.  Cleaning-only / partner-
+        // monitored sites have no cloud account on our side, so their
+        // online/offline status and energy production are not ours to
+        // report — including them in "9/9 sites online" misleads the
+        // operator because it lumps in sites we never poll.
+        var monitoredInstalls = await _context.Installations
+            .Where(i => i.Status != InstallationStatus.Inactive && i.IncludesMonitoring)
+            .Select(i => new { i.Id, i.Status, i.SiteName })
             .ToListAsync();
 
-        var totalSites = installations.Count;
-        var onlineSites = installations.Count(i => i.Status == InstallationStatus.Active);
-        var offlineSites = installations.Count(i => i.Status == InstallationStatus.Offline);
+        var monitoredIds = monitoredInstalls.Select(i => i.Id).ToList();
+        var totalSites = monitoredInstalls.Count;
+        var onlineSites = monitoredInstalls.Count(i => i.Status == InstallationStatus.Active);
+        var offlineSites = monitoredInstalls.Count(i => i.Status == InstallationStatus.Offline);
 
+        // Energy "Today" only counts production from monitored sites.
+        // Without the InstallationId filter, a partner-monitored site that
+        // briefly synced via a manual test would pollute the total.
         var todayEnergy = await _context.EnergyData
-            .Where(r => r.Timestamp >= todayStart && r.Timestamp < todayEnd)
+            .Where(r => r.Timestamp >= todayStart && r.Timestamp < todayEnd
+                        && monitoredIds.Contains(r.InstallationId))
             .SumAsync(r => (decimal?)r.EnergyGenerationKwh) ?? 0;
 
+        // Alerts / work orders: same scope.  An alert on a non-monitored
+        // site is either operator-entered (rare) or noise — exclude both
+        // so the customer-facing summary stays meaningful.
         var activeAlerts = await _context.SystemAlerts
-            .CountAsync(a => a.ResolvedAt == null);
+            .CountAsync(a => a.ResolvedAt == null && monitoredIds.Contains(a.InstallationId));
 
         var newAlertsToday = await _context.SystemAlerts
-            .CountAsync(a => a.OccurredAt >= todayStart && a.OccurredAt < todayEnd);
+            .CountAsync(a => a.OccurredAt >= todayStart && a.OccurredAt < todayEnd
+                             && monitoredIds.Contains(a.InstallationId));
 
         var resolvedToday = await _context.SystemAlerts
-            .CountAsync(a => a.ResolvedAt >= todayStart && a.ResolvedAt < todayEnd);
+            .CountAsync(a => a.ResolvedAt >= todayStart && a.ResolvedAt < todayEnd
+                             && monitoredIds.Contains(a.InstallationId));
 
+        // Work orders include both monitored and external sites (we still
+        // dispatch crews for cleaning at partner-monitored sites), so the
+        // WO counts intentionally span the broader installation set —
+        // gated only on WorkOrders.InstallationId being one of ours.
+        var allOwnedIds = await _context.Installations
+            .Where(i => i.Status != InstallationStatus.Inactive)
+            .Select(i => i.Id)
+            .ToListAsync();
         var pendingWo = await _context.WorkOrders
-            .CountAsync(wo => wo.Status != WorkOrderStatus.Completed && wo.Status != WorkOrderStatus.Cancelled);
+            .CountAsync(wo => wo.Status != WorkOrderStatus.Completed
+                              && wo.Status != WorkOrderStatus.Cancelled
+                              && (wo.InstallationId == null || allOwnedIds.Contains(wo.InstallationId.Value)));
 
         var completedWoToday = await _context.WorkOrders
             .CountAsync(wo => wo.Status == WorkOrderStatus.Completed
-                && wo.UpdatedAt >= todayStart && wo.UpdatedAt < todayEnd);
+                              && wo.UpdatedAt >= todayStart && wo.UpdatedAt < todayEnd
+                              && (wo.InstallationId == null || allOwnedIds.Contains(wo.InstallationId.Value)));
 
         var criticalSites = await _context.SystemAlerts
             .Include(a => a.Installation)
-            .Where(a => a.ResolvedAt == null && a.Severity == AlertSeverity.Critical)
+            .Where(a => a.ResolvedAt == null && a.Severity == AlertSeverity.Critical
+                        && monitoredIds.Contains(a.InstallationId))
             .Select(a => a.Installation.SiteName)
             .Distinct()
             .Take(10)
@@ -71,7 +99,8 @@ public class DailySummaryJob
         var recoveredSites = await _context.SystemAlerts
             .Include(a => a.Installation)
             .Where(a => a.ResolvedAt >= todayStart && a.ResolvedAt < todayEnd
-                && (a.AlertType == AlertType.Offline || a.AlertType == AlertType.Error))
+                && (a.AlertType == AlertType.Offline || a.AlertType == AlertType.Error)
+                && monitoredIds.Contains(a.InstallationId))
             .Select(a => a.Installation.SiteName)
             .Distinct()
             .Take(10)

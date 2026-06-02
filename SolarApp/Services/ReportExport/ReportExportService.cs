@@ -92,7 +92,11 @@ public class ReportExportService : IReportExportService
             dailySheet.Cell(row + 2, 3).Value = (double)d.GridExportKwh;
             dailySheet.Cell(row + 2, 4).Value = (double)d.GridImportKwh;
             dailySheet.Cell(row + 2, 5).Value = (double)d.SelfConsumptionKwh;
-            dailySheet.Cell(row + 2, 6).Value = d.BatterySocPercent.HasValue ? (double)d.BatterySocPercent : 0;
+            // Battery SOC column stays in the report (column header is fixed
+            // by the schema), but for no-battery sites we leave it blank
+            // instead of writing 0 — a literal 0 looked like a fault.
+            if (installation.HasBattery && d.BatterySocPercent.HasValue)
+                dailySheet.Cell(row + 2, 6).Value = (double)d.BatterySocPercent;
             dailySheet.Cell(row + 2, 7).Value = (double)(d.EnergyGenerationKwh * installation.ElectricityRatePerKwh);
         }
 

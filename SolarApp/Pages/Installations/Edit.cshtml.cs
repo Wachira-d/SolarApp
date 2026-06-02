@@ -87,6 +87,7 @@ public class EditModel : PageModel
         [Required][Range(100, 1000)] public int PanelWattage { get; set; }
         public string? PanelBrand { get; set; }
         public string? PanelModel { get; set; }
+        public bool HasBattery { get; set; }
         public string? BatteryBrand { get; set; }
         public string? BatteryModel { get; set; }
         public decimal? BatteryCapacityKwh { get; set; }
@@ -327,10 +328,24 @@ public class EditModel : PageModel
         installation.PanelWattage = Input.PanelWattage;
         installation.PanelBrand = Input.PanelBrand;
         installation.PanelModel = Input.PanelModel;
-        installation.BatteryBrand = Input.BatteryBrand;
-        installation.BatteryModel = Input.BatteryModel;
-        installation.BatteryCapacityKwh = Input.BatteryCapacityKwh;
-        installation.BatteryCount = Input.BatteryCount;
+        // Battery: HasBattery is the gate. When unchecked, wipe the metadata
+        // so no stale brand/capacity lingers and the battery UI stays hidden
+        // everywhere (display + alerts read HasBattery).
+        installation.HasBattery = Input.HasBattery;
+        if (Input.HasBattery)
+        {
+            installation.BatteryBrand = Input.BatteryBrand;
+            installation.BatteryModel = Input.BatteryModel;
+            installation.BatteryCapacityKwh = Input.BatteryCapacityKwh;
+            installation.BatteryCount = Input.BatteryCount;
+        }
+        else
+        {
+            installation.BatteryBrand = null;
+            installation.BatteryModel = null;
+            installation.BatteryCapacityKwh = null;
+            installation.BatteryCount = null;
+        }
         installation.InstallationDate = Input.InstallationDate;
         installation.CommissionDate = Input.CommissionDate;
         installation.InverterWarrantyYears = Input.InverterWarrantyYears;
@@ -463,6 +478,7 @@ public class EditModel : PageModel
             PanelWattage = installation.PanelWattage,
             PanelBrand = installation.PanelBrand,
             PanelModel = installation.PanelModel,
+            HasBattery = installation.HasBattery,
             BatteryBrand = installation.BatteryBrand,
             BatteryModel = installation.BatteryModel,
             BatteryCapacityKwh = installation.BatteryCapacityKwh,

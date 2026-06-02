@@ -89,9 +89,13 @@ public class MyApiController : ControllerBase
         var custId = await ResolveCustomerIdAsync();
         if (custId == null) return Forbid();
 
-        var owned = await _context.Installations
-            .AnyAsync(i => i.Id == id && i.CustomerId == custId.Value);
-        if (!owned) return NotFound();
+        // Pull HasBattery alongside the ownership check — we need it to
+        // suppress phantom SOC readings on no-battery sites.
+        var inst = await _context.Installations
+            .Where(i => i.Id == id && i.CustomerId == custId.Value)
+            .Select(i => new { i.HasBattery })
+            .FirstOrDefaultAsync();
+        if (inst == null) return NotFound();
 
         var today = SolarApp.Services.SiteTime.Today;
         var rt = await _context.EnergyData
@@ -107,7 +111,7 @@ public class MyApiController : ControllerBase
         return Ok(new
         {
             currentPowerKw = Math.Round(rt?.PowerGenerationKw ?? 0, 2),
-            batterySoc = rt?.BatterySocPercent,
+            batterySoc = inst.HasBattery ? rt?.BatterySocPercent : null,
             todayKwh = Math.Round(todayKwh, 1),
             asOf = rt?.Timestamp,
         });

@@ -52,6 +52,21 @@ public class Installation
     public int PanelWattage { get; set; }
     public string? PanelBrand { get; set; }
     public string? PanelModel { get; set; }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Battery storage — opt-in per site
+    // ─────────────────────────────────────────────────────────────────────
+    // HasBattery is the single source of truth for "does this site have a
+    // battery?".  When false, ALL battery UI (SOC tiles, charge/discharge
+    // columns, battery-SoC alert rules) is suppressed system-wide even if a
+    // stray SOC value sneaks through from the inverter cloud — some hybrid
+    // inverters report a phantom 0% SOC with no battery attached.  When the
+    // operator unchecks it on the Edit form the battery metadata below is
+    // also cleared so nothing stale lingers.
+
+    /// <summary>True when this site has battery storage. Gates all battery UI/alerts.</summary>
+    public bool HasBattery { get; set; }
+
     public string? BatteryBrand { get; set; }
     public string? BatteryModel { get; set; }
     public decimal? BatteryCapacityKwh { get; set; }

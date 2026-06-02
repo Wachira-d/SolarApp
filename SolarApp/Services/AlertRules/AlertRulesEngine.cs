@@ -161,6 +161,13 @@ public class AlertRulesEngine : IAlertRulesEngine
             }
             case AlertRuleMetric.BatterySoc:
             {
+                // Short-circuit: sites flagged as no-battery can still
+                // receive stray phantom SOC readings from hybrid-inverter
+                // firmware (e.g. SOC = 0 reported every poll).  Evaluating
+                // a "SOC < 20%" rule against those phantoms would fire
+                // every cycle, so refuse to evaluate the rule at all.
+                if (!inst.HasBattery)
+                    return (false, 0, "site has no battery");
                 var latest = await _context.EnergyData
                     .Where(e => e.InstallationId == inst.Id
                                 && e.Granularity == DataGranularity.Realtime

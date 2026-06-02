@@ -69,6 +69,7 @@ public class CreateModel : PageModel
         [Required][Range(100, 1000)] public int PanelWattage { get; set; }
         public string? PanelBrand { get; set; }
         public string? PanelModel { get; set; }
+        public bool HasBattery { get; set; }
         public string? BatteryBrand { get; set; }
         public string? BatteryModel { get; set; }
         public decimal? BatteryCapacityKwh { get; set; }
@@ -139,10 +140,11 @@ public class CreateModel : PageModel
             PanelWattage = Input.PanelWattage,
             PanelBrand = Input.PanelBrand,
             PanelModel = Input.PanelModel,
-            BatteryBrand = Input.BatteryBrand,
-            BatteryModel = Input.BatteryModel,
-            BatteryCapacityKwh = Input.BatteryCapacityKwh,
-            BatteryCount = Input.BatteryCount,
+            HasBattery = Input.HasBattery,
+            BatteryBrand = Input.HasBattery ? Input.BatteryBrand : null,
+            BatteryModel = Input.HasBattery ? Input.BatteryModel : null,
+            BatteryCapacityKwh = Input.HasBattery ? Input.BatteryCapacityKwh : null,
+            BatteryCount = Input.HasBattery ? Input.BatteryCount : null,
             InstallationDate = Input.InstallationDate,
             CommissionDate = Input.CommissionDate,
             WarrantyYears = Input.WarrantyYears,

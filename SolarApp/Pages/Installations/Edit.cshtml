@@ -135,6 +135,40 @@
                         </div>
                     </div>
 
+                    <!-- Battery storage — opt-in.  When unchecked, ALL battery
+                         UI (SOC tiles, charge/discharge columns, BatterySoc
+                         alert rules) hides system-wide. -->
+                    <h6 class="text-muted mb-2 mt-4">Battery Storage</h6>
+                    <div class="row mb-2">
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input asp-for="Input.HasBattery" class="form-check-input" id="Input_HasBattery" />
+                                <label asp-for="Input.HasBattery" class="form-check-label" for="Input_HasBattery">
+                                    <strong>มี Battery</strong>
+                                    <small class="text-muted ms-2">ติ๊กถ้าไซต์นี้มีระบบกักเก็บไฟฟ้า — ค่า SOC, charge/discharge, alert rules จะถูกเปิดใช้</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mb-3 battery-fields-row">
+                        <div class="col-md-3">
+                            <label asp-for="Input.BatteryBrand" class="form-label">Battery Brand</label>
+                            <input asp-for="Input.BatteryBrand" class="form-control" placeholder="e.g. BYD, Pylontech" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.BatteryModel" class="form-label">Battery Model</label>
+                            <input asp-for="Input.BatteryModel" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.BatteryCapacityKwh" class="form-label">Capacity (kWh)</label>
+                            <input asp-for="Input.BatteryCapacityKwh" class="form-control" type="number" step="any" min="0" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.BatteryCount" class="form-label"># of Batteries</label>
+                            <input asp-for="Input.BatteryCount" class="form-control" type="number" min="1" />
+                        </div>
+                    </div>
+
                     <!-- Cloud API -->
                     <h6 class="text-muted mb-3 mt-4">Cloud API Connection</h6>
                     @{
@@ -314,8 +348,44 @@
                             <input asp-for="Input.WarrantyYears" class="form-control" />
                         </div>
                         <div class="col-md-3">
-                            <label asp-for="Input.TotalCleaningCount" class="form-label">Total Cleanings</label>
+                            <label asp-for="Input.TotalCleaningCount" class="form-label">Total Cleanings (จำนวนครั้งในสัญญา)</label>
                             <input asp-for="Input.TotalCleaningCount" class="form-control" />
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label asp-for="Input.CleaningFrequencyMonths" class="form-label">ความถี่ในการล้างแผง</label>
+                            @{
+                                // Preset frequencies: 1/2/3/4/6 ครั้งต่อปี → 12 / 6 / 4 / 3 / 2 เดือนระหว่างรอบ.
+                                // The contract is independent of warranty (e.g. 2-year warranty + 5-year cleaning interval),
+                                // so we list 5-year too.  "ทุก N เดือน" stays as the storage unit.
+                                var freqPresets = new (int Months, string Label)[]
+                                {
+                                    (12, "ปีละครั้ง (ทุก 12 เดือน)"),
+                                    (6,  "ปีละ 2 ครั้ง (ทุก 6 เดือน)"),
+                                    (4,  "ปีละ 3 ครั้ง (ทุก 4 เดือน)"),
+                                    (3,  "ปีละ 4 ครั้ง (ทุก 3 เดือน)"),
+                                    (2,  "ปีละ 6 ครั้ง (ทุก 2 เดือน)"),
+                                    (24, "ทุก 2 ปี"),
+                                    (36, "ทุก 3 ปี"),
+                                    (60, "ทุก 5 ปี"),
+                                };
+                                var freqSelected = Model.Input.CleaningFrequencyMonths;
+                            }
+                            <select asp-for="Input.CleaningFrequencyMonths" class="form-select">
+                                @foreach (var (m, lbl) in freqPresets)
+                                {
+                                    var isSel = freqSelected == m;
+                                    <option value="@m" selected="@isSel">@lbl</option>
+                                }
+                                @if (!freqPresets.Any(p => p.Months == freqSelected))
+                                {
+                                    <option value="@freqSelected" selected="selected">กำหนดเอง (@freqSelected เดือน)</option>
+                                }
+                            </select>
+                            <small class="text-muted">
+                                คนละค่ากับ Warranty Years ได้ — เช่น Warranty 2 ปี แต่สัญญาล้างแผงทุก 5 ปี
+                            </small>
                         </div>
                     </div>
                     <div class="row mb-3">
@@ -846,5 +916,19 @@
         }
         document.getElementById('Input_ConnectionMethod')?.addEventListener('change', applyCredentialVisibility);
         applyCredentialVisibility();
+
+        // ── Battery section toggle ─────────────────────────────────────
+        // Show/hide the battery brand/model/capacity/count inputs based on
+        // the HasBattery checkbox.  Inputs stay in the DOM so existing
+        // saved values aren't lost if the operator toggles by accident.
+        function applyBatteryVisibility() {
+            const cb = document.getElementById('Input_HasBattery');
+            if (!cb) return;
+            document.querySelectorAll('.battery-fields-row').forEach(row => {
+                row.style.display = cb.checked ? '' : 'none';
+            });
+        }
+        document.getElementById('Input_HasBattery')?.addEventListener('change', applyBatteryVisibility);
+        applyBatteryVisibility();
     </script>
 }

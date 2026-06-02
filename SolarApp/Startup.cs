@@ -656,6 +656,12 @@ public class Startup
              Sql: "ALTER TABLE [Installations] ADD [QuietHoursEnd] time NULL"),
             (Table: "Installations", Column: "NotifyOnRecovery",
              Sql: "ALTER TABLE [Installations] ADD [NotifyOnRecovery] bit NOT NULL DEFAULT 1"),
+
+            // Battery storage opt-in.  Default 0 (no battery); a backfill
+            // stage below flips it on for legacy rows that already carry
+            // battery metadata so we don't lose existing hybrid sites.
+            (Table: "Installations", Column: "HasBattery",
+             Sql: "ALTER TABLE [Installations] ADD [HasBattery] bit NOT NULL DEFAULT 0"),
         };
 
         var indexUpgrades = new (string Name, string Table, string Columns)[]
@@ -699,6 +705,23 @@ BEGIN {sql}; END");
 
         // Stage 1: column ALTERs (already in sb as IF EXISTS/NOT EXISTS guarded statements)
         stages.Add(("AlterColumns", sb.ToString()));
+
+        // Stage 1b: one-time backfill of HasBattery for legacy rows.  Runs
+        // after the column exists.  Idempotent + safe: it only flips rows
+        // that are still 0 AND carry battery metadata (capacity / count) or
+        // are Hybrid systems.  Once an operator unchecks battery on a site
+        // (which also nulls the metadata), this won't re-flip it.
+        stages.Add(("BackfillHasBattery", @"
+IF EXISTS (SELECT 1 FROM sys.columns
+    WHERE Name = N'HasBattery' AND Object_ID = Object_ID(N'[Installations]'))
+BEGIN
+    UPDATE [Installations]
+    SET [HasBattery] = 1
+    WHERE [HasBattery] = 0
+      AND ( ([BatteryCapacityKwh] IS NOT NULL AND [BatteryCapacityKwh] > 0)
+            OR ([BatteryCount] IS NOT NULL AND [BatteryCount] > 0)
+            OR [SystemType] = 3 );  -- 3 = SystemType.Hybrid
+END"));
 
         // Stage 2: each table CREATE in its own stage. Failures in one don't block others.
         stages.Add(("CreateTable:AlertRules", @"

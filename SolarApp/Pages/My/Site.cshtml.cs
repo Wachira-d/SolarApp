@@ -74,7 +74,11 @@ public class SiteModel : PageModel
             .OrderByDescending(e => e.Timestamp)
             .FirstOrDefaultAsync();
         CurrentPowerKw = Math.Round(latestRealtime?.PowerGenerationKw ?? 0, 2);
-        BatterySoc = latestRealtime?.BatterySocPercent;
+        // Only surface a battery reading when the operator has flagged the
+        // site as having one.  Some hybrid inverters report a phantom 0%
+        // SOC even with no battery wired up — without this guard the
+        // customer would see "🔋 0%" on a no-battery system.
+        BatterySoc = Site.HasBattery ? latestRealtime?.BatterySocPercent : null;
 
         async Task<decimal> SumSince(DateTime since)
         {
