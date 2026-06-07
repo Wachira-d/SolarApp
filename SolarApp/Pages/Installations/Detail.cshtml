@@ -12,6 +12,22 @@
     };
 }
 
+@* Flash banners from POST handlers (Force Recover, etc.) *@
+@if (TempData["FlashSuccess"] is string flashSuccess)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="bi bi-check-circle-fill"></i> @flashSuccess
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+@if (TempData["FlashWarning"] is string flashWarning)
+{
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle-fill"></i> @flashWarning
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
 <div class="d-flex justify-content-between mb-4">
     <div>
         <h4>@inst.SiteName <span class="badge @statusClass">@inst.Status</span></h4>
@@ -29,6 +45,23 @@
         }
         @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
         {
+            @* "Force Recover" — visible only when the site is stuck in
+               Maintenance OR has at least one open Station Faulty alert.
+               Lets the operator clear the alert + send the ✅ LINE
+               recovery immediately, for when the FusionSolar app shows
+               the site is back to normal but our cloud poll hasn't
+               caught up yet. *@
+            @if (Model.OpenStationFaultCount > 0
+                 || inst.Status == SolarApp.Models.Enums.InstallationStatus.Maintenance)
+            {
+                <form method="post" asp-page-handler="ForceRecover" asp-route-id="@inst.Id"
+                      class="d-inline"
+                      onsubmit="return confirm('ยืนยันการ Force Recover: จะปลดล็อก @Model.OpenStationFaultCount alert และส่ง LINE recovery ทันที — ใช้เมื่อ FusionSolar/inverter app ขึ้นปกติแล้วแต่ SolarApp ยังค้าง.');">
+                    <button type="submit" class="btn btn-outline-success btn-sm">
+                        <i class="bi bi-arrow-counterclockwise"></i> Force Recover
+                    </button>
+                </form>
+            }
             <a asp-page="/Performance/Detail" asp-route-id="@inst.Id" class="btn btn-outline-success btn-sm">
                 <i class="bi bi-speedometer"></i> ผลการผลิต
             </a>

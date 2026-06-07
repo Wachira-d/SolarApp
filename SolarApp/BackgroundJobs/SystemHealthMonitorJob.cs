@@ -642,8 +642,18 @@ public class SystemHealthMonitorJob
     /// </summary>
     private async Task SendRecoveryNotificationsAsync()
     {
-        // Find alerts resolved in the last 10 minutes that were previously notified as problems
-        var recentWindow = DateTime.UtcNow.AddMinutes(-10);
+        // Widened from the original 10-minute window to 24 hours because
+        // SolarDataSyncJob can resolve an alert at any sync (every 5-15
+        // min depending on brand) but this monitor job runs on its own
+        // schedule.  A 10-min window meant any resolution that happened
+        // just after a monitor pass was permanently silenced — customers
+        // saw "system down" alerts that never got an "✅ ระบบกลับมาแล้ว"
+        // closure even though our DB knew the alert was resolved.
+        //
+        // De-dup is already handled below via NotificationLogs lookup —
+        // we never re-fire a recovery for the same alert twice, so
+        // widening the window costs nothing.
+        var recentWindow = DateTime.UtcNow.AddHours(-24);
         var resolvedAlerts = await _context.SystemAlerts
             .Include(a => a.Installation)
                 .ThenInclude(i => i.Customer)
