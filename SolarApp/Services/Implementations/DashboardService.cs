@@ -16,7 +16,12 @@ public class DashboardService : IDashboardService
         _context = context;
     }
 
-    public async Task<DashboardViewModel> GetDashboardAsync(string? userId, string role, int? filterPartnerId = null)
+    public async Task<DashboardViewModel> GetDashboardAsync(
+        string? userId, string role,
+        int? filterPartnerId = null,
+        ServiceLevel? filterServiceLevel = null,
+        bool? filterMonitoredOnly = null,
+        InverterBrand? filterBrand = null)
     {
         var query = _context.Installations
             .Include(i => i.Customer)
@@ -42,6 +47,22 @@ public class DashboardService : IDashboardService
         // Partner filter (admin can filter by partner)
         if (filterPartnerId.HasValue && filterPartnerId > 0)
             query = query.Where(i => i.PartnerId == filterPartnerId);
+
+        // ── Project-type filters ──
+        // ServiceLevel = the contract preset (FullOM / MonitoringOnly / …).
+        if (filterServiceLevel.HasValue)
+            query = query.Where(i => i.ServiceLevel == filterServiceLevel.Value);
+
+        // Monitored-only = the operator's most common ask: "show me only the
+        // sites we actually poll via the cloud API".  IncludesMonitoring is
+        // the runtime source of truth (a Custom site can be monitored even if
+        // its ServiceLevel isn't MonitoringOnly), so we filter on the flag,
+        // not the preset.
+        if (filterMonitoredOnly.HasValue)
+            query = query.Where(i => i.IncludesMonitoring == filterMonitoredOnly.Value);
+
+        if (filterBrand.HasValue)
+            query = query.Where(i => i.InverterBrand == filterBrand.Value);
 
         var installations = await query.ToListAsync();
         var installationIds = installations.Select(i => i.Id).ToList();
@@ -175,6 +196,9 @@ public class DashboardService : IDashboardService
 
             Partners = partners,
             SelectedPartnerId = filterPartnerId,
+            SelectedServiceLevel = filterServiceLevel,
+            SelectedMonitoredOnly = filterMonitoredOnly,
+            SelectedBrand = filterBrand,
             TotalCapacityKw = installations.Sum(i => i.SystemCapacityKw),
             TodayGenerationKwh = todayGenTotal,
             MonthlySavingsThb = todayGenTotal * avgRate * 30

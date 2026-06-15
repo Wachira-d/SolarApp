@@ -8,6 +8,7 @@ using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.Interfaces;
 using SolarApp.Services.LineApi;
+using SolarApp.Services.Notifications;
 
 namespace SolarApp.Pages.Installations;
 
@@ -19,6 +20,7 @@ public class DetailModel : PageModel
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ApplicationDbContext _context;
     private readonly ILineMessagingService _lineService;
+    private readonly INotificationRouteService _routes;
     private readonly ILogger<DetailModel> _logger;
 
     public DetailModel(
@@ -27,6 +29,7 @@ public class DetailModel : PageModel
         UserManager<ApplicationUser> userManager,
         ApplicationDbContext context,
         ILineMessagingService lineService,
+        INotificationRouteService routes,
         ILogger<DetailModel> logger)
     {
         _installationService = installationService;
@@ -34,6 +37,7 @@ public class DetailModel : PageModel
         _userManager = userManager;
         _context = context;
         _lineService = lineService;
+        _routes = routes;
         _logger = logger;
     }
 
@@ -175,6 +179,22 @@ public class DetailModel : PageModel
                 {
                     _logger.LogWarning(ex, "Force-recover customer LINE failed for alert {Id}", alert.Id);
                 }
+            }
+
+            // Operator-configured recovery routes (extra recipients).
+            try
+            {
+                var routeSent = await _routes.SendEventAsync(
+                    Models.Enums.NotificationEventType.Recovery,
+                    id,
+                    $"[RECOVERED] {alert.Title}",
+                    $"✅ {installation.SiteName} กลับมาทำงานปกติแล้ว (manual recovery)",
+                    string.IsNullOrWhiteSpace(alertGroupId) ? null : new[] { alertGroupId! });
+                sent += routeSent;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Force-recover route fan-out failed for alert {Id}", alert.Id);
             }
         }
 

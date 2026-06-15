@@ -5,6 +5,7 @@ using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.AlertRules;
 using SolarApp.Services.LineApi;
+using SolarApp.Services.Notifications;
 using SolarApp.Services.PredictiveDiagnostics;
 
 namespace SolarApp.BackgroundJobs;
@@ -22,6 +23,7 @@ public class SystemHealthMonitorJob
     private readonly IConfiguration _configuration;
     private readonly IAlertRulesEngine _rulesEngine;
     private readonly AlertDiagnosticsEnricher _diagnosticsEnricher;
+    private readonly INotificationRouteService _routes;
 
     public SystemHealthMonitorJob(
         ApplicationDbContext context,
@@ -29,7 +31,8 @@ public class SystemHealthMonitorJob
         ILogger<SystemHealthMonitorJob> logger,
         IConfiguration configuration,
         IAlertRulesEngine rulesEngine,
-        AlertDiagnosticsEnricher diagnosticsEnricher)
+        AlertDiagnosticsEnricher diagnosticsEnricher,
+        INotificationRouteService routes)
     {
         _context = context;
         _lineService = lineService;
@@ -37,6 +40,7 @@ public class SystemHealthMonitorJob
         _configuration = configuration;
         _rulesEngine = rulesEngine;
         _diagnosticsEnricher = diagnosticsEnricher;
+        _routes = routes;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
@@ -541,11 +545,16 @@ public class SystemHealthMonitorJob
 
             int attempted = 0;
             int succeeded = 0;
+            // Track every LINE id we reach via the built-in routing so the
+            // operator-configured NotificationRoute fan-out below can skip
+            // them (no double messages).
+            var reachedLineIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             async Task SendOneAsync(string toLineId, string label)
             {
                 if (string.IsNullOrWhiteSpace(toLineId)) return;
                 if (sentInThisCycle >= maxSendsPerCycle) return;
+                reachedLineIds.Add(toLineId.Trim());
                 attempted++;
                 try
                 {
@@ -593,6 +602,7 @@ public class SystemHealthMonitorJob
             if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed && !inQuietHours
                 && sentInThisCycle < maxSendsPerCycle)
             {
+                reachedLineIds.Add(customerLineId.Trim());
                 attempted++;
                 try
                 {
@@ -616,6 +626,29 @@ public class SystemHealthMonitorJob
                 {
                     await SendOneAsync(lineId, "partner");
                 }
+            }
+
+            // 4. Operator-configured extra recipients (NotificationRoute).
+            //    Fans out the SAME alert to any global / per-site routes the
+            //    operator set up for this event category, skipping anyone
+            //    already reached above.  Plain-text technical message so it
+            //    works for both groups and personal user ids.
+            try
+            {
+                var evt = _routes.FromAlertType(alert.AlertType, alert.Title);
+                var routeMsg =
+                    $"[{severity}] {alert.Installation.SiteName}\n{alert.Title}\n{alert.Message}";
+                var routeSent = await _routes.SendEventAsync(
+                    evt, alert.InstallationId, alert.Title, routeMsg, reachedLineIds);
+                if (routeSent > 0)
+                {
+                    succeeded += routeSent;
+                    sentInThisCycle += routeSent;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "NotificationRoute fan-out failed for alert {Id}", alert.Id);
             }
 
             // Only mark as notified if at least one recipient was successfully reached
@@ -808,6 +841,32 @@ public class SystemHealthMonitorJob
                 && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var pIds))
             {
                 foreach (var lineId in pIds) await SendTechRecoveryToAsync(lineId);
+            }
+
+            // 4. Operator-configured recovery routes — anyone the operator
+            //    wired to the Recovery event for this site (or globally).
+            //    Exclude the alert group + customer + partner ids already
+            //    reached so they don't get a duplicate "all clear".
+            try
+            {
+                var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(alertGroupId)) exclude.Add(alertGroupId.Trim());
+                if (!string.IsNullOrWhiteSpace(customerLineId)) exclude.Add(customerLineId!.Trim());
+                if (alert.Installation.PartnerId.HasValue
+                    && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var pIds2))
+                    foreach (var lid in pIds2) exclude.Add(lid.Trim());
+
+                var routeSent = await _routes.SendEventAsync(
+                    Models.Enums.NotificationEventType.Recovery,
+                    alert.InstallationId,
+                    $"[RECOVERED] {alert.Title}",
+                    $"✅ {techMsg}",
+                    exclude);
+                sent += routeSent;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Recovery NotificationRoute fan-out failed for alert {Id}", alert.Id);
             }
         }
 

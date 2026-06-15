@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models.Enums;
 using SolarApp.Services.LineApi;
+using SolarApp.Services.Notifications;
 
 namespace SolarApp.BackgroundJobs;
 
@@ -15,15 +16,18 @@ public class DailySummaryJob
     private readonly ApplicationDbContext _context;
     private readonly ILineMessagingService _lineService;
     private readonly ILogger<DailySummaryJob> _logger;
+    private readonly INotificationRouteService _routes;
 
     public DailySummaryJob(
         ApplicationDbContext context,
         ILineMessagingService lineService,
-        ILogger<DailySummaryJob> logger)
+        ILogger<DailySummaryJob> logger,
+        INotificationRouteService routes)
     {
         _context = context;
         _lineService = lineService;
         _logger = logger;
+        _routes = routes;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 300)]
@@ -144,6 +148,32 @@ public class DailySummaryJob
         else
         {
             _logger.LogWarning("Daily summary skipped — no Line.AlertGroupId configured");
+        }
+
+        // Operator-configured DailySummary routes — extra group/user ids
+        // that should also get the summary, as a plain-text digest (these
+        // recipients may not be in the alert group).  Global-only: a daily
+        // summary isn't site-specific, so installationId is null.
+        try
+        {
+            var digest =
+                $"📊 Daily Summary {DateTime.UtcNow:dd/MM/yyyy}\n" +
+                $"Online/Monitored: {onlineSites}/{totalSites} ไซต์\n" +
+                $"Offline: {offlineSites}\n" +
+                $"Energy Today: {todayEnergy:N1} kWh\n" +
+                $"Active Alerts: {activeAlerts} (ใหม่วันนี้ {newAlertsToday})\n" +
+                $"Work Orders: {pendingWo} ค้าง, {completedWoToday} เสร็จวันนี้";
+            var exclude = string.IsNullOrWhiteSpace(alertGroupId)
+                ? null
+                : new[] { alertGroupId! };
+            var routeSent = await _routes.SendEventAsync(
+                NotificationEventType.DailySummary, null, "Daily Summary", digest, exclude);
+            if (routeSent > 0)
+                _logger.LogInformation("Daily summary fanned out to {Count} extra route(s)", routeSent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Daily summary NotificationRoute fan-out failed");
         }
     }
 }

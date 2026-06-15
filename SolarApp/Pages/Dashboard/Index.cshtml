@@ -1,27 +1,84 @@
 @page
+@using SolarApp.Models.Enums
 @model SolarApp.Pages.Dashboard.IndexModel
 @{
     ViewData["Title"] = "หน้าหลัก — ภาพรวมการทำงาน";
     var d = Model.Dashboard;
 }
 
-<!-- ═══ Partner Filter (Admin only) ═══ -->
-@if (d.Partners.Any())
-{
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-        <h5 class="mb-0">ภาพรวม</h5>
-        <form method="get" class="d-flex gap-2 align-items-center flex-grow-1 flex-md-grow-0"
-              style="max-width: 350px;">
-            <select name="PartnerId" class="form-select form-select-sm" onchange="this.form.submit()">
-                <option value="">พาร์ทเนอร์ทั้งหมด (@d.TotalInstallations ไซต์)</option>
+<!-- ═══ Filter bar — partner (admin) + project type + monitoring + brand ═══ -->
+@{
+    var anyFilterActive = d.SelectedPartnerId.HasValue
+        || d.SelectedServiceLevel.HasValue
+        || d.SelectedMonitoredOnly.HasValue
+        || d.SelectedBrand.HasValue;
+    var monitoringVal = d.SelectedMonitoredOnly switch
+    {
+        true => "monitored",
+        false => "unmonitored",
+        _ => ""
+    };
+}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h5 class="mb-0">ภาพรวม <span class="text-muted fs-6">(@d.TotalInstallations ไซต์)</span></h5>
+    <form method="get" class="d-flex flex-wrap gap-2 align-items-center">
+        @if (d.Partners.Any())
+        {
+            <select name="PartnerId" class="form-select form-select-sm" style="width:auto"
+                    onchange="this.form.submit()" title="กรองตามพาร์ทเนอร์">
+                <option value="">พาร์ทเนอร์ทั้งหมด</option>
                 @foreach (var p in d.Partners)
                 {
                     <option value="@p.Id" selected="@(d.SelectedPartnerId == p.Id)">@p.Name (@p.InstallationCount)</option>
                 }
             </select>
-        </form>
-    </div>
-}
+        }
+
+        @* Project type = ServiceLevel preset *@
+        <select name="ServiceLevel" class="form-select form-select-sm" style="width:auto"
+                onchange="this.form.submit()" title="ประเภทโปรเจ็ค (ขอบเขตบริการ)">
+            <option value="">ทุกประเภทบริการ</option>
+            @foreach (var sl in Enum.GetValues<SolarApp.Models.Enums.ServiceLevel>())
+            {
+                var label = sl switch
+                {
+                    SolarApp.Models.Enums.ServiceLevel.FullOM => "Full O&M",
+                    SolarApp.Models.Enums.ServiceLevel.MonitoringOnly => "Monitoring เท่านั้น",
+                    SolarApp.Models.Enums.ServiceLevel.CleaningOnly => "ล้างแผงเท่านั้น",
+                    SolarApp.Models.Enums.ServiceLevel.PreventiveOnly => "PM เท่านั้น",
+                    SolarApp.Models.Enums.ServiceLevel.Custom => "Custom",
+                    _ => sl.ToString()
+                };
+                <option value="@sl" selected="@(d.SelectedServiceLevel == sl)">@label</option>
+            }
+        </select>
+
+        @* Monitoring — the operator's primary ask: only sites we poll via API *@
+        <select name="Monitoring" class="form-select form-select-sm" style="width:auto"
+                onchange="this.form.submit()" title="กรองตามการ Monitor ผ่าน API">
+            <option value="" selected="@(monitoringVal == "")">Monitor: ทั้งหมด</option>
+            <option value="monitored" selected="@(monitoringVal == "monitored")">เฉพาะที่ Monitor (ดึงผ่าน API)</option>
+            <option value="unmonitored" selected="@(monitoringVal == "unmonitored")">เฉพาะที่ไม่ Monitor</option>
+        </select>
+
+        @* Brand *@
+        <select name="Brand" class="form-select form-select-sm" style="width:auto"
+                onchange="this.form.submit()" title="กรองตามยี่ห้อ inverter">
+            <option value="">ทุกยี่ห้อ</option>
+            @foreach (var b in Enum.GetValues<InverterBrand>())
+            {
+                <option value="@b" selected="@(d.SelectedBrand == b)">@b</option>
+            }
+        </select>
+
+        @if (anyFilterActive)
+        {
+            <a asp-page="Index" class="btn btn-sm btn-outline-secondary" title="ล้างตัวกรอง">
+                <i class="bi bi-x-circle"></i> ล้างตัวกรอง
+            </a>
+        }
+    </form>
+</div>
 
 <!-- ═══ STATUS OVERVIEW ═══ -->
 <div class="row mb-4 g-2 g-md-3">

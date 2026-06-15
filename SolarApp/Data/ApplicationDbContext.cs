@@ -29,6 +29,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<WorkOrderItem> WorkOrderItems => Set<WorkOrderItem>();
     public DbSet<WorkOrderPhoto> WorkOrderPhotos => Set<WorkOrderPhoto>();
     public DbSet<WorkOrderTypeTemplate> WorkOrderTypeTemplates => Set<WorkOrderTypeTemplate>();
+    public DbSet<NotificationRoute> NotificationRoutes => Set<NotificationRoute>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -318,6 +319,24 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasIndex(r => r.IsEnabled);
             entity.HasIndex(r => r.InstallationId);
             entity.HasIndex(r => r.Metric);
+        });
+
+        // ── NotificationRoute ──
+        builder.Entity<NotificationRoute>(entity =>
+        {
+            // Cascade so deleting an installation also clears its routes
+            // (matches AlertRule).  Global routes (InstallationId null) are
+            // untouched by site deletes.
+            entity.HasOne(r => r.Installation)
+                .WithMany()
+                .HasForeignKey(r => r.InstallationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(r => r.LineId).HasMaxLength(200);
+            entity.Property(r => r.Label).HasMaxLength(100);
+            entity.HasIndex(r => r.EventType);
+            entity.HasIndex(r => r.InstallationId);
+            entity.HasIndex(r => r.IsEnabled);
         });
 
         // ── WorkOrder ──

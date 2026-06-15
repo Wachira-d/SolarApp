@@ -1,4 +1,5 @@
 using SolarApp.Models;
+using SolarApp.Models.Enums;
 
 namespace SolarApp.ViewModels;
 
@@ -37,6 +38,13 @@ public class DashboardViewModel
     // ── Partner filter ──
     public List<PartnerOption> Partners { get; set; } = new();
     public int? SelectedPartnerId { get; set; }
+
+    // ── Project-type filters (round-tripped so the dropdowns keep their
+    //    selection after the GET re-renders) ──
+    public ServiceLevel? SelectedServiceLevel { get; set; }
+    /// <summary>null = all, true = monitored only, false = non-monitored only.</summary>
+    public bool? SelectedMonitoredOnly { get; set; }
+    public InverterBrand? SelectedBrand { get; set; }
 
     // ── Quick stats ──
     public decimal TotalCapacityKw { get; set; }

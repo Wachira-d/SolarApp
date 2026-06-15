@@ -206,6 +206,7 @@ public class Startup
         builder.Services.AddScoped<Services.Performance.IPerformanceMetricsService, Services.Performance.PerformanceMetricsService>();
         builder.Services.AddScoped<Services.AlertRules.IAlertRulesEngine, Services.AlertRules.AlertRulesEngine>();
         builder.Services.AddScoped<Services.LineApi.ILineMessagingService, Services.LineApi.LineMessagingService>();
+        builder.Services.AddScoped<Services.Notifications.INotificationRouteService, Services.Notifications.NotificationRouteService>();
         builder.Services.AddScoped<Services.Weather.IWeatherService, Services.Weather.WeatherService>();
         builder.Services.AddMemoryCache();
         builder.Services.AddValidatorsFromAssemblyContaining<Startup>();
@@ -867,6 +868,26 @@ BEGIN
         [UpdatedByUserId] nvarchar(450) NULL
     );
     CREATE UNIQUE INDEX IX_WorkOrderTypeTemplates_Type ON [WorkOrderTypeTemplates]([Type]);
+END"));
+
+        stages.Add(("CreateTable:NotificationRoutes", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'NotificationRoutes')
+BEGIN
+    CREATE TABLE [NotificationRoutes] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NULL,
+        [EventType] int NOT NULL,
+        [LineId] nvarchar(200) NOT NULL,
+        [Label] nvarchar(100) NULL,
+        [IsEnabled] bit NOT NULL DEFAULT 1,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [CreatedByUserId] nvarchar(450) NULL,
+        CONSTRAINT FK_NotificationRoutes_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id]) ON DELETE CASCADE
+    );
+    CREATE INDEX IX_NotificationRoutes_EventType ON [NotificationRoutes]([EventType]);
+    CREATE INDEX IX_NotificationRoutes_InstallationId ON [NotificationRoutes]([InstallationId]);
+    CREATE INDEX IX_NotificationRoutes_IsEnabled ON [NotificationRoutes]([IsEnabled]);
 END"));
 
         // Stage 3: ancillary indexes (each in its own statement so one failure doesn't block others)
