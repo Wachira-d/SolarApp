@@ -185,11 +185,39 @@ public class Startup
         builder.Services.AddScoped<Services.Admin.IUserAdminQueryService, Services.Admin.UserAdminQueryService>();
         builder.Services.AddScoped<Services.Admin.IUserAdminCommandService, Services.Admin.UserAdminCommandService>();
 
+        // ── Global HttpClient hardening (applies to EVERY client, named or
+        // bare, that any adapter resolves from IHttpClientFactory) ──
+        // The vendor clouds (neapi.hoymiles, *.fusionsolar.huawei, semsportal,
+        // soliscloud, …) sit behind load balancers whose IPs rotate.  With
+        // the framework default (PooledConnectionLifetime = infinite) a
+        // long-lived process pins the first resolved IP forever, so when the
+        // vendor drains a node our syncs hang/timeout until the app restarts.
+        // Recycling pooled connections every 2 min forces periodic DNS
+        // re-resolution — pure reliability, no behaviour change.
+        // A 100s ceiling is a safety net for the bare CreateClient() path
+        // (Deye/FoxESS/GoodWe/Solis) which previously had NO timeout at all.
+        builder.Services.ConfigureHttpClientDefaults(b =>
+        {
+            b.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+                // Cap concurrent sockets per vendor host so a burst of
+                // parallel installations can't exhaust ephemeral ports.
+                MaxConnectionsPerServer = 20,
+            });
+            b.SetHandlerLifetime(TimeSpan.FromMinutes(5));
+        });
+
         builder.Services.AddHttpClient("default", c =>
         {
             c.Timeout = TimeSpan.FromSeconds(30);
         });
-        builder.Services.AddHttpClient();
+        // Bare default client: give it a real timeout ceiling (was infinite).
+        builder.Services.AddHttpClient(Microsoft.Extensions.Options.Options.DefaultName, c =>
+        {
+            c.Timeout = TimeSpan.FromSeconds(100);
+        });
         builder.Services.AddScoped<Services.InverterApi.Adapters.HuaweiAdapter>();
         builder.Services.AddScoped<Services.InverterApi.Adapters.FoxEssAdapter>();
         builder.Services.AddScoped<Services.InverterApi.Adapters.SolisAdapter>();
