@@ -66,11 +66,6 @@ public class DeyeAdapter : IInverterApiAdapter
     private static string TokenCacheKey(ApiCredentials c) =>
         $"deye|{c.ApiKey}|{c.Username}|{c.Password?.Length ?? 0}";
 
-    private static void ClearTokenCache(ApiCredentials c)
-    {
-        lock (_tokenLock) { _tokenCache.Remove(TokenCacheKey(c)); }
-    }
-
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
     {
         if (string.IsNullOrEmpty(credentials.ApiKey)) return (false, "appId (ApiKey) is required");
