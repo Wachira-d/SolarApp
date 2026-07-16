@@ -197,6 +197,7 @@ public class Startup
         // A 100s ceiling is a safety net for the bare CreateClient() path
         // (Deye/FoxESS/GoodWe/Solis) which previously had NO timeout at all.
         builder.Services.AddTransient<Services.InverterApi.Common.ResilientHttpHandler>();
+        builder.Services.AddTransient<Services.InverterApi.Common.VendorRateLimitHandler>();
         builder.Services.ConfigureHttpClientDefaults(b =>
         {
             b.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
@@ -207,10 +208,16 @@ public class Startup
                 // parallel installations can't exhaust ephemeral ports.
                 MaxConnectionsPerServer = 20,
             });
-            // Transparent transient-failure retry for every adapter's calls
-            // (5xx / 429 / timeout / network, with exponential backoff).
+            // Pipeline order (outermost → innermost):
+            //   ResilientHttpHandler  — retry transient failures
+            //   VendorRateLimitHandler — token-bucket throttle per vendor host
+            //   SocketsHttpHandler    — the actual connection
+            // Retry is outermost so each RETRY attempt also passes the rate
+            // gate (consuming a token per real request, never over-budget).
             b.AddHttpMessageHandler(sp =>
                 sp.GetRequiredService<Services.InverterApi.Common.ResilientHttpHandler>());
+            b.AddHttpMessageHandler(sp =>
+                sp.GetRequiredService<Services.InverterApi.Common.VendorRateLimitHandler>());
             b.SetHandlerLifetime(TimeSpan.FromMinutes(5));
         });
 
