@@ -11,6 +11,28 @@ public enum AlertType
     PredictiveDiagnostic = 7,
 }
 
+/// <summary>
+/// Splits alert types into two operator-facing buckets so reports and
+/// dashboards can separate "the plant has a fault" from "a scheduled
+/// visit is due".  Mixing the two made a routine cleaning reminder read
+/// as a system outage in the daily summary.
+/// </summary>
+public static class AlertCategory
+{
+    /// <summary>
+    /// Scheduled / calendar-driven reminders — cleaning due, warranty
+    /// expiring.  These are planning items, not faults.
+    /// </summary>
+    public static bool IsScheduledReminder(this AlertType t) =>
+        t is AlertType.MaintenanceDue or AlertType.WarrantyExpiring;
+
+    /// <summary>
+    /// Real system problems — offline, error, low performance, predictive,
+    /// generic warning.  Everything that isn't a scheduled reminder.
+    /// </summary>
+    public static bool IsSystemProblem(this AlertType t) => !t.IsScheduledReminder();
+}
+
 public enum AlertSeverity
 {
     Critical = 1,

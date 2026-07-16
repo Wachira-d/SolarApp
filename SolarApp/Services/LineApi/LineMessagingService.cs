@@ -863,15 +863,20 @@ public class LineMessagingService : ILineMessagingService
         var token = await GetChannelAccessTokenAsync();
         if (string.IsNullOrEmpty(token)) return;
 
+        // Header status reflects SYSTEM PROBLEMS only (s.ActiveAlerts is now
+        // scoped to faults, excluding cleaning/warranty reminders).  A day
+        // with only a cleaning reminder shows "✓ All Systems Normal" plus a
+        // separate maintenance section — no more false "system has alerts".
         var statusColor = s.OfflineSites == 0 && s.ActiveAlerts == 0 ? "#00C853"
             : s.ActiveAlerts > 0 && s.OfflineSites > 0 ? "#FF0000" : "#FF8C00";
         var statusText = s.OfflineSites == 0 && s.ActiveAlerts == 0
-            ? "✓ All Systems Normal" : $"⚠ {s.ActiveAlerts} Active Alert(s)";
+            ? "✓ All Systems Normal" : $"⚠ {s.ActiveAlerts} System Alert(s)";
 
         var bodyContents = new List<object>
         {
             new { type = "text", text = statusText, weight = "bold", size = "md", color = statusColor, wrap = true },
             new { type = "separator" },
+            // ── Section 1: plant / production status ──
             new
             {
                 type = "box", layout = "vertical", spacing = "sm",
@@ -884,13 +889,44 @@ public class LineMessagingService : ILineMessagingService
                     MakeSummaryRow("Online / Monitored", $"{s.OnlineSites}/{s.TotalSites} sites"),
                     MakeSummaryRow("Offline", $"{s.OfflineSites} site(s)", s.OfflineSites > 0 ? "#FF0000" : null),
                     MakeSummaryRow("Energy Today", $"{s.TotalEnergyTodayKwh:N1} kWh"),
-                    MakeSummaryRow("New Alerts", $"{s.NewAlertsToday}"),
-                    MakeSummaryRow("Resolved Today", $"{s.ResolvedTodayAlerts}"),
-                    MakeSummaryRow("Active Alerts", $"{s.ActiveAlerts}", s.ActiveAlerts > 0 ? "#FF8C00" : null),
+                }
+            },
+            new { type = "separator" },
+            // ── Section 2: system-problem alerts (faults) ──
+            new { type = "text", text = "🔴 ปัญหาระบบ (System Alerts)", size = "sm", weight = "bold", color = "#D32F2F" },
+            new
+            {
+                type = "box", layout = "vertical", spacing = "sm",
+                contents = new object[]
+                {
+                    MakeSummaryRow("Active", $"{s.ActiveAlerts}", s.ActiveAlerts > 0 ? "#D32F2F" : "#00C853"),
+                    MakeSummaryRow("New today", $"{s.NewAlertsToday}"),
+                    MakeSummaryRow("Resolved today", $"{s.ResolvedTodayAlerts}"),
+                }
+            },
+            new { type = "separator" },
+            // ── Section 3: scheduled maintenance reminders ──
+            new { type = "text", text = "🧽 งานตามกำหนด (Maintenance)", size = "sm", weight = "bold", color = "#F57C00" },
+            new
+            {
+                type = "box", layout = "vertical", spacing = "sm",
+                contents = new object[]
+                {
+                    MakeSummaryRow("ครบ/เลยกำหนดล้างแผง", $"{s.CleaningDueCount} site(s)", s.CleaningDueCount > 0 ? "#F57C00" : null),
+                    MakeSummaryRow("ประกันใกล้หมด", $"{s.WarrantyExpiringCount} site(s)", s.WarrantyExpiringCount > 0 ? "#F57C00" : null),
                     MakeSummaryRow("Work Orders", $"{s.PendingWorkOrders} pending, {s.CompletedWorkOrdersToday} done today"),
                 }
             }
         };
+
+        // Cleaning-due site names (so the crew sees WHICH sites without
+        // opening the app).
+        if (s.CleaningDueSites.Count > 0)
+        {
+            bodyContents.Add(new { type = "text", text = "ไซต์ที่ต้องล้าง:", size = "xs", color = "#F57C00", weight = "bold", margin = "sm" });
+            foreach (var site in s.CleaningDueSites.Take(5))
+                bodyContents.Add(new { type = "text", text = $"  • {site}", size = "xs", color = "#F57C00", wrap = true });
+        }
 
         if (s.CriticalSites.Count > 0)
         {
@@ -917,22 +953,33 @@ public class LineMessagingService : ILineMessagingService
         var footerContents = new List<object>();
         if (!string.IsNullOrEmpty(baseUrl))
         {
+            // Primary button → system-problem alerts.  Red + count when
+            // there ARE faults; neutral "open" when the plant is clean.
             var alertsUrl = $"{baseUrl}/Admin/Alerts";
-            // Label reflects the count so the operator sees "3" without opening.
             var btnLabel = s.ActiveAlerts > 0
-                ? $"🔔 ดู Alert ค้าง ({s.ActiveAlerts})"
+                ? $"🔔 ดูปัญหาระบบ ({s.ActiveAlerts})"
                 : "📋 เปิดดูระบบ";
             footerContents.Add(new
             {
                 type = "button",
                 style = "primary",
                 height = "sm",
-                // Red when there are outstanding alerts, brand-blue otherwise.
                 color = s.ActiveAlerts > 0 ? "#D32F2F" : "#1565C0",
                 action = new { type = "uri", label = btnLabel, uri = alertsUrl }
             });
-            // Also expose the offline/work-order views as a lighter secondary
-            // link when relevant, so the summary is a jump-off point.
+            // Separate cleaning button → Maintenance page, only when there
+            // are cleaning-due reminders.  Keeps "fault" and "cleaning"
+            // one tap apart.
+            if (s.CleaningDueCount > 0)
+            {
+                footerContents.Add(new
+                {
+                    type = "button",
+                    style = "secondary",
+                    height = "sm",
+                    action = new { type = "uri", label = $"🧽 งานล้างแผง ({s.CleaningDueCount})", uri = $"{baseUrl}/Maintenance" }
+                });
+            }
             if (s.PendingWorkOrders > 0)
             {
                 footerContents.Add(new
@@ -974,7 +1021,7 @@ public class LineMessagingService : ILineMessagingService
             var payload = new
             {
                 to = lineUserId,
-                messages = new object[] { new { type = "flex", altText = $"[Daily Summary] {s.OnlineSites}/{s.TotalSites} online, {s.ActiveAlerts} alerts", contents = flexContent } }
+                messages = new object[] { new { type = "flex", altText = $"[Daily Summary] {s.OnlineSites}/{s.TotalSites} online · {s.ActiveAlerts} system alert(s) · {s.CleaningDueCount} cleaning due", contents = flexContent } }
             };
 
             using var slot = await AcquireSendSlotAsync();

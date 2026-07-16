@@ -62,16 +62,45 @@ public class DailySummaryJob
         // Alerts / work orders: same scope.  An alert on a non-monitored
         // site is either operator-entered (rare) or noise — exclude both
         // so the customer-facing summary stays meaningful.
+        //
+        // Split unresolved alerts into SYSTEM PROBLEMS vs SCHEDULED
+        // REMINDERS so the report doesn't report a routine cleaning-due as
+        // a plant fault.  MaintenanceDue = cleaning; WarrantyExpiring =
+        // warranty; everything else = a real system problem.
         var activeAlerts = await _context.SystemAlerts
-            .CountAsync(a => a.ResolvedAt == null && monitoredIds.Contains(a.InstallationId));
+            .CountAsync(a => a.ResolvedAt == null && monitoredIds.Contains(a.InstallationId)
+                             && a.AlertType != AlertType.MaintenanceDue
+                             && a.AlertType != AlertType.WarrantyExpiring);
 
+        // Cleaning-due / warranty reminders span ALL owned sites we service,
+        // not just monitored ones — a cleaning-only (unmonitored) site still
+        // needs its cleaning reminder counted.  Gate on the broader owned set.
+        var cleaningDueCount = await _context.SystemAlerts
+            .CountAsync(a => a.ResolvedAt == null
+                             && a.AlertType == AlertType.MaintenanceDue);
+        var warrantyExpiringCount = await _context.SystemAlerts
+            .CountAsync(a => a.ResolvedAt == null
+                             && a.AlertType == AlertType.WarrantyExpiring);
+        var cleaningDueSites = await _context.SystemAlerts
+            .Include(a => a.Installation)
+            .Where(a => a.ResolvedAt == null && a.AlertType == AlertType.MaintenanceDue)
+            .Select(a => a.Installation.SiteName)
+            .Distinct()
+            .Take(10)
+            .ToListAsync();
+
+        // "New alerts today" = new SYSTEM PROBLEMS today (not reminders).
         var newAlertsToday = await _context.SystemAlerts
             .CountAsync(a => a.OccurredAt >= todayStart && a.OccurredAt < todayEnd
-                             && monitoredIds.Contains(a.InstallationId));
+                             && monitoredIds.Contains(a.InstallationId)
+                             && a.AlertType != AlertType.MaintenanceDue
+                             && a.AlertType != AlertType.WarrantyExpiring);
 
         var resolvedToday = await _context.SystemAlerts
             .CountAsync(a => a.ResolvedAt >= todayStart && a.ResolvedAt < todayEnd
-                             && monitoredIds.Contains(a.InstallationId));
+                             && monitoredIds.Contains(a.InstallationId)
+                             && a.AlertType != AlertType.MaintenanceDue
+                             && a.AlertType != AlertType.WarrantyExpiring);
 
         // Work orders include both monitored and external sites (we still
         // dispatch crews for cleaning at partner-monitored sites), so the
@@ -119,6 +148,9 @@ public class DailySummaryJob
             ActiveAlerts = activeAlerts,
             NewAlertsToday = newAlertsToday,
             ResolvedTodayAlerts = resolvedToday,
+            CleaningDueCount = cleaningDueCount,
+            WarrantyExpiringCount = warrantyExpiringCount,
+            CleaningDueSites = cleaningDueSites,
             PendingWorkOrders = pendingWo,
             CompletedWorkOrdersToday = completedWoToday,
             CriticalSites = criticalSites,
@@ -168,12 +200,26 @@ public class DailySummaryJob
                     && baseUrl.Trim().StartsWith("https://", StringComparison.OrdinalIgnoreCase)
                 ? $"\n🔔 ดู Alert ค้าง: {baseUrl.Trim().TrimEnd('/')}/Admin/Alerts"
                 : "";
+            // Cleaning link (Maintenance page) when there are cleaning-due
+            // reminders and the base URL is set.
+            var normalizedBase = !string.IsNullOrWhiteSpace(baseUrl)
+                    && baseUrl.Trim().StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? baseUrl.Trim().TrimEnd('/')
+                : null;
+            var cleaningLine = cleaningDueCount > 0
+                ? $"\n🧽 ครบ/เลยกำหนดล้างแผง: {cleaningDueCount}"
+                  + (normalizedBase != null ? $" → {normalizedBase}/Maintenance" : "")
+                : "";
+            var warrantyLine = warrantyExpiringCount > 0
+                ? $"\n🛡️ ประกันใกล้หมด: {warrantyExpiringCount}"
+                : "";
             var digest =
                 $"📊 Daily Summary {DateTime.UtcNow:dd/MM/yyyy}\n" +
                 $"Online/Monitored: {onlineSites}/{totalSites} ไซต์\n" +
                 $"Offline: {offlineSites}\n" +
                 $"Energy Today: {todayEnergy:N1} kWh\n" +
-                $"Active Alerts: {activeAlerts} (ใหม่วันนี้ {newAlertsToday})\n" +
+                $"🔴 ปัญหาระบบ (Active Alerts): {activeAlerts} (ใหม่วันนี้ {newAlertsToday})" +
+                cleaningLine + warrantyLine + "\n" +
                 $"Work Orders: {pendingWo} ค้าง, {completedWoToday} เสร็จวันนี้" +
                 linkLine;
             var exclude = string.IsNullOrWhiteSpace(alertGroupId)
