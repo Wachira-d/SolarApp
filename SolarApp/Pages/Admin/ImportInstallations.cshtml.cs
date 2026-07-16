@@ -160,6 +160,19 @@ public class ImportInstallationsModel : PageModel
             if (double.TryParse(Get("latitude"), NumberStyles.Any, CultureInfo.InvariantCulture, out var latVal)) lat = latVal;
             if (double.TryParse(Get("longitude"), NumberStyles.Any, CultureInfo.InvariantCulture, out var lngVal)) lng = lngVal;
 
+            var instDate = DateTime.TryParse(Get("installationdate"), out var parsedDate) ? parsedDate : DateTime.UtcNow;
+            const int cleaningFreqMonths = 6;
+            const int warrantyYears = 10;
+
+            // Seed warranty + next-cleaning dates so imported sites actually
+            // participate in the warranty/cleaning reminder jobs.  Without
+            // these, WarrantyExpiryDate stayed 0001-01-01 (treated as already
+            // expired → no reminder) and NextCleaningDueDate stayed null
+            // (cleaning alerts never fire).  Next cleaning rolls forward to
+            // the first future cycle.
+            var nextCleaning = instDate.AddMonths(cleaningFreqMonths);
+            while (nextCleaning < DateTime.UtcNow) nextCleaning = nextCleaning.AddMonths(cleaningFreqMonths);
+
             toAdd.Add(new Installation
             {
                 SiteCode = siteCode,
@@ -175,9 +188,12 @@ public class ImportInstallationsModel : PageModel
                 PostalCode = Get("postalcode"),
                 Latitude = lat,
                 Longitude = lng,
-                InstallationDate = DateTime.TryParse(Get("installationdate"), out var instDate) ? instDate : DateTime.UtcNow,
+                InstallationDate = instDate,
                 Status = InstallationStatus.Active,
-                CleaningFrequencyMonths = 6
+                CleaningFrequencyMonths = cleaningFreqMonths,
+                NextCleaningDueDate = nextCleaning,
+                WarrantyYears = warrantyYears,
+                WarrantyExpiryDate = instDate.AddYears(warrantyYears)
             });
             siteCodeSet.Add(siteCode);
             Results.Add(new ImportResult(row, siteName, DryRun ? "VALID" : "OK", null));

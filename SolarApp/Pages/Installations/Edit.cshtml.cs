@@ -478,6 +478,18 @@ public class EditModel : PageModel
         installation.IncludesWarrantyService = Input.IncludesWarrantyService;
         installation.ServiceNotes = string.IsNullOrWhiteSpace(Input.ServiceNotes) ? null : Input.ServiceNotes.Trim();
 
+        // Seed a cleaning due-date the first time a site becomes a cleaning
+        // site with no schedule yet — otherwise the cleaning-due job never
+        // has a date to compare against and silently never reminds.  Rolls
+        // forward to the next future cycle from the install date.
+        if (installation.IncludesCleaning && installation.NextCleaningDueDate == null)
+        {
+            var freq = installation.CleaningFrequencyMonths > 0 ? installation.CleaningFrequencyMonths : 6;
+            var next = installation.InstallationDate.AddMonths(freq);
+            while (next < DateTime.UtcNow) next = next.AddMonths(freq);
+            installation.NextCleaningDueDate = next;
+        }
+
         // Cloud connection — clamp interval to the brand-allowed minimum so
         // an operator can't pick "5 min" for a brand that mandates 15.
         installation.ConnectionMethod = Input.ConnectionMethod;
