@@ -200,6 +200,31 @@ public class SolarDataSyncJob
         int processedSinceLastSave = 0;
         foreach (var installation in installations)
         {
+            // ── Circuit breaker ──
+            // Skip a site that has failed to sync many times in a row, for a
+            // cooldown, instead of hammering a hopeless endpoint every round.
+            // Huawei sites already resolved via the batch above are exempt
+            // (their outcome is handled from the batch result, no per-site
+            // call to gate).
+            if (Services.InverterApi.Common.SyncCircuitBreaker.IsOpen(installation.Id))
+            {
+                var openUntil = Services.InverterApi.Common.SyncCircuitBreaker.OpenUntil(installation.Id);
+                totalApiFailures++;
+                LogApiCall(installation, "Sync", 0, false,
+                    $"[CIRCUIT OPEN] Skipping {installation.SiteName} — {installation.InverterBrand} sync has failed " +
+                    $"repeatedly; paused until {openUntil:HH:mm} UTC to stop wasting the vendor's rate budget. " +
+                    "Fix credentials / connectivity, then it resumes automatically.");
+                // Retry a bit after the breaker's cooldown, not on the normal cadence.
+                installation.NextSyncDueAt = openUntil ?? DateTime.UtcNow.AddMinutes(30);
+                processedSinceLastSave++;
+                if (processedSinceLastSave >= 10)
+                {
+                    await _context.SaveChangesAsync();
+                    processedSinceLastSave = 0;
+                }
+                continue;
+            }
+
             try
             {
                 var adapter = _adapterFactory.GetAdapter(installation.InverterBrand);
@@ -779,10 +804,15 @@ public class SolarDataSyncJob
                     }
                 }
 
+                // Reached the end without a thrown error → this site synced.
+                // Reset its circuit breaker (a device merely offline still
+                // counts as a successful sync — the cloud answered).
+                Services.InverterApi.Common.SyncCircuitBreaker.RecordSuccess(installation.Id);
             }
             catch (TaskCanceledException)
             {
                 totalApiFailures++;
+                Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id);
                 _logger.LogWarning("Sync timeout for {Id} ({Brand})", installation.Id, installation.InverterBrand);
                 LogApiCall(installation, "Sync", 0, false,
                     $"[TIMEOUT] Sync timed out for {installation.SiteName}. " +
@@ -792,6 +822,7 @@ public class SolarDataSyncJob
             catch (HttpRequestException hre)
             {
                 totalApiFailures++;
+                Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id);
                 _logger.LogWarning(hre, "Network error syncing {Id} ({Brand})", installation.Id, installation.InverterBrand);
                 LogApiCall(installation, "Sync", 0, false,
                     $"[NETWORK ERROR] Cannot reach {installation.InverterBrand} cloud: {hre.Message}. " +
@@ -801,6 +832,7 @@ public class SolarDataSyncJob
             catch (Exception ex)
             {
                 totalApiFailures++;
+                Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id);
                 _logger.LogError(ex, "Sync failed for {Id} ({Brand})", installation.Id, installation.InverterBrand);
                 LogApiCall(installation, "Sync", 500, false,
                     $"[UNEXPECTED ERROR] {ex.GetType().Name}: {ex.Message}");
