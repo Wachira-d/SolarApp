@@ -656,7 +656,9 @@ public class GoodWeAdapter : IInverterApiAdapter
             req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             req.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 SolarApp/1.0");
 
-            _logger.LogInformation("GoodWe: POST {Url} for account={Account}", url, credentials.Username);
+            // Don't log the customer's account email (PII).  Mask to first 2
+            // chars so it's still useful for correlating without leaking it.
+            _logger.LogInformation("GoodWe: POST {Url} for account={Account}", url, MaskAccount(credentials.Username));
 
             var response = await client.SendAsync(req);
             var body = await response.Content.ReadAsStringAsync();
@@ -852,6 +854,14 @@ public class GoodWeAdapter : IInverterApiAdapter
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "...";
+
+    /// <summary>Mask an account/email for logs: "jo•••@•••" style, no PII leak.</summary>
+    private static string MaskAccount(string? account)
+    {
+        if (string.IsNullOrWhiteSpace(account)) return "(none)";
+        var a = account.Trim();
+        return a.Length <= 2 ? "••" : a[..2] + "•••";
+    }
 
     // ═══════════════════════════════════════════════════════════
     //  ApiResult<T> methods

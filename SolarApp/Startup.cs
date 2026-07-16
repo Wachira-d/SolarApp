@@ -595,7 +595,10 @@ public class Startup
         try
         {
             await DbInitializer.SeedAsync(scope.ServiceProvider);
-            log("DB: Seed complete (admin@solarapp.com / Admin@123456)");
+            // Never log the admin password.  Set SEED_ADMIN_PASSWORD (env) or
+            // Seed:AdminPassword (config) to provision it securely; change it
+            // on first login regardless.
+            log("DB: Seed complete (admin user: admin@solarapp.com — set SEED_ADMIN_PASSWORD to control the seed password).");
         }
         catch (Exception ex)
         {
@@ -2063,16 +2066,18 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                         .FirstOrDefaultAsync(db.Installations, i => i.Id == installId);
                     if (inst != null)
                     {
-                        // Access control: verify caller can access this installation
+                        // Access control: verify caller can access this installation.
+                        // A null principal must be REJECTED, not skipped — the old
+                        // `if (currentUser != null)` let an unauthenticated edge case
+                        // fall through to back-fill stored (decrypted) credentials.
                         var userManager = req.HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Models.ApplicationUser>>();
                         var currentUser = await userManager.GetUserAsync(req.HttpContext.User);
-                        if (currentUser != null)
-                        {
-                            var isAdmin = await userManager.IsInRoleAsync(currentUser, "Admin");
-                            var isPartnerMatch = currentUser.PartnerId.HasValue && inst.PartnerId == currentUser.PartnerId;
-                            if (!isAdmin && !isPartnerMatch)
-                                return Results.Json(Services.Api.ApiResponse.AccessDenied("Access denied to this installation"));
-                        }
+                        if (currentUser == null)
+                            return Results.Json(Services.Api.ApiResponse.AccessDenied("Not authenticated."));
+                        var isAdmin = await userManager.IsInRoleAsync(currentUser, "Admin");
+                        var isPartnerMatch = currentUser.PartnerId.HasValue && inst.PartnerId == currentUser.PartnerId;
+                        if (!isAdmin && !isPartnerMatch)
+                            return Results.Json(Services.Api.ApiResponse.AccessDenied("Access denied to this installation"));
                         if (string.IsNullOrEmpty(apiKey))
                             apiKey = credProtector.Unprotect(inst.CloudApiKey) ?? "";
                         if (string.IsNullOrEmpty(apiSecret))
@@ -2176,7 +2181,9 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             {
                 return Results.Json(Services.Api.ApiResponse.Fail($"Error: {ex.Message}", "INTERNAL_ERROR"));
             }
-        }).RequireAuthorization();
+        // Admin/Partner only — this endpoint issues an outbound request to a
+        // caller-supplied apiBaseUrl, so a Customer must never reach it (SSRF).
+        }).RequireAuthorization(p => p.RequireRole("Admin", "Partner"));
     }
 
     // ══════════════════════════════════════════════════════════════

@@ -60,6 +60,16 @@ public class CreateModel : PageModel
 
         var user = await _userManager.GetUserAsync(User);
 
+        // IDOR guard: the dropdown is scoped, but a crafted POST can carry any
+        // InstallationId.  Re-validate that the posted id is one this caller is
+        // actually allowed to file a ticket against before trusting it.
+        if (!await CanAccessInstallationAsync(InstallationId, user!))
+        {
+            ModelState.AddModelError(nameof(InstallationId), "You don't have access to that installation.");
+            await LoadInstallationsAsync();
+            return Page();
+        }
+
         var ticket = new ServiceTicket
         {
             InstallationId = InstallationId,
@@ -72,6 +82,23 @@ public class CreateModel : PageModel
 
         await _maintenanceService.CreateTicketAsync(ticket);
         return RedirectToPage("Index");
+    }
+
+    private async Task<bool> CanAccessInstallationAsync(int installationId, Models.ApplicationUser user)
+    {
+        var roles = await _userManager.GetRolesAsync(user);
+        if (roles.Contains(UserRoles.Admin))
+            return await _context.Installations.AnyAsync(i => i.Id == installationId);
+        if (roles.Contains(UserRoles.Partner))
+            return user.PartnerId != null
+                && await _context.Installations.AnyAsync(i => i.Id == installationId && i.PartnerId == user.PartnerId);
+        if (roles.Contains(UserRoles.Customer))
+        {
+            var customer = await _context.Customers.FirstOrDefaultAsync(c => c.UserId == user.Id);
+            return customer != null
+                && await _context.Installations.AnyAsync(i => i.Id == installationId && i.CustomerId == customer.Id);
+        }
+        return false;
     }
 
     private async Task LoadInstallationsAsync()

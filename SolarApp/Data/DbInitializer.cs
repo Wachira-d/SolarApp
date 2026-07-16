@@ -36,7 +36,18 @@ public static class DbInitializer
                 EmailConfirmed = true
             };
 
-            var result = await userManager.CreateAsync(admin, "Admin@123456");
+            // Seed password precedence: SEED_ADMIN_PASSWORD env var → config
+            // "Seed:AdminPassword" → a last-resort default (kept so a fresh
+            // deploy still has a working admin, but operators are told to set
+            // the env var and change it).  The password is NEVER written to
+            // the startup log (it used to be — a known credential in the logs).
+            var config = serviceProvider.GetService<IConfiguration>();
+            var seedPassword =
+                Environment.GetEnvironmentVariable("SEED_ADMIN_PASSWORD")
+                ?? config?["Seed:AdminPassword"]
+                ?? "Admin@123456";
+
+            var result = await userManager.CreateAsync(admin, seedPassword);
             if (result.Succeeded)
             {
                 await userManager.AddToRoleAsync(admin, UserRoles.Admin);
