@@ -9,6 +9,16 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
 
+    // High-volume / machine-generated tables are NEVER audited — auditing
+    // them would grow AuditLog faster than the data itself (SolarDataSyncJob
+    // saves thousands of these per cycle).  We audit the meaningful,
+    // user-editable domain entities; everything else is skipped.
+    private static readonly HashSet<string> _excludedEntities = new(StringComparer.Ordinal)
+    {
+        "EnergyData", "InverterApiLog", "NotificationLog", "SystemAlert",
+        "StartupLog", "AuditLog",
+    };
+
     public AuditableEntityInterceptor(IHttpContextAccessor httpContextAccessor)
     {
         _httpContextAccessor = httpContextAccessor;
@@ -23,16 +33,22 @@ public class AuditableEntityInterceptor : SaveChangesInterceptor
         if (context == null) return base.SavingChangesAsync(eventData, result, cancellationToken);
 
         var httpContext = _httpContextAccessor.HttpContext;
-        var userId = httpContext?.User?.FindFirst(
+        // No HTTP context ⇒ a background job / startup write.  Those are not
+        // user actions and would flood the audit trail, so skip them entirely.
+        if (httpContext == null) return base.SavingChangesAsync(eventData, result, cancellationToken);
+
+        var userId = httpContext.User?.FindFirst(
             System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        var userName = httpContext?.User?.Identity?.Name;
-        var ipAddress = httpContext?.Connection?.RemoteIpAddress?.ToString();
+        var userName = httpContext.User?.Identity?.Name;
+        var ipAddress = httpContext.Connection?.RemoteIpAddress?.ToString();
 
         var auditEntries = new List<AuditLog>();
 
         foreach (var entry in context.ChangeTracker.Entries())
         {
             if (entry.Entity is AuditLog || entry.State == EntityState.Detached || entry.State == EntityState.Unchanged)
+                continue;
+            if (_excludedEntities.Contains(entry.Entity.GetType().Name))
                 continue;
 
             var entityType = entry.Entity.GetType().Name;

@@ -30,9 +30,15 @@ public class Startup
     public static void ConfigureServices(WebApplicationBuilder builder)
     {
         builder.Services.AddHttpContextAccessor();
+        // Automatic audit trail for user-driven changes to domain entities
+        // (Installation, Customer, Partner, AlertRule, settings, …).  The
+        // interceptor self-excludes background-job writes and high-volume
+        // tables, so it never floods AuditLog.
+        builder.Services.AddScoped<Data.Interceptors.AuditableEntityInterceptor>();
         builder.Services.AddDbContext<ApplicationDbContext>((sp, options) =>
         {
             options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+            options.AddInterceptors(sp.GetRequiredService<Data.Interceptors.AuditableEntityInterceptor>());
         });
 
         builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>

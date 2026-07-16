@@ -9,10 +9,34 @@ namespace SolarApp.Pages.Account;
 public class LoginModel : PageModel
 {
     private readonly SignInManager<ApplicationUser> _signInManager;
+    private readonly Data.ApplicationDbContext _db;
 
-    public LoginModel(SignInManager<ApplicationUser> signInManager)
+    public LoginModel(SignInManager<ApplicationUser> signInManager, Data.ApplicationDbContext db)
     {
         _signInManager = signInManager;
+        _db = db;
+    }
+
+    private async Task AuditAuthAsync(string action, string email)
+    {
+        // Auth events aren't entity changes, so the audit interceptor won't
+        // catch them — record them explicitly.  Email is masked so the audit
+        // trail doesn't itself become a list of valid accounts.
+        try
+        {
+            var masked = string.IsNullOrEmpty(email) ? "(none)"
+                : (email.Length <= 2 ? "••" : email[..2] + "•••");
+            _db.AuditLogs.Add(new AuditLog
+            {
+                Action = action,
+                EntityType = "Auth",
+                EntityId = masked,
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+                Timestamp = DateTime.UtcNow,
+            });
+            await _db.SaveChangesAsync();
+        }
+        catch { /* auditing must never block login */ }
     }
 
     [BindProperty]
@@ -62,10 +86,14 @@ public class LoginModel : PageModel
             Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: true);
 
         if (result.Succeeded)
+        {
+            await AuditAuthAsync("LoginSuccess", Input.Email);
             return LocalRedirect(returnUrl);
+        }
 
         if (result.IsLockedOut)
         {
+            await AuditAuthAsync("LoginLockout", Input.Email);
             ModelState.AddModelError(string.Empty,
                 "Account locked due to too many failed attempts. Try again in 15 minutes.");
             return Page();
@@ -77,6 +105,7 @@ public class LoginModel : PageModel
             return Page();
         }
 
+        await AuditAuthAsync("LoginFailed", Input.Email);
         // Use a generic message — don't reveal whether email exists
         ModelState.AddModelError(string.Empty, "Invalid email or password.");
         return Page();
