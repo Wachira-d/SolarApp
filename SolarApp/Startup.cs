@@ -258,6 +258,7 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.WorkOrderReminderJob>();
         builder.Services.AddScoped<BackgroundJobs.DailySummaryJob>();
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
+        builder.Services.AddScoped<BackgroundJobs.DataRetentionJob>();
         builder.Services.AddScoped<Services.PredictiveDiagnostics.PredictiveDiagnosticsEngine>();
         builder.Services.AddScoped<Services.PredictiveDiagnostics.AlertDiagnosticsEnricher>();
 
@@ -354,6 +355,11 @@ public class Startup
         var predictiveCron = GetSetting(ctx, "Schedule.PredictiveDiagnostics", "0 1 * * *"); // 08:00 Thailand (UTC+7)
         RecurringJob.AddOrUpdate<BackgroundJobs.PredictiveDiagnosticsJob>(
             "predictive-diagnostics", job => job.ExecuteAsync(), predictiveCron);
+
+        // Nightly retention sweep at 18:00 UTC = 01:00 Thailand (lowest traffic).
+        var retentionCron = GetSetting(ctx, "Schedule.DataRetention", "0 18 * * *");
+        RecurringJob.AddOrUpdate<BackgroundJobs.DataRetentionJob>(
+            "data-retention", job => job.ExecuteAsync(), retentionCron);
     }
 
     /// <summary>
