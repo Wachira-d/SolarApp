@@ -25,10 +25,50 @@ public class DeyeAdapter : IInverterApiAdapter
 
     public InverterBrand Brand => InverterBrand.Deye;
 
+    // Static token cache — shared across all requests + installations that
+    // use the same Deye account.  Previously the adapter POSTed
+    // /account/token on EVERY call (~5 per sync round per site), which both
+    // wasted latency and chewed through Deye's 10-req/min budget.  Deye
+    // access tokens are long-lived; we cache conservatively for 50 min and
+    // clear on any auth error so a rotated token self-heals.
+    private static readonly Dictionary<string, (string Token, DateTime ExpiresAt)> _tokenCache = new();
+    private static readonly object _tokenLock = new();
+    private static readonly TimeSpan TokenTtl = TimeSpan.FromMinutes(50);
+
     public DeyeAdapter(IHttpClientFactory httpClientFactory, ILogger<DeyeAdapter> logger)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Regional base URL.  Deye/Solarman host per-region developer clouds
+    /// (eu1 / us1 / cn1 …).  Honour an explicit CloudApiBaseUrl override so
+    /// non-EU accounts aren't stuck on the hardcoded eu1 endpoint (which
+    /// rejects their login).  Falls back to eu1 when unset.
+    /// </summary>
+    private static string ResolveBase(ApiCredentials credentials)
+    {
+        var ov = credentials.ApiBaseUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(ov))
+        {
+            ov = ov.TrimEnd('/');
+            // Accept either a full ".../v1.0" or a bare host; append the
+            // versioned path when the operator gave only the host.
+            if (!ov.Contains("/v1.0", StringComparison.OrdinalIgnoreCase)
+                && !ov.Contains("/v1", StringComparison.OrdinalIgnoreCase))
+                ov += "/v1.0";
+            return ov;
+        }
+        return BaseUrl;
+    }
+
+    private static string TokenCacheKey(ApiCredentials c) =>
+        $"deye|{c.ApiKey}|{c.Username}|{c.Password?.Length ?? 0}";
+
+    private static void ClearTokenCache(ApiCredentials c)
+    {
+        lock (_tokenLock) { _tokenCache.Remove(TokenCacheKey(c)); }
     }
 
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
@@ -59,7 +99,7 @@ public class DeyeAdapter : IInverterApiAdapter
             var client = await CreateAuthenticatedClientAsync(credentials);
             if (client == null) return null;
 
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/station/latest",
+            var response = await client.PostAsJsonAsync($"{ResolveBase(credentials)}/station/latest",
                 new { stationId = credentials.PlantId });
             if (!response.IsSuccessStatusCode) return null;
 
@@ -91,7 +131,7 @@ public class DeyeAdapter : IInverterApiAdapter
             var client = await CreateAuthenticatedClientAsync(credentials);
             if (client == null) return null;
 
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/station/latest",
+            var response = await client.PostAsJsonAsync($"{ResolveBase(credentials)}/station/latest",
                 new { stationId = credentials.PlantId });
             if (!response.IsSuccessStatusCode) return null;
 
@@ -132,7 +172,7 @@ public class DeyeAdapter : IInverterApiAdapter
             // not the device SN).  Use /station/history with dateType=2
             // (day) which returns one row per calendar day with
             // generationValue / gridSell / gridBuy fields.
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/station/history",
+            var response = await client.PostAsJsonAsync($"{ResolveBase(credentials)}/station/history",
                 new
                 {
                     stationId = credentials.PlantId,
@@ -216,7 +256,7 @@ public class DeyeAdapter : IInverterApiAdapter
             var client = await CreateAuthenticatedClientAsync(credentials);
             if (client == null) return alarms;
 
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/device/fault",
+            var response = await client.PostAsJsonAsync($"{ResolveBase(credentials)}/device/fault",
                 new { deviceSn = credentials.PlantId, pageNo = 1, pageSize = 100 });
             if (!response.IsSuccessStatusCode) return alarms;
 
@@ -268,7 +308,7 @@ public class DeyeAdapter : IInverterApiAdapter
             var client = await CreateAuthenticatedClientAsync(credentials);
             if (client == null) return devices;
 
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/device/list",
+            var response = await client.PostAsJsonAsync($"{ResolveBase(credentials)}/device/list",
                 new { stationId = credentials.PlantId, pageNo = 1, pageSize = 100 });
             if (!response.IsSuccessStatusCode) return devices;
 
@@ -326,10 +366,18 @@ public class DeyeAdapter : IInverterApiAdapter
 
     private async Task<(string? Token, string Error)> GetTokenWithDetailAsync(ApiCredentials credentials)
     {
+        // ── Cache hit ──
+        var cacheKey = TokenCacheKey(credentials);
+        lock (_tokenLock)
+        {
+            if (_tokenCache.TryGetValue(cacheKey, out var cached) && DateTime.UtcNow < cached.ExpiresAt)
+                return (cached.Token, "OK (cached)");
+        }
+
         try
         {
             var client = _httpClientFactory.CreateClient();
-            var response = await client.PostAsJsonAsync($"{BaseUrl}/account/token",
+            var response = await client.PostAsJsonAsync($"{ResolveBase(credentials)}/account/token",
                 new
                 {
                     appId = credentials.ApiKey,
@@ -346,7 +394,14 @@ public class DeyeAdapter : IInverterApiAdapter
             if (json.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
             {
                 var token = SafeGetString(data, "accessToken");
-                if (!string.IsNullOrEmpty(token)) return (token, "OK");
+                if (!string.IsNullOrEmpty(token))
+                {
+                    lock (_tokenLock)
+                    {
+                        _tokenCache[cacheKey] = (token, DateTime.UtcNow.Add(TokenTtl));
+                    }
+                    return (token, "OK");
+                }
             }
 
             var msg = SafeGetString(json, "msg") ?? SafeGetString(json, "message") ?? "no token in response";

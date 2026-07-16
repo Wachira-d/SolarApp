@@ -450,9 +450,13 @@ public class SolisAdapter : IInverterApiAdapter
     //  SOLISWEB mode: Reverse Web Login (unofficial)
     // ══════════════════════════════════════════════════════════════
 
-    private string? _webToken;
-    private DateTime _webTokenExpiry = DateTime.MinValue;
-    private string? _webTokenUser;
+    // Web-login token cache — STATIC + thread-safe so it's shared across
+    // every SolisAdapter instance.  The adapter is DI-Scoped, so the old
+    // per-instance fields were thrown away between sync rounds and web
+    // requests, forcing a fresh (fragile) portal login almost every time.
+    // Keyed by username so multiple Solis accounts don't collide.
+    private static readonly Dictionary<string, (string Token, DateTime ExpiresAt)> _webTokenCache = new();
+    private static readonly object _webTokenLock = new();
     private string? _lastWebLoginError;
     private static readonly TimeSpan WebTokenTtl = TimeSpan.FromMinutes(25);
 
@@ -460,12 +464,17 @@ public class SolisAdapter : IInverterApiAdapter
 
     private async Task<string?> WebLoginAsync(ApiCredentials credentials, bool forceRefresh = false)
     {
-        // Use cached token only if: not expired, same user, not forced refresh
-        if (!forceRefresh
-            && !string.IsNullOrEmpty(_webToken)
-            && _webTokenUser == credentials.Username
-            && DateTime.UtcNow < _webTokenExpiry)
-            return _webToken;
+        // Use cached token only if: not expired, not forced refresh.
+        var webKey = credentials.Username ?? "";
+        if (!forceRefresh)
+        {
+            lock (_webTokenLock)
+            {
+                if (_webTokenCache.TryGetValue(webKey, out var cached)
+                    && DateTime.UtcNow < cached.ExpiresAt)
+                    return cached.Token;
+            }
+        }
 
         _lastWebLoginError = null;
         var attemptLog = new List<string>();
@@ -612,11 +621,12 @@ public class SolisAdapter : IInverterApiAdapter
 
                             if (!string.IsNullOrEmpty(token))
                             {
-                                _webToken = token;
-                                _webTokenExpiry = DateTime.UtcNow.Add(WebTokenTtl);
-                                _webTokenUser = credentials.Username;
+                                lock (_webTokenLock)
+                                {
+                                    _webTokenCache[webKey] = (token, DateTime.UtcNow.Add(WebTokenTtl));
+                                }
                                 _logger.LogInformation("Solis web login OK via {Tag}", tag);
-                                return _webToken;
+                                return token;
                             }
 
                             attemptLog.Add($"{tag} → {code} OK but no token field. Body: {Truncate(body, 150)}");
@@ -677,8 +687,7 @@ public class SolisAdapter : IInverterApiAdapter
                      response.StatusCode == System.Net.HttpStatusCode.Forbidden) && attempt == 1)
                 {
                     _logger.LogWarning("Solis web {Path}: auth rejected, invalidating cached token and retrying", path);
-                    _webToken = null;
-                    _webTokenExpiry = DateTime.MinValue;
+                    lock (_webTokenLock) { _webTokenCache.Remove(credentials.Username ?? ""); }
                     continue;
                 }
 

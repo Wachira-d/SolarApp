@@ -41,6 +41,13 @@ public class FoxEssAdapter : IInverterApiAdapter
     private readonly ILogger<FoxEssAdapter> _logger;
     private const string BaseUrl = "https://www.foxesscloud.com";
 
+    // OAuth (Mode 2) token cache — static + thread-safe, keyed by clientId.
+    // Mode 1 (private token + MD5 signature) is stateless so needs none, but
+    // the OAuth path previously re-fetched a token on every single call.
+    private static readonly Dictionary<string, (string Token, DateTime ExpiresAt)> _oauthCache = new();
+    private static readonly object _oauthLock = new();
+    private static readonly TimeSpan OAuthTtl = TimeSpan.FromMinutes(25);
+
     public InverterBrand Brand => InverterBrand.FoxESS;
 
     public FoxEssAdapter(IHttpClientFactory httpClientFactory, ILogger<FoxEssAdapter> logger)
@@ -375,6 +382,11 @@ public class FoxEssAdapter : IInverterApiAdapter
 
     private async Task<string?> GetOAuthTokenAsync(string clientId, string clientSecret)
     {
+        lock (_oauthLock)
+        {
+            if (_oauthCache.TryGetValue(clientId, out var cached) && DateTime.UtcNow < cached.ExpiresAt)
+                return cached.Token;
+        }
         try
         {
             var client = _httpClientFactory.CreateClient();
@@ -384,10 +396,16 @@ public class FoxEssAdapter : IInverterApiAdapter
             if (!response.IsSuccessStatusCode) return null;
 
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-            if (json.TryGetProperty("access_token", out var tok)) return tok.GetString();
-            if (json.TryGetProperty("data", out var d) && d.TryGetProperty("access_token", out var tok2))
-                return tok2.GetString();
+            string? token = null;
+            if (json.TryGetProperty("access_token", out var tok)) token = tok.GetString();
+            else if (json.TryGetProperty("data", out var d) && d.TryGetProperty("access_token", out var tok2))
+                token = tok2.GetString();
 
+            if (!string.IsNullOrEmpty(token))
+            {
+                lock (_oauthLock) { _oauthCache[clientId] = (token, DateTime.UtcNow.Add(OAuthTtl)); }
+                return token;
+            }
             return null;
         }
         catch (Exception ex)
