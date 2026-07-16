@@ -67,7 +67,10 @@ public class ConnectionHealthModel : PageModel
                 InstallationId = g.Key,
                 Total = g.Count(),
                 Success = g.Count(x => x.IsSuccess),
-                LastFail = g.Where(x => !x.IsSuccess).Max(x => (DateTime?)x.RequestTime),
+                // Max over a CASE (null for successes) translates reliably;
+                // a filtered .Where(...).Max(...) inside GroupBy may not.
+                // SQL MAX ignores nulls, so this is the latest failure time.
+                LastFail = g.Max(x => x.IsSuccess ? (DateTime?)null : x.RequestTime),
             })
             .ToListAsync();
 
