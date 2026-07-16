@@ -110,7 +110,11 @@ public class IndexModel : PageModel
                 i.Status,
                 i.InverterBrand,
                 i.SystemCapacityKw,
-                i.NextCleaningDueDate,
+                // Only treat a due date as a cleaning signal when we actually
+                // clean this site — otherwise a stale NextCleaningDueDate on a
+                // monitoring-only site would paint the pin yellow/red with no
+                // matching alert (same mismatch as the dashboard tile).
+                NextCleaningDueDate = i.IncludesCleaning ? i.NextCleaningDueDate : null,
                 // Earliest scheduled PM record that's still pending — i.e. the
                 // next visit the field crew has on the books for this site.
                 NextPmDate = i.MaintenanceRecords

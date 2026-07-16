@@ -69,6 +69,14 @@ public class InstallationStatusItem
     public DateTime? LastOnline { get; set; }
     public int ActiveAlerts { get; set; }
     public bool IsCleaningDue { get; set; }
+    // Service-scope flags — needed so the dashboard's "cleaning due" /
+    // "warranty expiring" counts match the alert job, which only raises
+    // those alerts for sites we actually service.  Without these, a site
+    // that's past its cleaning date but that we DON'T clean
+    // (IncludesCleaning = false) would inflate the tile with no matching
+    // alert — exactly the "4 due but 1 alert" mismatch.
+    public bool IncludesCleaning { get; set; }
+    public bool IncludesWarrantyService { get; set; }
     public int RemainingCleanings { get; set; }
     public DateTime? NextCleaningDate { get; set; }
     public DateTime WarrantyExpiry { get; set; }

@@ -135,6 +135,8 @@ public class DashboardService : IDashboardService
                 LastOnline = inst.LastOnlineAt,
                 ActiveAlerts = instAlerts,
                 IsCleaningDue = inst.IsCleaningDue,
+                IncludesCleaning = inst.IncludesCleaning,
+                IncludesWarrantyService = inst.IncludesWarrantyService,
                 RemainingCleanings = inst.RemainingCleanings,
                 NextCleaningDate = inst.NextCleaningDueDate,
                 WarrantyExpiry = inst.WarrantyExpiryDate,
@@ -178,16 +180,23 @@ public class DashboardService : IDashboardService
 
             CriticalAlertCount = activeAlerts.Count(a => a.Severity == AlertSeverity.Critical),
             HighAlertCount = activeAlerts.Count(a => a.Severity == AlertSeverity.High),
-            CleaningDueCount = installations.Count(i => i.IsCleaningDue),
+            // Cleaning-due / warranty counts respect the service-scope flags so
+            // they match the alert job (CheckMaintenanceDueAsync gates on
+            // IncludesCleaning; CheckWarrantyExpiryAsync gates on
+            // IncludesWarrantyService).  A site past its cleaning date that we
+            // don't clean is not "action required" for us, so it's excluded.
+            CleaningDueCount = installations.Count(i => i.IncludesCleaning && i.IsCleaningDue),
             WarrantyExpiringCount = installations.Count(i =>
-                i.WarrantyExpiryDate <= DateTime.UtcNow.AddDays(90) && !i.IsWarrantyExpired),
+                i.IncludesWarrantyService
+                && i.WarrantyExpiryDate <= DateTime.UtcNow.AddDays(90) && !i.IsWarrantyExpired),
             PendingMaintenanceCount = pendingMaintenance,
             OpenTicketCount = openTickets,
 
             ActiveAlerts = activeAlerts,
             OfflineInstallations = items.Where(i => i.Status == "Offline").ToList(),
-            CleaningDueInstallations = items.Where(i => i.IsCleaningDue).ToList(),
-            WarrantyExpiringInstallations = items.Where(i => i.WarrantyDaysLeft > 0 && i.WarrantyDaysLeft <= 90).ToList(),
+            CleaningDueInstallations = items.Where(i => i.IncludesCleaning && i.IsCleaningDue).ToList(),
+            WarrantyExpiringInstallations = items.Where(i =>
+                i.IncludesWarrantyService && i.WarrantyDaysLeft > 0 && i.WarrantyDaysLeft <= 90).ToList(),
 
             AllInstallations = items.OrderByDescending(i => i.ActiveAlerts)
                 .ThenBy(i => i.Status == "Active" ? 1 : 0)
