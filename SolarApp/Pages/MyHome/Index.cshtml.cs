@@ -55,7 +55,9 @@ public class IndexModel : PageModel
         if (Customer == null || !Customer.Installations.Any())
             return Page();
 
-        var today = DateTime.UtcNow.Date;
+        // Site-local today (matches how daily rows are keyed); UtcNow.Date
+        // read the wrong row during 00:00–07:00 Thailand time.
+        var today = SolarApp.Services.SiteTime.Today;
         var last7d = today.AddDays(-7);
         var last30d = today.AddDays(-30);
 

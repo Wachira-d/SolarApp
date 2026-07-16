@@ -51,11 +51,17 @@ public class DailySummaryJob
         var onlineSites = monitoredInstalls.Count(i => i.Status == InstallationStatus.Active);
         var offlineSites = monitoredInstalls.Count(i => i.Status == InstallationStatus.Offline);
 
-        // Energy "Today" only counts production from monitored sites.
-        // Without the InstallationId filter, a partner-monitored site that
-        // briefly synced via a manual test would pollute the total.
+        // Energy "Today" — sum the DAILY-granularity rows only.  The old
+        // query had NO Granularity filter, so it also summed every Realtime
+        // row (each of which carries the running TodayEnergyKwh accumulator),
+        // inflating the total by ~ the number of syncs that day — that was
+        // the "101,341 kWh" the operator saw.  Daily rows are keyed by the
+        // site-local date (SiteTime.Today), not UtcNow.Date, so match on that
+        // to stay correct during the 00:00–07:00 Thailand window.
+        var siteToday = SolarApp.Services.SiteTime.Today;
         var todayEnergy = await _context.EnergyData
-            .Where(r => r.Timestamp >= todayStart && r.Timestamp < todayEnd
+            .Where(r => r.Granularity == DataGranularity.Daily
+                        && r.Timestamp.Date == siteToday
                         && monitoredIds.Contains(r.InstallationId))
             .SumAsync(r => (decimal?)r.EnergyGenerationKwh) ?? 0;
 

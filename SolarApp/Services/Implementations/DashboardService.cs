@@ -67,7 +67,10 @@ public class DashboardService : IDashboardService
         var installations = await query.ToListAsync();
         var installationIds = installations.Select(i => i.Id).ToList();
 
-        var today = DateTime.UtcNow.Date;
+        // Site-local "today" (Bangkok), not UtcNow.Date — daily rows are keyed
+        // by the site date, so UtcNow.Date read the wrong row during 00:00–07:00
+        // Thailand time and showed 0 / stale "today" energy.
+        var today = SolarApp.Services.SiteTime.Today;
 
         // ── Active alerts ──
         var activeAlerts = await _context.SystemAlerts
@@ -229,7 +232,10 @@ public class DashboardService : IDashboardService
             .OrderBy(e => e.Timestamp)
             .ToListAsync();
 
-        var totalDays = Math.Max(1, (to - from).Days);
+        // Inclusive day count: a 1-31 May range is 31 days, not 30.  The +1
+        // matches PerformanceMetricsService so AverageDailyKwh agrees across
+        // the two pages.
+        var totalDays = Math.Max(1, (to - from).Days + 1);
         var totalGen = data.Sum(e => e.EnergyGenerationKwh);
 
         return new ProductionReportViewModel
