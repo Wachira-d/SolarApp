@@ -34,10 +34,13 @@ public class LineSettingsModel : PageModel
     [BindProperty] public string? ChannelSecret { get; set; }
     [BindProperty] public string? AlertGroupId { get; set; }
     [BindProperty] public string? TestLineUserId { get; set; }
+    /// <summary>Public base URL (https://…) used for tappable deep-links in LINE messages.</summary>
+    [BindProperty] public string? AppBaseUrl { get; set; }
 
     public bool IsTokenConfigured { get; set; }
     public string TokenSource { get; set; } = "Not set";
     public string? CurrentAlertGroupId { get; set; }
+    public string? CurrentAppBaseUrl { get; set; }
     public List<NotificationLog> RecentNotifications { get; set; } = new();
 
     [TempData] public string? StatusMessage { get; set; }
@@ -77,6 +80,13 @@ public class LineSettingsModel : PageModel
         CurrentAlertGroupId = dbGroupId?.Value;
         AlertGroupId = CurrentAlertGroupId;
 
+        var dbBaseUrl = await _context.SystemSettings
+            .FirstOrDefaultAsync(s => s.Key == "App.BaseUrl");
+        CurrentAppBaseUrl = !string.IsNullOrWhiteSpace(dbBaseUrl?.Value)
+            ? dbBaseUrl.Value
+            : _configuration["App:BaseUrl"];
+        AppBaseUrl = dbBaseUrl?.Value;
+
         var currentUser = await _userManager.GetUserAsync(User);
         if (!string.IsNullOrEmpty(currentUser?.LineUserId))
             TestLineUserId = currentUser.LineUserId;
@@ -105,6 +115,11 @@ public class LineSettingsModel : PageModel
         // Alert Group ID (always save, even if empty = clear)
         await UpsertSettingAsync("Line.AlertGroupId", AlertGroupId?.Trim() ?? "",
             "LINE Group ID for system alerts (all alerts sent here)");
+
+        // Public base URL for deep-links in LINE messages (always save).
+        // Normalise: strip trailing slash so "{base}/Admin/Alerts" is clean.
+        await UpsertSettingAsync("App.BaseUrl", AppBaseUrl?.Trim().TrimEnd('/') ?? "",
+            "Public base URL (https://…) for tappable links in LINE messages");
 
         StatusMessage = "LINE settings saved!";
         return RedirectToPage();

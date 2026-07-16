@@ -131,6 +131,26 @@ public class LineMessagingService : ILineMessagingService
         return _configuration["LineMessaging:ChannelAccessToken"];
     }
 
+    /// <summary>
+    /// The app's public base URL (e.g. https://solarapp.mangkorn.co.th),
+    /// used to build tappable deep-links in LINE messages.  Configurable
+    /// via Admin → LINE Settings (SystemSettings key "App.BaseUrl"), falls
+    /// back to appsettings "App:BaseUrl".  Returns null (no button) when
+    /// unset, or when the value isn't an absolute https URL — LINE rejects
+    /// URI actions that aren't https.
+    /// </summary>
+    private async Task<string?> GetAppBaseUrlAsync()
+    {
+        var dbSetting = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+            .FirstOrDefaultAsync(_context.SystemSettings, s => s.Key == "App.BaseUrl");
+        var raw = (dbSetting != null && !string.IsNullOrWhiteSpace(dbSetting.Value))
+            ? dbSetting.Value
+            : _configuration["App:BaseUrl"];
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        raw = raw.Trim().TrimEnd('/');
+        return raw.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? raw : null;
+    }
+
     public async Task SendMessageAsync(string lineUserId, string message)
     {
         if (string.IsNullOrEmpty(lineUserId)) return;
@@ -888,6 +908,44 @@ public class LineMessagingService : ILineMessagingService
                 bodyContents.Add(new { type = "text", text = $"  • {site}", size = "xs", color = "#00C853", wrap = true });
         }
 
+        // Footer: an optional "view pending alerts" button (only when the
+        // public base URL is configured) followed by the generated-at line.
+        // The button deep-links to the /Admin/Alerts page filtered to the
+        // unresolved alerts — tapping it from the LINE group opens the
+        // browser straight to the outstanding-alert list.
+        var baseUrl = await GetAppBaseUrlAsync();
+        var footerContents = new List<object>();
+        if (!string.IsNullOrEmpty(baseUrl))
+        {
+            var alertsUrl = $"{baseUrl}/Admin/Alerts";
+            // Label reflects the count so the operator sees "3" without opening.
+            var btnLabel = s.ActiveAlerts > 0
+                ? $"🔔 ดู Alert ค้าง ({s.ActiveAlerts})"
+                : "📋 เปิดดูระบบ";
+            footerContents.Add(new
+            {
+                type = "button",
+                style = "primary",
+                height = "sm",
+                // Red when there are outstanding alerts, brand-blue otherwise.
+                color = s.ActiveAlerts > 0 ? "#D32F2F" : "#1565C0",
+                action = new { type = "uri", label = btnLabel, uri = alertsUrl }
+            });
+            // Also expose the offline/work-order views as a lighter secondary
+            // link when relevant, so the summary is a jump-off point.
+            if (s.PendingWorkOrders > 0)
+            {
+                footerContents.Add(new
+                {
+                    type = "button",
+                    style = "link",
+                    height = "sm",
+                    action = new { type = "uri", label = $"📋 Work Orders ค้าง ({s.PendingWorkOrders})", uri = $"{baseUrl}/WorkOrders" }
+                });
+            }
+        }
+        footerContents.Add(new { type = "text", text = $"Report generated {DateTime.Now:HH:mm}", size = "xs", color = "#AAAAAA", align = "center", margin = "sm" });
+
         var flexContent = new
         {
             type = "bubble",
@@ -903,11 +961,8 @@ public class LineMessagingService : ILineMessagingService
             body = new { type = "box", layout = "vertical", spacing = "md", contents = bodyContents.ToArray() },
             footer = new
             {
-                type = "box", layout = "vertical",
-                contents = new object[]
-                {
-                    new { type = "text", text = $"Report generated {DateTime.Now:HH:mm}", size = "xs", color = "#AAAAAA", align = "center" }
-                }
+                type = "box", layout = "vertical", spacing = "sm",
+                contents = footerContents.ToArray()
             }
         };
 

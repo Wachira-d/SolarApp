@@ -156,13 +156,26 @@ public class DailySummaryJob
         // summary isn't site-specific, so installationId is null.
         try
         {
+            // Append a tappable link to the pending-alerts page when the
+            // public base URL is configured (same setting the flex button
+            // uses).  Plain text, so it works for personal-user recipients
+            // that don't get the rich flex card.
+            var baseUrl = await _context.SystemSettings
+                .Where(s => s.Key == "App.BaseUrl")
+                .Select(s => s.Value)
+                .FirstOrDefaultAsync();
+            var linkLine = !string.IsNullOrWhiteSpace(baseUrl)
+                    && baseUrl.Trim().StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? $"\n🔔 ดู Alert ค้าง: {baseUrl.Trim().TrimEnd('/')}/Admin/Alerts"
+                : "";
             var digest =
                 $"📊 Daily Summary {DateTime.UtcNow:dd/MM/yyyy}\n" +
                 $"Online/Monitored: {onlineSites}/{totalSites} ไซต์\n" +
                 $"Offline: {offlineSites}\n" +
                 $"Energy Today: {todayEnergy:N1} kWh\n" +
                 $"Active Alerts: {activeAlerts} (ใหม่วันนี้ {newAlertsToday})\n" +
-                $"Work Orders: {pendingWo} ค้าง, {completedWoToday} เสร็จวันนี้";
+                $"Work Orders: {pendingWo} ค้าง, {completedWoToday} เสร็จวันนี้" +
+                linkLine;
             var exclude = string.IsNullOrWhiteSpace(alertGroupId)
                 ? null
                 : new[] { alertGroupId! };
