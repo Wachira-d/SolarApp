@@ -8,6 +8,7 @@
 //   4. Database table StartupLogs        (best effort, after DB init)
 //   5. Windows Event Log                 (last resort)
 // ══════════════════════════════════════════════════════════════
+using Microsoft.AspNetCore.Authentication; // AuthenticateAsync for the /uploads guard
 
 var logFiles = new List<string>();
 var logBuffer = new List<string>();
@@ -130,8 +131,41 @@ try
         Log("  • UseHttpsRedirection + UseHsts (config override)");
     }
 
+    // Authorize uploaded files BEFORE static-file serving.  Documents and
+    // cleaning/work-order photos live under wwwroot/uploads and would
+    // otherwise be served anonymously to anyone who knows the (GUID) URL.
+    // Path shape is /uploads/{category}/{installationId}/{file}; require an
+    // authenticated user who can access that installation.
+    app.Use(async (context, next) =>
+    {
+        var path = context.Request.Path.Value;
+        if (path != null && path.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            var auth = await context.AuthenticateAsync(
+                Microsoft.AspNetCore.Identity.IdentityConstants.ApplicationScheme);
+            if (auth?.Principal?.Identity?.IsAuthenticated != true)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+            // segments: [uploads, category, installationId, file...]
+            var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length >= 3 && int.TryParse(segments[2], out var installId))
+            {
+                var access = context.RequestServices
+                    .GetRequiredService<SolarApp.Services.Authorization.IInstallationAccessHelper>();
+                if (!await access.CanAccessAsync(installId, auth.Principal))
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return;
+                }
+            }
+        }
+        await next();
+    });
+
     app.UseStaticFiles();
-    Log("  • UseStaticFiles");
+    Log("  • UseStaticFiles (uploads authorized)");
 
     var locOpt = app.Services.GetService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>>();
     if (locOpt != null)

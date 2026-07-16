@@ -151,34 +151,49 @@ public class ExternalLoginModel : PageModel
         if (!string.IsNullOrEmpty(email))
             user = await _userManager.FindByEmailAsync(email);
 
-        if (user == null)
+        if (user != null)
         {
-            // Create a new Customer-role user from Microsoft info
-            if (string.IsNullOrEmpty(email))
-            {
-                ErrorMessage = "Microsoft account did not return an email — cannot create a local account. " +
-                    "Ask your admin to create a user for you, then link Microsoft from profile settings.";
-                return RedirectToPage("./Login");
-            }
-
-            user = new ApplicationUser
-            {
-                UserName = email,
-                Email = email,
-                EmailConfirmed = true,
-                FullName = displayName ?? email,
-                IsActive = true
-            };
-            var createResult = await _userManager.CreateAsync(user);
-            if (!createResult.Succeeded)
-            {
-                ErrorMessage = "Could not create local account: " +
-                    string.Join(", ", createResult.Errors.Select(e => e.Description));
-                return RedirectToPage("./Login");
-            }
-            await _userManager.AddToRoleAsync(user, UserRoles.Customer);
-            _logger.LogInformation("Created local user {Email} from Microsoft login", user.Email);
+            // SECURITY (nOAuth): DO NOT auto-link an external login to an
+            // EXISTING local account based on an email claim.  The IdP token
+            // is minted by whatever tenant the user authenticated against
+            // (we use /common when no tenant is pinned), so an attacker who
+            // can assert a victim's email — e.g. an admin's — would otherwise
+            // be linked and signed straight into that privileged account.
+            // Linking must be done while already authenticated, from
+            // Account → Manage Logins (same policy as LINE).
+            _logger.LogWarning(
+                "Refused Microsoft auto-link to existing account for email claim (nOAuth guard). Provider={Provider}",
+                info.LoginProvider);
+            ErrorMessage = "มีบัญชีที่ใช้อีเมลนี้อยู่แล้ว. เพื่อความปลอดภัย กรุณาเข้าสู่ระบบด้วยรหัสผ่านก่อน " +
+                "แล้วไปที่ Account → Manage Logins เพื่อผูกบัญชี Microsoft.";
+            return RedirectToPage("./Login");
         }
+
+        // No existing account → create a brand-new Customer-role user.
+        if (string.IsNullOrEmpty(email))
+        {
+            ErrorMessage = "Microsoft account did not return an email — cannot create a local account. " +
+                "Ask your admin to create a user for you, then link Microsoft from profile settings.";
+            return RedirectToPage("./Login");
+        }
+
+        user = new ApplicationUser
+        {
+            UserName = email,
+            Email = email,
+            EmailConfirmed = true,
+            FullName = displayName ?? email,
+            IsActive = true
+        };
+        var createResult = await _userManager.CreateAsync(user);
+        if (!createResult.Succeeded)
+        {
+            ErrorMessage = "Could not create local account: " +
+                string.Join(", ", createResult.Errors.Select(e => e.Description));
+            return RedirectToPage("./Login");
+        }
+        await _userManager.AddToRoleAsync(user, UserRoles.Customer);
+        _logger.LogInformation("Created local user from Microsoft login (new Customer)");
 
         var addLoginResult = await _userManager.AddLoginAsync(user, info);
         if (!addLoginResult.Succeeded)
