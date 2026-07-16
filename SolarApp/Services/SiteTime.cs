@@ -24,6 +24,10 @@ public static class SiteTime
     /// <summary>Site local "now" (date + time of day).</summary>
     public static DateTime Now => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _tz);
 
+    /// <summary>Convert an arbitrary UTC instant to site-local time.</summary>
+    public static DateTime ToSiteTime(DateTime utc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _tz);
+
     public static TimeZoneInfo TimeZone => _tz;
 
     private static TimeZoneInfo Resolve()

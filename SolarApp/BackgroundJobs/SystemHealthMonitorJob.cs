@@ -408,6 +408,19 @@ public class SystemHealthMonitorJob
             }
         }
 
+        // Auto-resolve cleaning alerts whose site is no longer due (cleaning
+        // recorded → NextCleaningDueDate pushed to the future, or the site
+        // stopped being a cleaning site).  Without this the alert stayed open
+        // forever AND the dedup guard above then blocked the NEXT cycle from
+        // ever alerting again.
+        var dueIds = installations.Select(i => i.Id).ToHashSet();
+        var openCleaning = await _context.SystemAlerts
+            .Where(a => a.AlertType == AlertType.MaintenanceDue && a.ResolvedAt == null)
+            .ToListAsync();
+        foreach (var a in openCleaning)
+            if (!dueIds.Contains(a.InstallationId))
+                a.ResolvedAt = DateTime.UtcNow;
+
         await _context.SaveChangesAsync();
     }
 
@@ -444,6 +457,17 @@ public class SystemHealthMonitorJob
                 });
             }
         }
+
+        // Auto-resolve warranty alerts no longer in the expiring window
+        // (warranty renewed/extended → expiry pushed out, already expired, or
+        // warranty service dropped).  Same rationale as cleaning above.
+        var warnIds = installations.Select(i => i.Id).ToHashSet();
+        var openWarranty = await _context.SystemAlerts
+            .Where(a => a.AlertType == AlertType.WarrantyExpiring && a.ResolvedAt == null)
+            .ToListAsync();
+        foreach (var a in openWarranty)
+            if (!warnIds.Contains(a.InstallationId))
+                a.ResolvedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
     }

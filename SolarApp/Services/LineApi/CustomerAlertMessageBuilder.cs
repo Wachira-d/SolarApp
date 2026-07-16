@@ -184,7 +184,11 @@ $@"✅ {site} กลับมาทำงานปกติแล้ว (หย�
     {
         if (severity == AlertSeverity.Critical) return false;
         if (!install.QuietHoursStart.HasValue || !install.QuietHoursEnd.HasValue) return false;
-        var localNow = TimeOnly.FromDateTime(utcNow.ToLocalTime());
+        // Use the SITE-local time, not the server OS time.  On a UTC-configured
+        // host, utcNow.ToLocalTime() == UTC, so a 22:00–07:00 quiet window
+        // silenced 05:00–14:00 Thai (prime daytime) and let 3 AM alerts through.
+        // SiteTime centralises the Bangkok offset used everywhere else.
+        var localNow = TimeOnly.FromDateTime(SolarApp.Services.SiteTime.ToSiteTime(utcNow));
         var start = install.QuietHoursStart.Value;
         var end = install.QuietHoursEnd.Value;
         // Window can wrap midnight: 22:00→07:00 means "22:00-23:59 OR 00:00-07:00".

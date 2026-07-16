@@ -61,7 +61,12 @@ public class MaintenanceService : IMaintenanceService
 
             if (installation.CompletedCleaningCount < installation.TotalCleaningCount)
             {
-                installation.NextCleaningDueDate = completedDate.AddMonths(6);
+                // Use the site's configured cleaning frequency, not a hardcoded
+                // 6 months — every other completion path uses CleaningFrequencyMonths,
+                // so this was the odd one out (a 3-month-cycle site got a 6-month
+                // next-due here).
+                var months = installation.CleaningFrequencyMonths > 0 ? installation.CleaningFrequencyMonths : 6;
+                installation.NextCleaningDueDate = completedDate.AddMonths(months);
             }
             else
             {
