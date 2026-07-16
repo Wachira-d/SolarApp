@@ -193,6 +193,9 @@ public class FoxEssAdapter : IInverterApiAdapter
         var records = new List<EnergyRecord>();
         if (string.IsNullOrEmpty(credentials.PlantId)) return records;
 
+        Common.AdapterCallState.Reset();
+        int monthsOk = 0, monthsFailed = 0;
+        string? lastMonthError = null;
         try
         {
             // history/query has 24h max window, so use report/query for daily data instead
@@ -209,7 +212,15 @@ public class FoxEssAdapter : IInverterApiAdapter
                     variables = new[] { "generation", "feedin", "gridConsumption" }
                 });
 
-                if (!json.HasValue || GetErrno(json.Value) != 0) continue;
+                if (!json.HasValue || GetErrno(json.Value) != 0)
+                {
+                    monthsFailed++;
+                    lastMonthError = !json.HasValue
+                        ? "no/failed response"
+                        : $"errno={GetErrno(json.Value)}";
+                    continue;
+                }
+                monthsOk++;
 
                 var daysInMonth = DateTime.DaysInMonth(ym.Year, ym.Month);
                 var dayValues = new decimal[daysInMonth];
@@ -261,7 +272,14 @@ public class FoxEssAdapter : IInverterApiAdapter
         catch (Exception ex)
         {
             _logger.LogError(ex, "FOX ESS GetHistoricalData failed");
+            Common.AdapterCallState.Fail($"FoxESS historical error: {ex.GetType().Name}: {ex.Message}");
+            return records;
         }
+        // Every month we asked for failed AND we got nothing → real failure,
+        // not "no production".  (If even one month succeeded, an empty result
+        // legitimately means no generation in the window.)
+        if (records.Count == 0 && monthsOk == 0 && monthsFailed > 0)
+            Common.AdapterCallState.Fail($"FoxESS: all {monthsFailed} month-queries failed ({lastMonthError}).");
         return records;
     }
 
@@ -554,6 +572,10 @@ public class FoxEssAdapter : IInverterApiAdapter
         {
             var list = await GetHistoricalDataAsync(credentials, from, to);
             sw.Stop();
+            var fail = Common.AdapterCallState.Take();
+            if (list.Count == 0 && fail != null)
+                return ApiResult<List<EnergyRecord>>.Fail(
+                    ApiResultKind.CloudServerError, "FoxESS historical fetch failed.", detail: fail, duration: sw.Elapsed);
             return ApiResult<List<EnergyRecord>>.Ok(list, $"{list.Count} record(s) fetched", sw.Elapsed);
         }
         catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<EnergyRecord>>(ex, "FoxESS", sw.Elapsed); }

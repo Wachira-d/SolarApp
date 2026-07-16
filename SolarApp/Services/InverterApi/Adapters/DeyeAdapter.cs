@@ -156,10 +156,15 @@ public class DeyeAdapter : IInverterApiAdapter
     public async Task<List<EnergyRecord>> GetHistoricalDataAsync(ApiCredentials credentials, DateTime from, DateTime to)
     {
         var records = new List<EnergyRecord>();
+        Common.AdapterCallState.Reset();
         try
         {
             var client = await CreateAuthenticatedClientAsync(credentials);
-            if (client == null) return records;
+            if (client == null)
+            {
+                Common.AdapterCallState.Fail("Deye login failed (no token) — check appId/appSecret/email/password.");
+                return records;
+            }
 
             // Previous version called /device/originalData with deviceSn —
             // wrong endpoint (returns raw 5-min telemetry, not daily kWh
@@ -178,6 +183,7 @@ public class DeyeAdapter : IInverterApiAdapter
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Deye /station/history returned HTTP {Status}", (int)response.StatusCode);
+                Common.AdapterCallState.Fail($"Deye /station/history HTTP {(int)response.StatusCode}");
                 return records;
             }
 
@@ -239,6 +245,7 @@ public class DeyeAdapter : IInverterApiAdapter
         catch (Exception ex)
         {
             _logger.LogError(ex, "Deye GetHistoricalData failed");
+            Common.AdapterCallState.Fail($"Deye historical error: {ex.GetType().Name}: {ex.Message}");
         }
         return records;
     }
@@ -537,6 +544,12 @@ public class DeyeAdapter : IInverterApiAdapter
         {
             var list = await GetHistoricalDataAsync(credentials, from, to);
             sw.Stop();
+            var fail = Common.AdapterCallState.Take();
+            // 0 records + a recorded transport error = a real failure, not
+            // "no data" — surface it so backfill/reporting isn't misled.
+            if (list.Count == 0 && fail != null)
+                return ApiResult<List<EnergyRecord>>.Fail(
+                    ApiResultKind.CloudServerError, "Deye historical fetch failed.", detail: fail, duration: sw.Elapsed);
             return ApiResult<List<EnergyRecord>>.Ok(list, $"{list.Count} record(s) fetched", sw.Elapsed);
         }
         catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<EnergyRecord>>(ex, "Deye", sw.Elapsed); }

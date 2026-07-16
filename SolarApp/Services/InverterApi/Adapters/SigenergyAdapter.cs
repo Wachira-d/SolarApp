@@ -245,8 +245,13 @@ public class SigenergyAdapter : IInverterApiAdapter
     {
         var records = new List<EnergyRecord>();
         if (string.IsNullOrEmpty(credentials.PlantId)) return records;
-        var (token, _) = await LoginAsync(credentials);
-        if (token == null) return records;
+        Common.AdapterCallState.Reset();
+        var (token, loginErr) = await LoginAsync(credentials);
+        if (token == null)
+        {
+            Common.AdapterCallState.Fail($"Sigenergy login failed: {loginErr}");
+            return records;
+        }
         var baseUrl = GetBaseUrl(credentials);
 
         try
@@ -254,7 +259,11 @@ public class SigenergyAdapter : IInverterApiAdapter
             var url = $"{baseUrl}/openapi/systems/{credentials.PlantId}/statistics/daily" +
                       $"?startDate={from:yyyy-MM-dd}&endDate={to:yyyy-MM-dd}";
             var data = await GetAsync(token, url);
-            if (data == null) return records;
+            if (data == null)
+            {
+                Common.AdapterCallState.Fail("Sigenergy statistics/daily returned no/failed response.");
+                return records;
+            }
 
             JsonElement arr;
             if (data.Value.ValueKind == JsonValueKind.Array) arr = data.Value;
@@ -285,7 +294,11 @@ public class SigenergyAdapter : IInverterApiAdapter
                 });
             }
         }
-        catch (Exception ex) { _logger.LogError(ex, "Sigenergy GetHistoricalData failed"); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Sigenergy GetHistoricalData failed");
+            Common.AdapterCallState.Fail($"Sigenergy historical error: {ex.GetType().Name}: {ex.Message}");
+        }
         return records;
     }
 
@@ -420,6 +433,10 @@ public class SigenergyAdapter : IInverterApiAdapter
         {
             var data = await GetHistoricalDataAsync(credentials, from, to);
             sw.Stop();
+            var fail = Common.AdapterCallState.Take();
+            if (data.Count == 0 && fail != null)
+                return ApiResult<List<EnergyRecord>>.Fail(
+                    ApiResultKind.CloudServerError, "Sigenergy historical fetch failed.", detail: fail, duration: sw.Elapsed);
             return ApiResult<List<EnergyRecord>>.Ok(data, $"{data.Count} records", sw.Elapsed);
         }
         catch (Exception ex) { sw.Stop(); return ApiResultClassifier.ClassifyException<List<EnergyRecord>>(ex, "Sigenergy", sw.Elapsed); }
