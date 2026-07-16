@@ -107,8 +107,19 @@ public class PerformanceMetricsService : IPerformanceMetricsService
             .OrderByDescending(t => t.EffectiveFrom)
             .FirstOrDefaultAsync();
 
-        var importRate = tariff?.ImportRatePerKwh ?? 4.5m;   // ~THB 4.50 default
-        var exportRate = tariff?.ExportRatePerKwh ?? 2.2m;
+        // Rate precedence: a time-bounded ElectricityTariff row (most precise)
+        // → the per-site rates the operator set on the installation
+        // (ElectricityRatePerKwh / FeedInTariffRate — previously IGNORED here,
+        // so the configured feed-in tariff never affected any number) → a
+        // sensible Thailand default.  Using the per-site rate also makes this
+        // page's savings agree with the Dashboard/Reports, which key off the
+        // same ElectricityRatePerKwh.
+        var importRate = tariff?.ImportRatePerKwh
+            ?? (installation.ElectricityRatePerKwh > 0 ? installation.ElectricityRatePerKwh : (decimal?)null)
+            ?? 4.5m;
+        var exportRate = tariff?.ExportRatePerKwh
+            ?? (installation.FeedInTariffRate is > 0 ? installation.FeedInTariffRate : null)
+            ?? 2.2m;
 
         var capacity = installation.SystemCapacityKw;
 
@@ -323,8 +334,14 @@ public class PerformanceMetricsService : IPerformanceMetricsService
         List<EnergyData> dailyRecords, ElectricityTariff? tariff, int unresolvedAlerts)
     {
         var days = Math.Max(1, (int)(toDate - fromDate).TotalDays + 1);
-        var importRate = tariff?.ImportRatePerKwh ?? 4.5m;
-        var exportRate = tariff?.ExportRatePerKwh ?? 2.2m;
+        // Same rate precedence as the single-site path (tariff → per-site
+        // configured rate → default) so fleet and detail agree.
+        var importRate = tariff?.ImportRatePerKwh
+            ?? (installation.ElectricityRatePerKwh > 0 ? installation.ElectricityRatePerKwh : (decimal?)null)
+            ?? 4.5m;
+        var exportRate = tariff?.ExportRatePerKwh
+            ?? (installation.FeedInTariffRate is > 0 ? installation.FeedInTariffRate : null)
+            ?? 2.2m;
         var capacity = installation.SystemCapacityKw;
         var expectedPerDay = capacity * DefaultPeakSunHours * DefaultDerateFactor;
 
