@@ -196,6 +196,7 @@ public class Startup
         // re-resolution — pure reliability, no behaviour change.
         // A 100s ceiling is a safety net for the bare CreateClient() path
         // (Deye/FoxESS/GoodWe/Solis) which previously had NO timeout at all.
+        builder.Services.AddTransient<Services.InverterApi.Common.ResilientHttpHandler>();
         builder.Services.ConfigureHttpClientDefaults(b =>
         {
             b.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
@@ -206,6 +207,10 @@ public class Startup
                 // parallel installations can't exhaust ephemeral ports.
                 MaxConnectionsPerServer = 20,
             });
+            // Transparent transient-failure retry for every adapter's calls
+            // (5xx / 429 / timeout / network, with exponential backoff).
+            b.AddHttpMessageHandler(sp =>
+                sp.GetRequiredService<Services.InverterApi.Common.ResilientHttpHandler>());
             b.SetHandlerLifetime(TimeSpan.FromMinutes(5));
         });
 
