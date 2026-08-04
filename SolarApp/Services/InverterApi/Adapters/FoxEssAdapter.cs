@@ -64,8 +64,13 @@ public class FoxEssAdapter : IInverterApiAdapter
     {
         try
         {
+            // pageSize must be 10+ — FoxESS rejects a smaller page with
+            // errno 40257 "Parameters do not meet expectations".  This call
+            // used pageSize=1 to stay light, which made Test Connection fail
+            // on accounts where every real call (which uses 10/100) worked
+            // fine.  Match the working calls.
             var json = await SendPostAsync(credentials, "/op/v0/plant/list",
-                new { currentPage = 1, pageSize = 1 });
+                new { currentPage = 1, pageSize = 10 });
             var ok = json.HasValue && GetErrno(json.Value) == 0;
             return (ok, ok ? "Connected to FOX ESS!" : DescribeError(json));
         }
@@ -428,8 +433,13 @@ public class FoxEssAdapter : IInverterApiAdapter
 
         var hint = errno switch
         {
-            40256 or 40257 or 40258 =>
-                " — โดยทั่วไปคือปัญหา API key / signature: ตรวจว่าใช้ Private Token ที่เพิ่ง generate (ค่าเดิมถูกยกเลิกทันทีที่ generate ใหม่), " +
+            // 40257 is a REQUEST-BODY complaint ("Parameters do not meet
+            // expectations"), not an auth failure — e.g. a pageSize below the
+            // allowed minimum, or a device SN that isn't on this account.
+            40257 => " — พารามิเตอร์ของคำขอไม่ถูกต้อง: ถ้าเป็นการดึงข้อมูลไซต์ ตรวจว่า Plant/Station ID " +
+                     "เป็น Serial Number (SN) ของ inverter (ไม่ใช่ GUID จาก URL ของเว็บ portal)",
+            40256 or 40258 =>
+                " — ปัญหา API key / signature: ตรวจว่าใช้ Private Token ที่เพิ่ง generate (ค่าเดิมถูกยกเลิกทันทีที่ generate ใหม่), " +
                 "ใส่ครบไม่มีช่องว่าง, และเวลาเครื่องเซิร์ฟเวอร์ตรง (signature ผูกกับ timestamp)",
             40400 => " — ไม่พบ resource: ตรวจว่า Plant/Station ID เป็น Serial Number (SN) ของ inverter",
             41807 or 41808 => " — เกินโควตาเรียก API ของวันนี้",
