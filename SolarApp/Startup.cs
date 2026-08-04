@@ -735,21 +735,12 @@ public class Startup
             ("IX_CleaningRecords_Status", "CleaningRecords", "[Status]"),
         };
 
-        var sb = new System.Text.StringBuilder();
-
-        // Build one big idempotent batch
-        foreach (var (table, column, sql) in upgrades)
-        {
-            // Guard: only ALTER if both the table EXISTS and the column does NOT.
-            // Without the table-existence check, ALTER TABLE on a table that's
-            // created later in the same batch (e.g. WorkOrders) would fail and
-            // abort the entire script.
-            sb.AppendLine($@"
-IF EXISTS (SELECT 1 FROM sys.tables WHERE name = N'{table}')
-AND NOT EXISTS (SELECT 1 FROM sys.columns
-    WHERE Name = N'{column}' AND Object_ID = Object_ID(N'[{table}]'))
-BEGIN {sql}; END");
-        }
+        // NOTE: column upgrades are NOT batched into one script any more.
+        // A single 30-statement batch shares one command timeout, so one slow
+        // or blocked ALTER took the whole batch down with it and NONE of the
+        // other 29 columns got applied — and the log couldn't say which
+        // statement was at fault.  They are now executed individually below,
+        // each idempotent and independently timed.
 
         // ── Execute in stages so a single failure doesn't abort the rest ──
         // Stage 1: ALTER TABLE column additions (idempotent IF EXISTS / NOT EXISTS).
@@ -759,8 +750,8 @@ BEGIN {sql}; END");
 
         var stages = new List<(string Name, string Sql)>();
 
-        // Stage 1: column ALTERs (already in sb as IF EXISTS/NOT EXISTS guarded statements)
-        stages.Add(("AlterColumns", sb.ToString()));
+        // Stage 1 (column ALTERs) is no longer a stage — see the individual
+        // per-column loop below, which replaced the single batched script.
 
         // Stage 1b: one-time backfill of HasBattery for legacy rows.  Runs
         // after the column exists.  Idempotent + safe: it only flips rows
@@ -945,21 +936,24 @@ BEGIN
     CREATE INDEX IX_NotificationRoutes_IsEnabled ON [NotificationRoutes]([IsEnabled]);
 END"));
 
-        // Stage 3: ancillary indexes (each in its own statement so one failure doesn't block others)
-        var indexSb = new System.Text.StringBuilder();
+        // Stage 3: ancillary indexes — one stage PER INDEX.  CREATE INDEX on a
+        // table with real data can genuinely take tens of seconds on SQL
+        // Express; batching them meant one slow index timed out the whole
+        // script, rolled back, and left every index uncreated — so the same
+        // slow statement was retried from scratch on every single startup.
+        // Individually, the fast ones stick and only the slow one retries.
         foreach (var (name, table, cols) in indexUpgrades)
         {
             var bareCols = cols.Replace("[", "").Replace("]", "")
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var colExistsClauses = string.Join(" AND ", bareCols.Select(c =>
                 $"EXISTS (SELECT 1 FROM sys.columns WHERE Name = N'{c}' AND Object_ID = Object_ID(N'[{table}]'))"));
-            indexSb.AppendLine($@"
+            stages.Add(($"Index:{name}", $@"
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{name}')
     AND EXISTS (SELECT 1 FROM sys.tables WHERE name = '{table}')
     AND {colExistsClauses}
-BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
+BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END"));
         }
-        stages.Add(("Indexes", indexSb.ToString()));
 
         // ── Bounded execution ────────────────────────────────────────
         // Schema work runs on the startup path, so it must NEVER be able to
@@ -980,6 +974,47 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
 
         var failedStages = new List<string>();
         var budgetExhausted = false;
+
+        // ── Column upgrades: one statement each ──────────────────────
+        // Each is idempotent (skips when the table is absent or the column
+        // already exists), so on an up-to-date database every iteration is a
+        // cheap metadata check.  Running them individually means a single
+        // slow/blocked ALTER can no longer prevent the other columns from
+        // being applied, and the log names the exact statement that failed.
+        var applied = new List<string>();
+        var columnFailures = new List<string>();
+        var skippedColumns = 0;
+        foreach (var (table, column, sql) in upgrades)
+        {
+            if (budgetExhausted || totalSw.Elapsed > schemaBudget)
+            {
+                budgetExhausted = true;
+                skippedColumns++;
+                continue;
+            }
+            try
+            {
+                #pragma warning disable EF1002
+                await context.Database.ExecuteSqlRawAsync(lockGuard + $@"
+IF EXISTS (SELECT 1 FROM sys.tables WHERE name = N'{table}')
+AND NOT EXISTS (SELECT 1 FROM sys.columns
+    WHERE Name = N'{column}' AND Object_ID = Object_ID(N'[{table}]'))
+BEGIN {sql}; END");
+                #pragma warning restore EF1002
+                applied.Add($"{table}.{column}");
+            }
+            catch (Exception ex)
+            {
+                columnFailures.Add($"{table}.{column}: {ex.Message}");
+                log($"DB: Column upgrade {table}.{column} FAILED: {ex.Message}");
+            }
+        }
+        if (columnFailures.Count > 0)
+            log($"DB: {columnFailures.Count} column upgrade(s) failed — pages using them may throw. " +
+                $"Manual SQL needed for: {string.Join(" | ", columnFailures.Select(f => f.Split(':')[0]))}");
+        if (skippedColumns > 0)
+            log($"DB: Skipped {skippedColumns} column upgrade(s) — schema budget spent. Restart when the database is idle.");
+
         foreach (var (stageName, stageSql) in stages)
         {
             if (string.IsNullOrWhiteSpace(stageSql)) continue;
@@ -1001,80 +1036,6 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 log($"DB: Schema stage '{stageName}' FAILED: {ex.Message}");
             }
         }
-
-        // ── Per-column verification + emergency retry ────────────────
-        // Even when the batched AlterColumns stage reports success, a
-        // single malformed ALTER in the middle of the batch can quietly
-        // abort the rest on some SQL Server configurations.  Walk the
-        // upgrades list AFTER the batch and verify each column actually
-        // exists; if any are missing, run that ALTER as its own statement.
-        //
-        // This is the safety net for the HasBattery dashboard crash:
-        // the model expects the column, EF SELECTs it, and a missing
-        // column blows up every page that queries Installations.
-        //
-        // IMPORTANT: this loop is BUDGETED.  It previously walked all ~30
-        // upgrades unbounded — against a locked/slow database where every
-        // statement times out, that serialised into 15+ minutes of startup
-        // hang and IIS served 503s.  Now it stops the moment the shared
-        // schema budget is spent, and each statement fails fast via
-        // LOCK_TIMEOUT.  A single verification query is cheap; the whole
-        // pass is skipped entirely when the batch above already ran long.
-        var retried = new List<string>();
-        var stillMissing = new List<string>();
-        var skippedVerify = 0;
-        foreach (var (table, column, sql) in upgrades)
-        {
-            if (budgetExhausted || totalSw.Elapsed > schemaBudget)
-            {
-                budgetExhausted = true;
-                skippedVerify++;
-                continue;
-            }
-
-            string? exists = null;
-            try
-            {
-                #pragma warning disable EF1002
-                exists = (await context.Database
-                    .SqlQueryRaw<string>(
-                        lockGuard +
-                        $"SELECT TOP 1 CAST(1 AS NVARCHAR(10)) AS Value " +
-                        $"FROM sys.columns WHERE Name = N'{column}' " +
-                        $"AND Object_ID = Object_ID(N'[{table}]')")
-                    .ToListAsync()).FirstOrDefault();
-                #pragma warning restore EF1002
-            }
-            catch
-            {
-                // Table doesn't exist yet (e.g. WorkOrders pre-create), or the
-                // probe was blocked/timed out — either way, skip this column.
-                continue;
-            }
-            if (exists != null) continue;
-
-            try
-            {
-                #pragma warning disable EF1002
-                await context.Database.ExecuteSqlRawAsync(lockGuard + sql);
-                #pragma warning restore EF1002
-                retried.Add($"{table}.{column}");
-                log($"DB: Retried ALTER for missing column {table}.{column} — OK");
-            }
-            catch (Exception ex)
-            {
-                stillMissing.Add($"{table}.{column}: {ex.Message}");
-                log($"DB: Retry of ALTER {table}.{column} FAILED: {ex.Message}");
-            }
-        }
-        if (skippedVerify > 0)
-            log($"DB: Skipped column verification for {skippedVerify} upgrade(s) — schema budget spent. " +
-                "App is starting anyway; re-run a restart when the database is idle to finish them.");
-        if (retried.Count > 0)
-            log($"DB: Recovered {retried.Count} missing column(s): {string.Join(", ", retried)}");
-        if (stillMissing.Count > 0)
-            log($"DB: {stillMissing.Count} column(s) STILL missing after retry — pages that depend on them will throw. " +
-                $"Manual SQL: {string.Join(" | ", stillMissing)}");
 
         totalSw.Stop();
         // Restore the ambient command timeout — the 20s cap was only for the
