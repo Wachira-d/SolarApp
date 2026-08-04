@@ -91,8 +91,21 @@ public class SelfKeepAliveService : BackgroundService
                     }
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                // The host is shutting down — leave quietly.
+                break;
+            }
+            catch (Exception ex)
+            {
+                // Catches EVERYTHING else, including TaskCanceledException from
+                // HttpClient.Timeout.  That one derives from
+                // OperationCanceledException, so the previous
+                // `when (ex is not OperationCanceledException)` filter let it
+                // escape — and an unhandled exception out of a BackgroundService
+                // stops the entire host (BackgroundServiceExceptionBehavior
+                // defaults to StopHost).  A failed keepalive ping must never be
+                // able to take the application down.
                 consecutiveFailures++;
                 if (consecutiveFailures == 1 || consecutiveFailures % 5 == 0)
                 {
@@ -102,7 +115,14 @@ public class SelfKeepAliveService : BackgroundService
                 }
             }
 
-            await Task.Delay(interval, stoppingToken);
+            try
+            {
+                await Task.Delay(interval, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break; // shutting down
+            }
         }
     }
 }

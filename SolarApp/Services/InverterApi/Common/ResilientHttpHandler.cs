@@ -35,11 +35,18 @@ public sealed class ResilientHttpHandler : DelegatingHandler
         _maxAttempts = Math.Max(1, maxAttempts);
     }
 
-    // Vendor cloud host suffixes whose POST endpoints are read/login calls
-    // and safe to retry.  Everything else (notably api.line.me, whose POST
-    // pushes a message and MUST NOT be duplicated) only retries idempotent
-    // GET/HEAD.  GETs are always safe to retry regardless of host.
-    private static readonly string[] RetryablePostHosts =
+    // ONLY these inverter-vendor clouds are retried.  Nothing else is
+    // touched — not the LINE push API (a resent POST would duplicate a
+    // message), not OAuth, not the self-keepalive ping, not SignalR.
+    //
+    // This allowlist is deliberately strict.  An earlier version also
+    // retried *any* GET "because GETs are idempotent", which quietly
+    // changed the failure mode of unrelated traffic: the keepalive ping to
+    // localhost went from failing fast (HttpRequestException, handled) to
+    // being retried until the caller's 10s HttpClient.Timeout fired
+    // (TaskCanceledException, unhandled) — and that killed the host.
+    // Retry behaviour must never leak outside the calls it was built for.
+    private static readonly string[] RetryableHosts =
     {
         "hoymiles.com", "huawei.com", "semsportal.com", "soliscloud.com",
         "deyecloud.com", "foxesscloud.com", "sigencloud.com", "solarman.cn",
@@ -47,13 +54,9 @@ public sealed class ResilientHttpHandler : DelegatingHandler
 
     private static bool MayRetry(HttpRequestMessage request)
     {
-        if (request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
-            return true; // idempotent by definition
         var host = request.RequestUri?.Host;
         if (string.IsNullOrEmpty(host)) return false;
-        // Non-GET (POST/PUT): only for the inverter vendor clouds, whose
-        // "login"/"query" POSTs are effectively idempotent.
-        foreach (var suffix in RetryablePostHosts)
+        foreach (var suffix in RetryableHosts)
             if (host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                 return true;
         return false;

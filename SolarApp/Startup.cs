@@ -29,6 +29,14 @@ public class Startup
 
     public static void ConfigureServices(WebApplicationBuilder builder)
     {
+        // A background service that throws must never stop the whole app.
+        // .NET's default (StopHost) took the entire site down when the
+        // self-keepalive ping timed out — one optional ping killing a
+        // production web app is never the trade-off we want.  Failures are
+        // logged; the site keeps serving.
+        builder.Services.Configure<HostOptions>(o =>
+            o.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
+
         builder.Services.AddHttpContextAccessor();
         // Automatic audit trail for user-driven changes to domain entities
         // (Installation, Customer, Partner, AlertRule, settings, …).  The
