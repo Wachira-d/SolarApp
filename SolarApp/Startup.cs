@@ -961,16 +961,38 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         }
         stages.Add(("Indexes", indexSb.ToString()));
 
-        // Execute each stage independently and log any failures
+        // ── Bounded execution ────────────────────────────────────────
+        // Schema work runs on the startup path, so it must NEVER be able to
+        // hold the app hostage.  Two guards:
+        //   1. SET LOCK_TIMEOUT — an ALTER needs a schema-modification lock;
+        //      if the previous app instance (or a running Hangfire job) still
+        //      holds a lock on the table, the statement would otherwise wait
+        //      the full command timeout.  Fail in 5s instead of 30s.
+        //   2. A total budget — once spent we stop trying and let the app
+        //      start.  Missing columns are logged loudly; the per-column
+        //      retry below is best-effort, not a startup requirement.
+        var schemaBudget = TimeSpan.FromSeconds(90);
         var totalSw = System.Diagnostics.Stopwatch.StartNew();
+        var previousTimeout = context.Database.GetCommandTimeout();
+        context.Database.SetCommandTimeout(20);
+
+        const string lockGuard = "SET LOCK_TIMEOUT 5000;\n";
+
         var failedStages = new List<string>();
+        var budgetExhausted = false;
         foreach (var (stageName, stageSql) in stages)
         {
             if (string.IsNullOrWhiteSpace(stageSql)) continue;
+            if (totalSw.Elapsed > schemaBudget)
+            {
+                budgetExhausted = true;
+                log($"DB: Schema budget ({schemaBudget.TotalSeconds:0}s) exhausted — skipping stage '{stageName}' so the app can start.");
+                continue;
+            }
             try
             {
                 #pragma warning disable EF1002
-                await context.Database.ExecuteSqlRawAsync(stageSql);
+                await context.Database.ExecuteSqlRawAsync(lockGuard + stageSql);
                 #pragma warning restore EF1002
             }
             catch (Exception ex)
@@ -990,16 +1012,33 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
         // This is the safety net for the HasBattery dashboard crash:
         // the model expects the column, EF SELECTs it, and a missing
         // column blows up every page that queries Installations.
+        //
+        // IMPORTANT: this loop is BUDGETED.  It previously walked all ~30
+        // upgrades unbounded — against a locked/slow database where every
+        // statement times out, that serialised into 15+ minutes of startup
+        // hang and IIS served 503s.  Now it stops the moment the shared
+        // schema budget is spent, and each statement fails fast via
+        // LOCK_TIMEOUT.  A single verification query is cheap; the whole
+        // pass is skipped entirely when the batch above already ran long.
         var retried = new List<string>();
         var stillMissing = new List<string>();
+        var skippedVerify = 0;
         foreach (var (table, column, sql) in upgrades)
         {
+            if (budgetExhausted || totalSw.Elapsed > schemaBudget)
+            {
+                budgetExhausted = true;
+                skippedVerify++;
+                continue;
+            }
+
             string? exists = null;
             try
             {
                 #pragma warning disable EF1002
                 exists = (await context.Database
                     .SqlQueryRaw<string>(
+                        lockGuard +
                         $"SELECT TOP 1 CAST(1 AS NVARCHAR(10)) AS Value " +
                         $"FROM sys.columns WHERE Name = N'{column}' " +
                         $"AND Object_ID = Object_ID(N'[{table}]')")
@@ -1008,7 +1047,8 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             }
             catch
             {
-                // Table doesn't exist yet (e.g. WorkOrders pre-create) — skip.
+                // Table doesn't exist yet (e.g. WorkOrders pre-create), or the
+                // probe was blocked/timed out — either way, skip this column.
                 continue;
             }
             if (exists != null) continue;
@@ -1016,7 +1056,7 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
             try
             {
                 #pragma warning disable EF1002
-                await context.Database.ExecuteSqlRawAsync(sql);
+                await context.Database.ExecuteSqlRawAsync(lockGuard + sql);
                 #pragma warning restore EF1002
                 retried.Add($"{table}.{column}");
                 log($"DB: Retried ALTER for missing column {table}.{column} — OK");
@@ -1027,6 +1067,9 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 log($"DB: Retry of ALTER {table}.{column} FAILED: {ex.Message}");
             }
         }
+        if (skippedVerify > 0)
+            log($"DB: Skipped column verification for {skippedVerify} upgrade(s) — schema budget spent. " +
+                "App is starting anyway; re-run a restart when the database is idle to finish them.");
         if (retried.Count > 0)
             log($"DB: Recovered {retried.Count} missing column(s): {string.Join(", ", retried)}");
         if (stillMissing.Count > 0)
@@ -1034,8 +1077,17 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 $"Manual SQL: {string.Join(" | ", stillMissing)}");
 
         totalSw.Stop();
+        // Restore the ambient command timeout — the 20s cap was only for the
+        // schema phase; normal app queries keep the provider default.
+        context.Database.SetCommandTimeout(previousTimeout);
 
-        if (failedStages.Count == 0)
+        if (budgetExhausted)
+        {
+            log($"DB: Schema upgrades TIMED OUT after {totalSw.ElapsedMilliseconds} ms and were cut short so the app could start. " +
+                "This usually means the database was busy or locked (e.g. the previous app instance's jobs were still running). " +
+                "Restart once the database is idle to finish any remaining changes.");
+        }
+        else if (failedStages.Count == 0)
         {
             log($"DB: Schema upgrades applied successfully ({stages.Count} stage(s), {totalSw.ElapsedMilliseconds} ms)");
         }
