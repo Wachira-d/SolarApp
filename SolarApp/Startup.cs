@@ -2055,12 +2055,18 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END");
                 if (!Enum.TryParse<Models.Enums.InverterBrand>(form["brand"].ToString(), out var brand))
                     return Results.Json(Services.Api.ApiResponse.ValidationError("Invalid brand"));
 
-                var apiKey    = form["apiKey"].ToString();
-                var apiSecret = form["apiSecret"].ToString();
-                var username  = form["username"].ToString();
-                var password  = form["password"].ToString();
-                var plantId   = form["plantId"].ToString();
-                var apiBaseUrl = form["apiBaseUrl"].ToString();
+                // Trim every pasted credential.  Copy-paste from a vendor
+                // portal very often carries a trailing space/newline, which
+                // silently breaks signature-based auth (the value is signed
+                // with the whitespace but sent without it) — and made Test
+                // Connection fail while a saved-then-synced value worked,
+                // because Save already trims.
+                var apiKey    = form["apiKey"].ToString().Trim();
+                var apiSecret = form["apiSecret"].ToString().Trim();
+                var username  = form["username"].ToString().Trim();
+                var password  = form["password"].ToString().Trim();
+                var plantId   = form["plantId"].ToString().Trim();
+                var apiBaseUrl = form["apiBaseUrl"].ToString().Trim();
                 // ConnectionMethod is sent by the UI dropdown.  When provided,
                 // adapters honor it instead of auto-detecting from which
                 // fields are populated — auto-detect produces the wrong

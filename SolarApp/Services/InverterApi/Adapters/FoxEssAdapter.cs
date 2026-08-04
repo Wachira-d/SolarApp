@@ -365,13 +365,19 @@ public class FoxEssAdapter : IInverterApiAdapter
     private async Task<HttpClient?> CreateClientAsync(ApiCredentials credentials, string path)
     {
         // Mode 1: Private Token + signature (preferred if ApiKey is set)
-        if (!string.IsNullOrEmpty(credentials.ApiKey))
+        if (!string.IsNullOrWhiteSpace(credentials.ApiKey))
         {
+            // TRIM is essential, not cosmetic: .NET strips surrounding
+            // whitespace when it serialises a header value, so a key pasted
+            // with a stray space/newline would be SIGNED with the whitespace
+            // but SENT without it — the signature then never matches and the
+            // vendor rejects every call with an auth error.
+            var apiKey = credentials.ApiKey.Trim();
             var client = _httpClientFactory.CreateClient();
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-            var signature = GenerateSignature(path, credentials.ApiKey, timestamp);
+            var signature = GenerateSignature(path, apiKey, timestamp);
 
-            client.DefaultRequestHeaders.Add("token", credentials.ApiKey);
+            client.DefaultRequestHeaders.Add("token", apiKey);
             client.DefaultRequestHeaders.Add("timestamp", timestamp);
             client.DefaultRequestHeaders.Add("signature", signature);
             client.DefaultRequestHeaders.Add("lang", "en");
