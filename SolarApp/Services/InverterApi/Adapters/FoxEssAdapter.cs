@@ -67,7 +67,7 @@ public class FoxEssAdapter : IInverterApiAdapter
             var json = await SendPostAsync(credentials, "/op/v0/plant/list",
                 new { currentPage = 1, pageSize = 1 });
             var ok = json.HasValue && GetErrno(json.Value) == 0;
-            return (ok, ok ? "Connected to FOX ESS!" : $"FOX ESS errno={GetErrno(json ?? default)}");
+            return (ok, ok ? "Connected to FOX ESS!" : DescribeError(json));
         }
         catch (Exception ex)
         {
@@ -191,9 +191,18 @@ public class FoxEssAdapter : IInverterApiAdapter
         ApiCredentials credentials, DateTime from, DateTime to)
     {
         var records = new List<EnergyRecord>();
-        if (string.IsNullOrEmpty(credentials.PlantId)) return records;
-
         Common.AdapterCallState.Reset();
+        if (string.IsNullOrEmpty(credentials.PlantId))
+        {
+            // Surface WHY nothing came back — this used to return an empty
+            // list silently, so the UI just said "0 records" with no clue that
+            // the required field was simply blank.
+            Common.AdapterCallState.Fail(
+                "FoxESS: Plant/Station ID is empty. For FoxESS this field must be the inverter's " +
+                "Serial Number (SN) — the device-level endpoints (real/query, report/query) are keyed by SN, " +
+                "not by the plant/station GUID from the web portal URL.");
+            return records;
+        }
         int monthsOk = 0, monthsFailed = 0;
         string? lastMonthError = null;
         try
@@ -217,7 +226,7 @@ public class FoxEssAdapter : IInverterApiAdapter
                     monthsFailed++;
                     lastMonthError = !json.HasValue
                         ? "no/failed response"
-                        : $"errno={GetErrno(json.Value)}";
+                        : DescribeError(json);
                     continue;
                 }
                 monthsOk++;
@@ -396,6 +405,33 @@ public class FoxEssAdapter : IInverterApiAdapter
         var signText = path + @"\r\n" + token + @"\r\n" + timestamp;
         var hash = MD5.HashData(Encoding.UTF8.GetBytes(signText));
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Turn a FoxESS error response into something an operator can act on.
+    /// The vendor's own "msg" field is the authoritative text, so it is always
+    /// included when present; the extra hints below are practical guidance for
+    /// the auth-family codes we see most often, not a copy of the vendor's
+    /// error table.  Check the portal's "API documentation" for the full list.
+    /// </summary>
+    private static string DescribeError(JsonElement? json)
+    {
+        if (json is null) return "FOX ESS: no response (network/timeout).";
+        var errno = GetErrno(json.Value);
+        var msg = GetString(json.Value, "msg");
+
+        var hint = errno switch
+        {
+            40256 or 40257 or 40258 =>
+                " — โดยทั่วไปคือปัญหา API key / signature: ตรวจว่าใช้ Private Token ที่เพิ่ง generate (ค่าเดิมถูกยกเลิกทันทีที่ generate ใหม่), " +
+                "ใส่ครบไม่มีช่องว่าง, และเวลาเครื่องเซิร์ฟเวอร์ตรง (signature ผูกกับ timestamp)",
+            40400 => " — ไม่พบ resource: ตรวจว่า Plant/Station ID เป็น Serial Number (SN) ของ inverter",
+            41807 or 41808 => " — เกินโควตาเรียก API ของวันนี้",
+            _ => "",
+        };
+
+        var msgPart = string.IsNullOrWhiteSpace(msg) ? "" : $": {msg}";
+        return $"FOX ESS errno={errno}{msgPart}{hint}";
     }
 
     private async Task<string?> GetOAuthTokenAsync(string clientId, string clientSecret)
