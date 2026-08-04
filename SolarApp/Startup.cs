@@ -983,17 +983,49 @@ BEGIN CREATE INDEX [{name}] ON [{table}]({cols}); END"));
         var failedStages = new List<string>();
         var budgetExhausted = false;
 
-        // ── Column upgrades: one statement each ──────────────────────
-        // Each is idempotent (skips when the table is absent or the column
-        // already exists), so on an up-to-date database every iteration is a
-        // cheap metadata check.  Running them individually means a single
-        // slow/blocked ALTER can no longer prevent the other columns from
-        // being applied, and the log names the exact statement that failed.
+        // ── Read the existing schema ONCE ────────────────────────────
+        // Catalog lookups are pathologically slow on this deployment
+        // (~2.5s per sys.columns probe, vs ~20ms for a normal table query),
+        // so probing each column separately cost 75s+ and blew the timeout —
+        // to answer "already present" every single time.  One query returns
+        // the whole picture, after which almost every upgrade is a pure
+        // in-memory skip with no database round-trip at all.
+        var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var schemaKnown = false;
+        try
+        {
+            #pragma warning disable EF1002
+            var rows = await context.Database.SqlQueryRaw<string>(
+                lockGuard +
+                "SELECT t.name + '.' + c.name AS Value " +
+                "FROM sys.columns c INNER JOIN sys.tables t ON c.object_id = t.object_id")
+                .ToListAsync();
+            #pragma warning restore EF1002
+            foreach (var r in rows)
+                if (!string.IsNullOrEmpty(r)) existingColumns.Add(r);
+            schemaKnown = true;
+            log($"DB: Schema snapshot loaded ({existingColumns.Count} columns) in {totalSw.ElapsedMilliseconds} ms");
+        }
+        catch (Exception ex)
+        {
+            // Fall back to per-statement guarded ALTERs (slower, still correct).
+            log($"DB: Schema snapshot unavailable ({ex.Message}) — falling back to per-column checks.");
+        }
+
+        // ── Column upgrades ──────────────────────────────────────────
+        // Statements stay individually executed so one slow/blocked ALTER
+        // cannot stop the rest, and the log names the exact failure.  Each
+        // is still guarded server-side, so the snapshot is an optimisation
+        // and never the sole source of truth.
         var applied = new List<string>();
         var columnFailures = new List<string>();
         var skippedColumns = 0;
         foreach (var (table, column, sql) in upgrades)
         {
+            // Already present → nothing to do, and no round-trip to prove it.
+            if (schemaKnown && existingColumns.Contains($"{table}.{column}"))
+                continue;
+
             if (budgetExhausted || totalSw.Elapsed > schemaBudget)
             {
                 budgetExhausted = true;
@@ -1010,6 +1042,7 @@ AND NOT EXISTS (SELECT 1 FROM sys.columns
 BEGIN {sql}; END");
                 #pragma warning restore EF1002
                 applied.Add($"{table}.{column}");
+                log($"DB: Column upgrade applied: {table}.{column}");
             }
             catch (Exception ex)
             {
@@ -1017,15 +1050,38 @@ BEGIN {sql}; END");
                 log($"DB: Column upgrade {table}.{column} FAILED: {ex.Message}");
             }
         }
+        if (applied.Count > 0)
+            log($"DB: Applied {applied.Count} column upgrade(s): {string.Join(", ", applied)}");
         if (columnFailures.Count > 0)
             log($"DB: {columnFailures.Count} column upgrade(s) failed — pages using them may throw. " +
                 $"Manual SQL needed for: {string.Join(" | ", columnFailures.Select(f => f.Split(':')[0]))}");
         if (skippedColumns > 0)
             log($"DB: Skipped {skippedColumns} column upgrade(s) — schema budget spent. Restart when the database is idle.");
 
+        // Same trick for indexes: one catalog read, then skip the ones that
+        // already exist without paying a round-trip each.
+        var existingIndexes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var indexesKnown = false;
+        try
+        {
+            #pragma warning disable EF1002
+            var idxRows = await context.Database.SqlQueryRaw<string>(
+                lockGuard + "SELECT name AS Value FROM sys.indexes WHERE name IS NOT NULL")
+                .ToListAsync();
+            #pragma warning restore EF1002
+            foreach (var r in idxRows)
+                if (!string.IsNullOrEmpty(r)) existingIndexes.Add(r);
+            indexesKnown = true;
+        }
+        catch { /* fall through to the guarded CREATE INDEX statements */ }
+
         foreach (var (stageName, stageSql) in stages)
         {
             if (string.IsNullOrWhiteSpace(stageSql)) continue;
+            // "Index:<name>" stages are skippable when the index is present.
+            if (indexesKnown && stageName.StartsWith("Index:", StringComparison.Ordinal)
+                && existingIndexes.Contains(stageName["Index:".Length..]))
+                continue;
             if (totalSw.Elapsed > schemaBudget)
             {
                 budgetExhausted = true;
