@@ -252,9 +252,12 @@
         const box = document.getElementById('probeResult');
         const brand = btn.dataset.brand || '';
         const isHoymiles = brand === 'Hoymiles';
+        const isFoxEss = brand === 'FoxESS';
         const endpoint = isHoymiles
             ? `/api/installations/@inst.Id/hoymiles-probe`
-            : `/api/installations/@inst.Id/backfill-probe`;
+            : isFoxEss
+                ? `/api/installations/@inst.Id/foxess-probe`
+                : `/api/installations/@inst.Id/backfill-probe`;
         btn.disabled = true;
         box.classList.remove('d-none');
         box.innerHTML = `<div class="card-body"><i class="bi bi-hourglass-split"></i> กำลังทดสอบ ${escapeHtml(brand)} backfill…</div>`;
@@ -263,6 +266,10 @@
             const data = await r.json();
             if (!r.ok) {
                 box.innerHTML = `<div class="card-body text-danger">${escapeHtml(data.error || ('HTTP ' + r.status))}</div>`;
+                return;
+            }
+            if (isFoxEss) {
+                renderFoxEssProbe(box, data);
                 return;
             }
             if (!isHoymiles) {
@@ -369,6 +376,48 @@
     // ok/kind badge, duration, and (for GetHistorical) record count +
     // first/last 3 sample rows so the operator can see whether real
     // production numbers came back or it's just empty.
+    // FoxESS endpoint probe — shows what the vendor cloud answered for each
+    // endpoint/parameter combination so we can settle spec questions with
+    // evidence instead of guesswork.
+    function renderFoxEssProbe(box, data) {
+        let html =
+            '<div class="card-header bg-warning bg-opacity-25"><strong>FoxESS endpoint probe</strong>' +
+            ` — Plant/Station ID: <code>${escapeHtml(data.plantId)}</code>` +
+            ` · API Key: ${data.hasApiKey ? '✅ มี' : '❌ ไม่มี'}` +
+            ` · server UTC ${escapeHtml(data.serverTimeUtc || '')}</div>` +
+            '<div class="card-body small">';
+
+        const probes = data.probes || [];
+        const anyOk = probes.some(p => p.ok);
+        html += anyOk
+            ? '<div class="alert alert-success py-2">มี endpoint ที่ตอบสำเร็จ — auth (API key + signature) ใช้งานได้</div>'
+            : '<div class="alert alert-danger py-2">ไม่มี endpoint ไหนสำเร็จเลย — ปัญหาน่าจะอยู่ที่ API key หรือเวลาเซิร์ฟเวอร์</div>';
+
+        for (const p of probes) {
+            const badge = p.ok
+                ? '<span class="badge bg-success">OK</span>'
+                : (p.errno === null || p.errno === undefined)
+                    ? '<span class="badge bg-secondary">—</span>'
+                    : `<span class="badge bg-danger">errno ${p.errno}</span>`;
+            html +=
+                `<details class="mb-2" ${p.ok ? '' : 'open'}>` +
+                `<summary>${badge} <strong>${escapeHtml(p.label)}</strong> ` +
+                `<code>${escapeHtml(p.path)}</code> ` +
+                `<small class="text-muted">${p.durationMs}ms</small><br>` +
+                `<span class="text-muted">${escapeHtml(p.msg || '')}</span></summary>`;
+            if (p.sample) {
+                html += `<pre class="bg-light p-2 mt-1" style="white-space:pre-wrap;max-height:260px;overflow:auto;font-size:.78rem">${escapeHtml(p.sample)}</pre>`;
+            }
+            html += '</details>';
+        }
+
+        html += '<div class="text-muted small mt-2">' +
+            'มองหา <strong>device/list</strong> ที่ขึ้น OK — ใน sample จะมี <code>deviceSN</code> ' +
+            'นั่นคือค่าที่ต้องเอาไปใส่ช่อง Plant/Station ID' +
+            '</div></div>';
+        box.innerHTML = html;
+    }
+
     function renderBackfillProbe(box, data) {
         let html =
             '<div class="card-header bg-warning bg-opacity-25"><strong>Backfill probe</strong>' +

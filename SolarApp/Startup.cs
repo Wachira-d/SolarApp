@@ -1426,6 +1426,51 @@ BEGIN {sql}; END");
             });
         }).RequireAuthorization();
 
+        // FoxESS endpoint probe — same idea as the Hoymiles one: ask the
+        // vendor cloud directly which endpoints/parameters it accepts and
+        // report its own errno + msg, instead of inferring from the spec.
+        app.MapGet("/api/installations/{id:int}/foxess-probe", async (
+            int id,
+            System.Security.Claims.ClaimsPrincipal principal,
+            UserManager<Models.ApplicationUser> userManager,
+            Data.ApplicationDbContext db,
+            Services.InverterApi.IInverterApiAdapterFactory adapterFactory,
+            Services.Security.ICredentialProtector protector) =>
+        {
+            var user = await userManager.GetUserAsync(principal);
+            if (user == null) return Results.Unauthorized();
+            if (!await userManager.IsInRoleAsync(user, "Admin")) return Results.Forbid();
+
+            var inst = await db.Installations.FirstOrDefaultAsync(i => i.Id == id);
+            if (inst == null) return Results.NotFound();
+            if (inst.InverterBrand != Models.Enums.InverterBrand.FoxESS)
+                return Results.BadRequest(new { error = "FoxESS only" });
+
+            var adapter = adapterFactory.GetAdapter(inst.InverterBrand);
+            if (adapter is not Services.InverterApi.Adapters.FoxEssAdapter f)
+                return Results.BadRequest(new { error = "adapter is not FoxEssAdapter" });
+
+            var creds = new Services.InverterApi.Models.ApiCredentials
+            {
+                ApiKey = protector.Unprotect(inst.CloudApiKey),
+                ApiSecret = protector.Unprotect(inst.CloudApiSecret),
+                Username = protector.Unprotect(inst.CloudUsername),
+                Password = protector.Unprotect(inst.CloudPassword),
+                PlantId = inst.PlantId,
+                ApiBaseUrl = inst.CloudApiBaseUrl,
+            };
+            var probes = await f.ProbeEndpointsAsync(creds);
+            return Results.Json(new
+            {
+                brand = "FoxESS",
+                plantId = string.IsNullOrWhiteSpace(inst.PlantId) ? "(not set)" : inst.PlantId,
+                hasApiKey = !string.IsNullOrEmpty(inst.CloudApiKey),
+                serverTimeUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
+                probeVersion = "v1-2026-08-04-foxess",
+                probes,
+            });
+        }).RequireAuthorization();
+
         // Brand-agnostic backfill probe.  Runs the live adapter end-to-end
         // (TestConnection → GetPlantInfo → GetHistorical for current month
         // / last 30d / last 90d / current year) and reports per-step

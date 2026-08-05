@@ -297,6 +297,131 @@ public class FoxEssAdapter : IInverterApiAdapter
         return records;
     }
 
+    /// <summary>
+    /// Admin diagnostic: call each plausible FoxESS endpoint/parameter
+    /// combination and report exactly what the cloud answered (errno + the
+    /// vendor's own msg + a slice of the payload).  Written because the
+    /// spec alone couldn't settle questions like "which API version does
+    /// this account serve?" and "what is the minimum pageSize?" — the
+    /// server is the authority, so we ask it rather than guess.
+    ///
+    /// Every probe is read-only.  Device-scoped probes are skipped when no
+    /// Plant/Station ID (device SN) is configured yet.
+    /// </summary>
+    public async Task<List<object>> ProbeEndpointsAsync(ApiCredentials credentials)
+    {
+        var results = new List<object>();
+
+        async Task ProbeAsync(string label, string path, object body, bool isGet = false, string? query = null)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var json = isGet
+                    ? await SendGetAsync(credentials, path, query)
+                    : await SendPostAsync(credentials, path, body);
+                sw.Stop();
+
+                if (!json.HasValue)
+                {
+                    results.Add(new
+                    {
+                        label, path, ok = false, errno = (int?)null,
+                        msg = "no response (HTTP error / non-JSON / network)",
+                        durationMs = (int)sw.ElapsedMilliseconds, sample = (string?)null,
+                    });
+                    return;
+                }
+
+                var errno = GetErrno(json.Value);
+                var msg = GetString(json.Value, "msg");
+                // Keep a short slice of the payload so the operator can see
+                // real values (e.g. a device SN) without dumping everything.
+                string? sample = null;
+                if (json.Value.TryGetProperty("result", out var res))
+                {
+                    var raw = res.ToString();
+                    sample = raw.Length > 600 ? raw[..600] + "…(truncated)" : raw;
+                }
+
+                results.Add(new
+                {
+                    label, path,
+                    ok = errno == 0,
+                    errno,
+                    msg = string.IsNullOrWhiteSpace(msg) ? (errno == 0 ? "OK" : "(no msg)") : msg,
+                    durationMs = (int)sw.ElapsedMilliseconds,
+                    sample,
+                });
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                results.Add(new
+                {
+                    label, path, ok = false, errno = (int?)null,
+                    msg = $"{ex.GetType().Name}: {ex.Message}",
+                    durationMs = (int)sw.ElapsedMilliseconds, sample = (string?)null,
+                });
+            }
+        }
+
+        // ── 1. Auth + pageSize behaviour ─────────────────────────────
+        // Same endpoint, three page sizes.  If 1 fails but 10 succeeds we
+        // have proof of a minimum-page-size rule rather than an auth fault.
+        await ProbeAsync("plant/list pageSize=1",   "/op/v0/plant/list", new { currentPage = 1, pageSize = 1 });
+        await ProbeAsync("plant/list pageSize=10",  "/op/v0/plant/list", new { currentPage = 1, pageSize = 10 });
+        await ProbeAsync("plant/list pageSize=100", "/op/v0/plant/list", new { currentPage = 1, pageSize = 100 });
+
+        // ── 2. API version check ─────────────────────────────────────
+        await ProbeAsync("v1 plant/list", "/op/v1/plant/list", new { currentPage = 1, pageSize = 10 });
+
+        // ── 3. Device list — this is where the inverter SN comes from ─
+        await ProbeAsync("device/list", "/op/v0/device/list", new { currentPage = 1, pageSize = 100 });
+        await ProbeAsync("v1 device/list", "/op/v1/device/list", new { currentPage = 1, pageSize = 100 });
+
+        // ── 4. Device-scoped calls (need the SN) ─────────────────────
+        if (!string.IsNullOrWhiteSpace(credentials.PlantId))
+        {
+            var sn = credentials.PlantId!.Trim();
+            await ProbeAsync("v1 device/real/query", "/op/v1/device/real/query", new
+            {
+                sns = new[] { sn },
+                variables = new[] { "pvPower", "generationPower", "SoC" },
+            });
+            await ProbeAsync("v0 device/real/query", "/op/v0/device/real/query", new
+            {
+                sns = new[] { sn },
+                variables = new[] { "pvPower", "generationPower", "SoC" },
+            });
+            var now = DateTime.UtcNow;
+            await ProbeAsync("device/report/query (month)", "/op/v0/device/report/query", new
+            {
+                sn,
+                year = now.Year,
+                month = now.Month,
+                dimension = "month",
+                variables = new[] { "generation" },
+            });
+        }
+        else
+        {
+            results.Add(new
+            {
+                label = "device-scoped probes",
+                path = "(skipped)",
+                ok = false,
+                errno = (int?)null,
+                msg = "Plant/Station ID is empty — set it to the inverter Serial Number (SN) to probe realtime/history. " +
+                      "The SN appears in the device/list sample above.",
+                durationMs = 0,
+                sample = (string?)null,
+            });
+        }
+
+        return results;
+    }
+
     public async Task<List<AlarmRecord>> GetAlarmsAsync(
         ApiCredentials credentials, DateTime from, DateTime to)
     {
