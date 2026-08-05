@@ -138,6 +138,11 @@ try
     // authenticated user who can access that installation.
     app.Use(async (context, next) =>
     {
+        // Learn our own public URL from the first real external request so
+        // background jobs can build absolute links in LINE messages without
+        // the operator having to configure anything. Runs once per process.
+        await SolarApp.Services.PublicBaseUrlCapture.TryCaptureAsync(context);
+
         var path = context.Request.Path.Value;
         if (path != null && path.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
         {

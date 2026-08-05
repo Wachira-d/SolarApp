@@ -991,6 +991,18 @@ public class LineMessagingService : ILineMessagingService
                 });
             }
         }
+        else
+        {
+            // No base URL yet → no tappable buttons.  Say so, rather than
+            // silently shipping a report with no way to act on it; the
+            // operator otherwise has no idea a feature is missing.
+            footerContents.Add(new
+            {
+                type = "text",
+                text = "ℹ️ ตั้งค่า App Base URL ที่ Admin → ตั้งค่า LINE เพื่อให้มีปุ่มกดดู Alert",
+                size = "xs", color = "#FF8C00", wrap = true, align = "center",
+            });
+        }
         footerContents.Add(new { type = "text", text = $"Report generated {DateTime.Now:HH:mm}", size = "xs", color = "#AAAAAA", align = "center", margin = "sm" });
 
         var flexContent = new
