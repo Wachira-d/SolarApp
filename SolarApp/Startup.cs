@@ -1915,6 +1915,10 @@ BEGIN {sql}; END");
             Services.DeviceImport.IDeviceImporter importer) =>
         {
             if (!await access.CanAccessAsync(id, user)) return Results.Forbid();
+            // Someone clicked "refresh devices" and is watching a spinner.
+            // Let brand rate gates WAIT for their slot instead of refusing —
+            // "try again in 64s" just makes the operator click again.
+            Services.InverterApi.Common.HuaweiRateGate.Interactive.Value = true;
             var result = await importer.ImportAsync(id);
             return Results.Json(new
             {

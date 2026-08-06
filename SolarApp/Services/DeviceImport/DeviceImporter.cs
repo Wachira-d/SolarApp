@@ -74,10 +74,27 @@ public class DeviceImporter : IDeviceImporter
         if (plantResult.IsSuccess && plantResult.Data is { } plant)
         {
             bool changed = false;
-            if (plant.CapacityKw > 0 && installation.SystemCapacityKw != plant.CapacityKw)
+            // Capacity: only ADOPT from the cloud when we don't already have a
+            // value.  This used to overwrite whatever the operator entered with
+            // whatever the vendor returned, so one bad unit conversion silently
+            // replaced a correct 10 kW with "0.011 kWp" — and capacity feeds
+            // Performance Ratio, specific yield and the sync sanity ceiling.
+            // The operator's figure is authoritative; a differing cloud value
+            // is reported, not applied.
+            if (plant.CapacityKw > 0)
             {
-                installation.SystemCapacityKw = plant.CapacityKw;
-                changed = true;
+                if (installation.SystemCapacityKw <= 0)
+                {
+                    installation.SystemCapacityKw = plant.CapacityKw;
+                    changed = true;
+                }
+                else if (Math.Abs(installation.SystemCapacityKw - plant.CapacityKw) > 0.5m)
+                {
+                    _logger.LogInformation(
+                        "DeviceImport {InstallationId}: cloud reports capacity {CloudKw} kWp but installation is set to " +
+                        "{LocalKw} kWp — keeping the configured value. Edit the site if the cloud figure is correct.",
+                        installation.Id, plant.CapacityKw, installation.SystemCapacityKw);
+                }
             }
             if (!string.IsNullOrWhiteSpace(plant.Address)
                 && string.IsNullOrWhiteSpace(installation.Address))

@@ -57,12 +57,34 @@ public static class HuaweiRateGate
     /// </summary>
     public static readonly AsyncLocal<bool> DiagnosticBypass = new();
 
+    /// <summary>
+    /// Marks the current async flow as a USER-INITIATED action (someone
+    /// clicked a button and is watching a spinner).
+    ///
+    /// Background jobs should defer when the gate is busy — there's another
+    /// cycle along shortly.  A human cannot "come back next cycle": refusing
+    /// them with "try again in 64s" just makes them click again, which is
+    /// both worse UX and more load.  So interactive callers WAIT for the
+    /// gate instead of being turned away.
+    ///
+    /// Note this waits, it does not bypass: Huawei's 1-req/min budget is
+    /// still fully respected, so it cannot provoke a 407 ban the way a
+    /// bypass would.
+    /// </summary>
+    public static readonly AsyncLocal<bool> Interactive = new();
+
+    /// <summary>How long an interactive caller is willing to block for the gate.</summary>
+    public static TimeSpan InteractiveMaxWait { get; set; } = TimeSpan.FromSeconds(75);
+
     /// <summary>Returns the (DeferOnLongWait, EffectiveWait) decision for a caller.</summary>
     public static (bool ShouldDefer, TimeSpan Wait) Decide(string accountKey)
     {
         if (DiagnosticBypass.Value) return (false, TimeSpan.Zero);
         var wait = GetRequiredWait(accountKey);
-        return wait > MaxAcceptableWait ? (true, wait) : (false, wait);
+        // A human is waiting → tolerate a much longer wait rather than
+        // refusing the action outright.
+        var limit = Interactive.Value ? InteractiveMaxWait : MaxAcceptableWait;
+        return wait > limit ? (true, wait) : (false, wait);
     }
 
     /// <summary>Reserves the next call window. Call this immediately BEFORE issuing the HTTP request.</summary>

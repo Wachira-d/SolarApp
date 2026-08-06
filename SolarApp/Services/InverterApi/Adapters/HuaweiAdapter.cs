@@ -296,7 +296,12 @@ public class HuaweiAdapter : IInverterApiAdapter
                 PlantId = actualStationCode ?? "",
                 PlantName = SafeGetString(match.Value, "stationName")
                            ?? SafeGetString(match.Value, "plantName") ?? "",
-                CapacityKw = SafeGetDecimal(match.Value, "capacity"),
+                // Huawei NBI reports station capacity in MEGAwatts, not kW.
+                // Storing it raw produced absurd values (a 10 kW site came
+                // back as "0.011 kWp", i.e. 11 watts) which then fed into
+                // Performance Ratio, specific yield and the sync sanity
+                // ceiling — all silently wrong.  Convert MW → kW.
+                CapacityKw = SafeGetDecimal(match.Value, "capacity") * 1000m,
                 Address = SafeGetString(match.Value, "stationAddr")
                          ?? SafeGetString(match.Value, "plantAddress")
             };
