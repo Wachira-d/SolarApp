@@ -1,24 +1,24 @@
 @page
 @model SolarApp.Pages.Admin.ImportInstallationsModel
 @{
-    ViewData["Title"] = "Bulk Import Installations";
+    ViewData["Title"] = "นำเข้าไซต์งานจำนวนมาก";
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-upload"></i> Bulk Import Installations</h4>
-        <small class="text-muted">Upload a CSV file to create multiple installations at once</small>
+        <h4 class="mb-0"><i class="bi bi-upload"></i> นำเข้าไซต์งานจำนวนมาก</h4>
+        <small class="text-muted">อัปโหลดไฟล์ CSV เพื่อสร้างไซต์งานหลายรายการพร้อมกัน</small>
     </div>
     <a asp-page="Users" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-arrow-left"></i> Users
+        <i class="bi bi-arrow-left"></i> จัดการผู้ใช้
     </a>
 </div>
 
 @if (Model.Imported)
 {
     <div class="alert alert-success alert-permanent">
-        <strong><i class="bi bi-check-circle"></i> Import complete.</strong>
-        @Model.SuccessCount installation(s) created. @Model.ErrorCount error(s).
+        <strong><i class="bi bi-check-circle"></i> นำเข้าเสร็จสิ้น</strong>
+        สร้างไซต์งานสำเร็จ @Model.SuccessCount รายการ · ผิดพลาด @Model.ErrorCount รายการ
     </div>
 }
 
@@ -26,34 +26,34 @@
     <div class="card-body">
         <form method="post" enctype="multipart/form-data">
             <div class="mb-3">
-                <label class="form-label">CSV File *</label>
+                <label class="form-label">ไฟล์ CSV *</label>
                 <input type="file" name="File" accept=".csv" class="form-control" required />
-                <small class="text-muted">Max 5 MB. UTF-8 encoded.</small>
+                <small class="text-muted">ขนาดไม่เกิน 5 MB · ต้องเข้ารหัสแบบ UTF-8</small>
             </div>
             <div class="form-check mb-3">
                 <input class="form-check-input" type="checkbox" asp-for="DryRun" id="DryRun" />
                 <label class="form-check-label" for="DryRun">
-                    Dry-run (validate only, don't save)
+                    ทดลองรัน (ตรวจสอบอย่างเดียว ไม่บันทึก)
                 </label>
             </div>
-            <button type="submit" class="btn btn-warning"><i class="bi bi-play-fill"></i> Process CSV</button>
+            <button type="submit" class="btn btn-warning"><i class="bi bi-play-fill"></i> ประมวลผลไฟล์ CSV</button>
         </form>
     </div>
 </div>
 
 <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white"><h6 class="mb-0">CSV Format</h6></div>
+    <div class="card-header bg-white"><h6 class="mb-0">รูปแบบไฟล์ CSV</h6></div>
     <div class="card-body">
-        <p class="small mb-2">Required columns: <code>siteCode, siteName, customerEmail, capacityKw, inverterBrand, systemType</code></p>
-        <p class="small mb-2">Optional: <code>partnerName, address, city, province, postalCode, latitude, longitude, installationDate</code></p>
+        <p class="small mb-2">คอลัมน์ที่จำเป็น: <code>siteCode, siteName, customerEmail, capacityKw, inverterBrand, systemType</code></p>
+        <p class="small mb-2">คอลัมน์เพิ่มเติม (ไม่บังคับ): <code>partnerName, address, city, province, postalCode, latitude, longitude, installationDate</code></p>
         <pre class="mb-0 small bg-body-secondary p-2 rounded"><code>siteCode,siteName,customerEmail,capacityKw,inverterBrand,systemType,latitude,longitude
 SITE-001,Bangkok Factory,customer@example.com,30,Huawei,OnGrid,13.7563,100.5018
 SITE-002,Chiang Mai Home,home@example.com,10,FoxESS,Hybrid,18.7883,98.9853
 </code></pre>
         <div class="small mt-2 text-muted">
-            Valid <strong>inverterBrand</strong>: Huawei, FoxESS, Solis, GoodWe, Deye, Other<br>
-            Valid <strong>systemType</strong>: OnGrid, OffGrid, Hybrid<br>
-            <strong>customerEmail</strong> and <strong>partnerName</strong> must already exist in the system.
+            ค่าที่ใช้ได้ของ <strong>inverterBrand</strong>: Huawei, FoxESS, Solis, GoodWe, Deye, Other<br>
+            ค่าที่ใช้ได้ของ <strong>systemType</strong>: OnGrid, OffGrid, Hybrid<br>
+            <strong>customerEmail</strong> และ <strong>partnerName</strong> ต้องมีอยู่ในระบบแล้ว
         </div>
     </div>
 </div>
@@ -61,7 +61,7 @@ SITE-002,Chiang Mai Home,home@example.com,10,FoxESS,Hybrid,18.7883,98.9853
 @if (Model.Errors.Any())
 {
     <div class="alert alert-danger alert-permanent">
-        <strong>Errors:</strong>
+        <strong>ข้อผิดพลาด:</strong>
         <ul class="mb-0">@foreach (var e in Model.Errors) { <li>@e</li> }</ul>
     </div>
 }
@@ -70,16 +70,16 @@ SITE-002,Chiang Mai Home,home@example.com,10,FoxESS,Hybrid,18.7883,98.9853
 {
     <div class="card border-0 shadow-sm">
         <div class="card-header bg-white d-flex justify-content-between align-items-center">
-            <h6 class="mb-0">Results</h6>
+            <h6 class="mb-0">ผลการนำเข้า</h6>
             <span>
-                <span class="badge bg-success">@Model.SuccessCount @(Model.DryRun ? "valid" : "imported")</span>
-                <span class="badge bg-danger">@Model.ErrorCount error(s)</span>
+                <span class="badge bg-success">@Model.SuccessCount @(Model.DryRun ? "รายการถูกต้อง" : "รายการนำเข้าแล้ว")</span>
+                <span class="badge bg-danger">ผิดพลาด @Model.ErrorCount รายการ</span>
             </span>
         </div>
         <div class="table-responsive">
             <table class="table table-sm mb-0">
                 <thead class="table-light">
-                    <tr><th>Row</th><th>Site Name</th><th>Status</th><th>Detail</th></tr>
+                    <tr><th>แถวที่</th><th>ชื่อไซต์งาน</th><th>ผล</th><th>รายละเอียด</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var r in Model.Results)

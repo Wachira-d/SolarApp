@@ -1,13 +1,13 @@
 @page
 @model SolarApp.Pages.Admin.ExternalAuthModel
 @{
-    ViewData["Title"] = "External Auth Settings";
+    ViewData["Title"] = "การเข้าสู่ระบบภายนอก";
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-shield-lock"></i> External Auth (Microsoft / LINE Login)</h4>
-        <small class="text-muted">Configure Single Sign-On via web. Credentials are stored encrypted in the database.</small>
+        <h4 class="mb-0"><i class="bi bi-shield-lock"></i> การเข้าสู่ระบบภายนอก (Microsoft / LINE Login)</h4>
+        <small class="text-muted">ตั้งค่า Single Sign-On ผ่านหน้าเว็บ · ข้อมูลรับรองถูกเข้ารหัสก่อนบันทึกลงฐานข้อมูล</small>
     </div>
 </div>
 
@@ -22,8 +22,8 @@
 
 <div class="alert alert-info">
     <i class="bi bi-info-circle"></i>
-    <strong>Important:</strong> After saving, you must <strong>restart the IIS application pool</strong>
-    (or redeploy) for authentication providers to be re-registered. Settings here are read at startup.
+    <strong>สำคัญ:</strong> หลังบันทึกแล้วต้อง <strong>รีสตาร์ท IIS application pool</strong>
+    (หรือ deploy ใหม่) ระบบจึงจะลงทะเบียนผู้ให้บริการเข้าสู่ระบบใหม่ — ค่าเหล่านี้ถูกอ่านตอนเริ่มระบบเท่านั้น
 </div>
 
 <!-- ═══ MICROSOFT ═══ -->
@@ -32,22 +32,22 @@
         <div class="d-flex justify-content-between align-items-center">
             <h6 class="mb-0"><i class="bi bi-microsoft text-primary"></i> Microsoft / Office 365</h6>
             @if (Model.MsConfiguredNow)
-            { <span class="badge bg-success">Configured</span> }
+            { <span class="badge bg-success">ตั้งค่าแล้ว</span> }
             else
-            { <span class="badge bg-secondary">Not configured</span> }
+            { <span class="badge bg-secondary">ยังไม่ได้ตั้งค่า</span> }
         </div>
     </div>
     <div class="card-body">
         <form method="post" asp-page-handler="SaveMicrosoft">
             <div class="row g-3">
                 <div class="col-12">
-                    <label class="form-label">Your Callback URL (register this in Azure)</label>
+                    <label class="form-label">Callback URL ของคุณ (นำไปลงทะเบียนใน Azure)</label>
                     <div class="input-group">
                         <input type="text" class="form-control font-monospace" readonly
                                value="@Model.MicrosoftCallbackUrl" id="msCallback" />
                         <button type="button" class="btn btn-outline-secondary"
-                                onclick="navigator.clipboard.writeText(document.getElementById('msCallback').value); this.innerHTML='<i class=bi-check2></i> Copied'">
-                            <i class="bi bi-clipboard"></i> Copy
+                                onclick="navigator.clipboard.writeText(document.getElementById('msCallback').value); this.innerHTML='<i class=bi-check2></i> คัดลอกแล้ว'">
+                            <i class="bi bi-clipboard"></i> คัดลอก
                         </button>
                     </div>
                 </div>
@@ -60,45 +60,45 @@
                     <label class="form-label">
                         Client Secret
                         @if (Model.MsConfiguredNow)
-                        { <small class="text-muted">(leave blank to keep current)</small> }
+                        { <small class="text-muted">(เว้นว่าง = ใช้ค่าเดิม)</small> }
                     </label>
                     <input asp-for="MsClientSecret" type="password" class="form-control"
-                           placeholder="@(Model.MsConfiguredNow ? "•••••••••••• (keep current)" : "Paste new secret")" />
+                           placeholder="@(Model.MsConfiguredNow ? "•••••••••••• (ใช้ค่าเดิม)" : "วางค่า secret ใหม่")" />
                 </div>
                 <div class="col-12">
                     <label class="form-label">
-                        Tenant ID <small class="text-muted">(required if app is single-tenant)</small>
+                        Tenant ID <small class="text-muted">(จำเป็นถ้าแอปเป็นแบบ single-tenant)</small>
                     </label>
                     <input asp-for="MsTenantId" class="form-control font-monospace"
-                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (leave blank for multi-tenant)" />
+                           placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (เว้นว่างถ้าเป็น multi-tenant)" />
                     <small class="text-muted">
-                        Find this on Azure portal → App registrations → Overview → <strong>Directory (tenant) ID</strong>.
-                        Leave blank ONLY if your Azure app is registered as multi-tenant.
+                        ดูได้ที่ Azure portal → App registrations → Overview → <strong>Directory (tenant) ID</strong>
+                        เว้นว่างได้เฉพาะกรณีที่แอปบน Azure ลงทะเบียนเป็นแบบ multi-tenant เท่านั้น
                     </small>
                 </div>
             </div>
             <div class="mt-2 small text-muted">
-                Source: <strong>@Model.MsConfigSource</strong>
+                ที่มาของค่า: <strong>@Model.MsConfigSource</strong>
             </div>
             <div class="mt-3 d-flex justify-content-between">
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-save"></i> Save Microsoft Settings
+                    <i class="bi bi-save"></i> บันทึกค่า Microsoft
                 </button>
                 <a class="btn btn-link small" href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank">
-                    Open Azure App registrations <i class="bi bi-box-arrow-up-right"></i>
+                    เปิด Azure App registrations <i class="bi bi-box-arrow-up-right"></i>
                 </a>
             </div>
         </form>
 
         <details class="mt-3 small">
-            <summary class="text-primary" style="cursor: pointer;">How to get these values</summary>
+            <summary class="text-primary" style="cursor: pointer;">หาค่าเหล่านี้ได้จากไหน</summary>
             <ol class="small mt-2">
-                <li>Go to <a href="https://portal.azure.com" target="_blank">portal.azure.com</a> → <strong>Microsoft Entra ID</strong> → <strong>App registrations</strong> → <strong>+ New registration</strong></li>
-                <li>Name: <code>SolarApp</code>, supported account type: <em>Accounts in any organizational directory and personal Microsoft accounts</em></li>
-                <li>Redirect URI: select <strong>Web</strong>, paste the Callback URL above</li>
-                <li>After registration: copy <strong>Application (client) ID</strong> → paste in Client ID field</li>
-                <li>Go to <strong>Certificates &amp; secrets</strong> → <strong>+ New client secret</strong> → name it, set expiry 24 months → <strong>copy the Value</strong> (shown once only!) → paste in Client Secret field</li>
-                <li>API permissions: default <code>User.Read</code> is enough</li>
+                <li>ไปที่ <a href="https://portal.azure.com" target="_blank">portal.azure.com</a> → <strong>Microsoft Entra ID</strong> → <strong>App registrations</strong> → <strong>+ New registration</strong></li>
+                <li>ตั้งชื่อ: <code>SolarApp</code> · เลือก supported account type: <em>Accounts in any organizational directory and personal Microsoft accounts</em></li>
+                <li>Redirect URI: เลือก <strong>Web</strong> แล้ววาง Callback URL ด้านบน</li>
+                <li>เมื่อลงทะเบียนเสร็จ คัดลอก <strong>Application (client) ID</strong> → วางในช่อง Client ID</li>
+                <li>ไปที่ <strong>Certificates &amp; secrets</strong> → <strong>+ New client secret</strong> → ตั้งชื่อ กำหนดอายุ 24 เดือน → <strong>คัดลอกค่า Value</strong> (แสดงครั้งเดียวเท่านั้น!) → วางในช่อง Client Secret</li>
+                <li>API permissions: ค่าเริ่มต้น <code>User.Read</code> เพียงพอแล้ว</li>
             </ol>
         </details>
     </div>
@@ -110,26 +110,26 @@
         <div class="d-flex justify-content-between align-items-center">
             <h6 class="mb-0"><i class="bi bi-chat-dots-fill text-success"></i> LINE Login</h6>
             @if (Model.LineConfiguredNow)
-            { <span class="badge bg-success">Configured</span> }
+            { <span class="badge bg-success">ตั้งค่าแล้ว</span> }
             else
-            { <span class="badge bg-secondary">Not configured</span> }
+            { <span class="badge bg-secondary">ยังไม่ได้ตั้งค่า</span> }
         </div>
     </div>
     <div class="card-body">
         <form method="post" asp-page-handler="SaveLine">
             <div class="row g-3">
                 <div class="col-12">
-                    <label class="form-label">Your Callback URL (register this in LINE Developers)</label>
+                    <label class="form-label">Callback URL ของคุณ (นำไปลงทะเบียนใน LINE Developers)</label>
                     <div class="input-group">
                         <input type="text" class="form-control font-monospace" readonly
                                value="@Model.LineCallbackUrl" id="lineCallback" />
                         <button type="button" class="btn btn-outline-secondary"
-                                onclick="navigator.clipboard.writeText(document.getElementById('lineCallback').value); this.innerHTML='<i class=bi-check2></i> Copied'">
-                            <i class="bi bi-clipboard"></i> Copy
+                                onclick="navigator.clipboard.writeText(document.getElementById('lineCallback').value); this.innerHTML='<i class=bi-check2></i> คัดลอกแล้ว'">
+                            <i class="bi bi-clipboard"></i> คัดลอก
                         </button>
                     </div>
-                    <small class="text-muted">Sharing a LINE channel across multiple sites? Add each site's callback URL
-                        (one per line) to the channel's "Callback URL" field.</small>
+                    <small class="text-muted">ถ้าใช้ LINE channel เดียวกันหลายเว็บ ให้ใส่ Callback URL ของแต่ละเว็บ
+                        (บรรทัดละหนึ่ง URL) ในช่อง "Callback URL" ของ channel นั้น</small>
                 </div>
                 <div class="col-md-6">
                     <label class="form-label">Channel ID</label>
@@ -140,35 +140,35 @@
                     <label class="form-label">
                         Channel Secret
                         @if (Model.LineConfiguredNow)
-                        { <small class="text-muted">(leave blank to keep current)</small> }
+                        { <small class="text-muted">(เว้นว่าง = ใช้ค่าเดิม)</small> }
                     </label>
                     <input asp-for="LineClientSecret" type="password" class="form-control"
-                           placeholder="@(Model.LineConfiguredNow ? "•••••••••••• (keep current)" : "Paste new secret")" />
+                           placeholder="@(Model.LineConfiguredNow ? "•••••••••••• (ใช้ค่าเดิม)" : "วางค่า secret ใหม่")" />
                 </div>
             </div>
             <div class="mt-2 small text-muted">
-                Source: <strong>@Model.LineConfigSource</strong>
+                ที่มาของค่า: <strong>@Model.LineConfigSource</strong>
             </div>
             <div class="mt-3 d-flex justify-content-between">
                 <button type="submit" class="btn btn-success">
-                    <i class="bi bi-save"></i> Save LINE Login Settings
+                    <i class="bi bi-save"></i> บันทึกค่า LINE Login
                 </button>
                 <a class="btn btn-link small" href="https://developers.line.biz/console/" target="_blank">
-                    Open LINE Developers Console <i class="bi bi-box-arrow-up-right"></i>
+                    เปิด LINE Developers Console <i class="bi bi-box-arrow-up-right"></i>
                 </a>
             </div>
         </form>
 
         <details class="mt-3 small">
-            <summary class="text-success" style="cursor: pointer;">How to get these values</summary>
+            <summary class="text-success" style="cursor: pointer;">หาค่าเหล่านี้ได้จากไหน</summary>
             <ol class="small mt-2">
-                <li>Go to <a href="https://developers.line.biz/console" target="_blank">developers.line.biz/console</a></li>
-                <li>Select your provider → <strong>Create a new channel</strong> → <strong>LINE Login</strong></li>
-                <li>Fill Channel name (e.g. <code>SolarApp Login</code>), description. App type: ✓ Web app</li>
-                <li>Go to the <strong>LINE Login</strong> tab → <strong>Callback URL</strong>: paste the Callback URL above (multiple URLs allowed, one per line)</li>
-                <li>Go to the <strong>Basic settings</strong> tab → copy <strong>Channel ID</strong> → paste here</li>
-                <li>Scroll down → copy <strong>Channel secret</strong> → paste here</li>
-                <li>Scopes: enable <code>profile</code> and <code>openid</code> (required for login)</li>
+                <li>ไปที่ <a href="https://developers.line.biz/console" target="_blank">developers.line.biz/console</a></li>
+                <li>เลือก provider ของคุณ → <strong>Create a new channel</strong> → <strong>LINE Login</strong></li>
+                <li>กรอก Channel name (เช่น <code>SolarApp Login</code>) และคำอธิบาย · App type เลือก ✓ Web app</li>
+                <li>ไปที่แท็บ <strong>LINE Login</strong> → ช่อง <strong>Callback URL</strong>: วาง Callback URL ด้านบน (ใส่ได้หลาย URL บรรทัดละหนึ่ง)</li>
+                <li>ไปที่แท็บ <strong>Basic settings</strong> → คัดลอก <strong>Channel ID</strong> → วางที่นี่</li>
+                <li>เลื่อนลง → คัดลอก <strong>Channel secret</strong> → วางที่นี่</li>
+                <li>Scopes: เปิดใช้ <code>profile</code> และ <code>openid</code> (จำเป็นสำหรับการเข้าสู่ระบบ)</li>
             </ol>
         </details>
     </div>
@@ -176,6 +176,6 @@
 
 <div class="small text-muted">
     <i class="bi bi-shield-fill-check"></i>
-    Secrets are encrypted using ASP.NET Core DataProtection before being written to the database.
-    They are never sent back to this form — to change, just paste a new value.
+    ค่า secret ถูกเข้ารหัสด้วย ASP.NET Core DataProtection ก่อนบันทึกลงฐานข้อมูล
+    และจะไม่ถูกส่งกลับมาแสดงในฟอร์มนี้ — ถ้าต้องการเปลี่ยน ให้วางค่าใหม่ทับได้เลย
 </div>

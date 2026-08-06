@@ -1,7 +1,7 @@
 @page
 @model SolarApp.Pages.Admin.LineSettingsModel
 @{
-    ViewData["Title"] = "LINE Messaging Settings";
+    ViewData["Title"] = "ตั้งค่า LINE";
 }
 
 @if (!string.IsNullOrEmpty(Model.StatusMessage))
@@ -22,12 +22,12 @@
 {
     <div class="alert alert-@(Model.TestSuccess ? "success" : "danger") alert-dismissible fade show">
         <i class="bi bi-@(Model.TestSuccess ? "check-circle-fill" : "x-circle-fill")"></i>
-        <strong>Test Result:</strong> @Model.TestResult
+        <strong>ผลการทดสอบ:</strong> @Model.TestResult
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 }
 
-<h4 class="mb-4">LINE Messaging Settings</h4>
+<h4 class="mb-4">ตั้งค่า LINE Messaging API</h4>
 
 <!-- Setup Guide -->
 <div class="alert alert-info">
@@ -47,24 +47,24 @@
     <div class="col-md-6">
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-white d-flex justify-content-between">
-                <h6 class="mb-0">Configuration</h6>
+                <h6 class="mb-0">การตั้งค่า</h6>
                 <span class="badge @(Model.IsTokenConfigured ? "bg-success" : "bg-warning")">
-                    @(Model.IsTokenConfigured ? "Configured" : "Not Configured")
+                    @(Model.IsTokenConfigured ? "ตั้งค่าแล้ว" : "ยังไม่ได้ตั้งค่า")
                 </span>
             </div>
             <div class="card-body">
-                <p class="small text-muted mb-3">Source: @Model.TokenSource</p>
+                <p class="small text-muted mb-3">ที่มาของค่า: @Model.TokenSource</p>
 
                 <form method="post" asp-page-handler="Save">
                     <div class="mb-3">
                         <label class="form-label fw-bold">Channel Access Token *</label>
-                        <input asp-for="ChannelAccessToken" class="form-control font-monospace" placeholder="Paste new token (leave blank to keep existing)" />
-                        <small class="text-muted">Long-lived token จาก LINE Developers</small>
+                        <input asp-for="ChannelAccessToken" class="form-control font-monospace" placeholder="วาง token ใหม่ (เว้นว่าง = ใช้ค่าเดิม)" />
+                        <small class="text-muted">token แบบ long-lived จาก LINE Developers</small>
                     </div>
 
                     <div class="mb-3">
                         <label class="form-label fw-bold">Channel Secret</label>
-                        <input asp-for="ChannelSecret" class="form-control font-monospace" placeholder="Paste new secret (leave blank to keep existing)" />
+                        <input asp-for="ChannelSecret" class="form-control font-monospace" placeholder="วาง secret ใหม่ (เว้นว่าง = ใช้ค่าเดิม)" />
                     </div>
 
                     <hr />
@@ -98,13 +98,13 @@
 
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-warning">
-                            <i class="bi bi-save"></i> Save Settings
+                            <i class="bi bi-save"></i> บันทึกการตั้งค่า
                         </button>
                         @if (Model.IsTokenConfigured && Model.TokenSource.Contains("Database"))
                         {
                             <button type="submit" asp-page-handler="ClearToken" class="btn btn-outline-danger ms-auto"
-                                    onclick="return confirm('Clear all LINE settings?');">
-                                <i class="bi bi-trash"></i> Clear All
+                                    onclick="return confirm('ล้างค่า LINE ทั้งหมด?');">
+                                <i class="bi bi-trash"></i> ล้างทั้งหมด
                             </button>
                         }
                     </div>
@@ -117,7 +117,7 @@
     <div class="col-md-6">
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-white">
-                <h6 class="mb-0"><i class="bi bi-send-check"></i> Test Notification</h6>
+                <h6 class="mb-0"><i class="bi bi-send-check"></i> ทดสอบส่งแจ้งเตือน</h6>
             </div>
             <div class="card-body">
                 <!-- Test to User -->
@@ -127,7 +127,7 @@
                         <input asp-for="TestLineUserId" class="form-control font-monospace"
                                placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
                         <button type="submit" class="btn btn-outline-success">
-                            <i class="bi bi-send"></i> Test User
+                            <i class="bi bi-send"></i> ทดสอบส่งหา User
                         </button>
                     </div>
                     <small class="text-muted">LINE User ID ของคนที่จะส่งทดสอบ</small>
@@ -141,7 +141,7 @@
                         <input asp-for="AlertGroupId" class="form-control font-monospace"
                                placeholder="Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
                         <button type="submit" class="btn btn-outline-success">
-                            <i class="bi bi-send"></i> Test Group
+                            <i class="bi bi-send"></i> ทดสอบส่งเข้ากลุ่ม
                         </button>
                     </div>
                     <small class="text-muted">Group ID ที่ต้องการทดสอบ (Bot ต้องอยู่ในกลุ่มแล้ว)</small>
@@ -160,12 +160,12 @@
                     <li><strong>Customer</strong> (ถ้ามี LINE User ID ใน Customer profile) — เฉพาะ installation ของตัวเอง</li>
                     <li><strong>Partner Users</strong> (ถ้ามี LINE User ID ใน User profile) — เฉพาะ installation ที่ดูแล</li>
                 </ol>
-                <p class="mb-2 fw-bold">Alert types:</p>
+                <p class="mb-2 fw-bold">ประเภทการแจ้งเตือน:</p>
                 <ul class="mb-0">
-                    <li><span class="badge bg-danger">Critical</span> ระบบ Offline</li>
-                    <li><span class="badge bg-warning text-dark">Medium</span> ล้างแผงครบกำหนด</li>
-                    <li><span class="badge bg-info">Low</span> ประกันใกล้หมด (90 วัน)</li>
-                    <li><span class="badge bg-secondary">Warning</span> Error จาก Inverter Cloud</li>
+                    <li><span class="badge bg-danger">วิกฤต</span> ระบบออฟไลน์</li>
+                    <li><span class="badge bg-warning text-dark">ปานกลาง</span> ล้างแผงครบกำหนด</li>
+                    <li><span class="badge bg-info">ต่ำ</span> ประกันใกล้หมด (90 วัน)</li>
+                    <li><span class="badge bg-secondary">เตือน</span> ข้อผิดพลาดจากคลาวด์ของอินเวอร์เตอร์</li>
                 </ul>
             </div>
         </div>
@@ -174,12 +174,12 @@
 
 <!-- Notification History -->
 <div class="card border-0 shadow-sm">
-    <div class="card-header bg-white"><h6 class="mb-0">Notification History (Last 20)</h6></div>
+    <div class="card-header bg-white"><h6 class="mb-0">ประวัติการส่งแจ้งเตือน (20 รายการล่าสุด)</h6></div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover table-sm mb-0">
                 <thead class="table-light">
-                    <tr><th>Time</th><th>Recipient</th><th>Title</th><th>Status</th><th>Error</th></tr>
+                    <tr><th>เวลา</th><th>ผู้รับ</th><th>หัวข้อ</th><th>สถานะ</th><th>ข้อผิดพลาด</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var n in Model.RecentNotifications)
@@ -206,7 +206,7 @@
                     }
                     @if (!Model.RecentNotifications.Any())
                     {
-                        <tr><td colspan="5" class="text-center text-muted py-4">No notifications yet</td></tr>
+                        <tr><td colspan="5" class="text-center text-muted py-4">ยังไม่มีประวัติการส่ง</td></tr>
                     }
                 </tbody>
             </table>

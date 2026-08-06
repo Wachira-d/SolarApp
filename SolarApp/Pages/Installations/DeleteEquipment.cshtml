@@ -8,52 +8,52 @@
     <div class="col-md-6">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white">
-                <h5 class="mb-0 text-danger">Delete Equipment</h5>
+                <h5 class="mb-0 text-danger">ลบอุปกรณ์</h5>
             </div>
             <div class="card-body">
                 <div class="alert alert-warning">
                     <i class="bi bi-exclamation-triangle"></i>
-                    Are you sure you want to delete this equipment? This action cannot be undone.
+                    ยืนยันการลบอุปกรณ์นี้? การลบไม่สามารถย้อนกลับได้
                 </div>
 
                 <div class="table-responsive">
                     <table class="table table-sm table-borderless">
                         <tr>
-                            <td class="text-muted">Installation</td>
+                            <td class="text-muted">ไซต์งาน</td>
                             <td class="fw-bold">@Model.Equipment.Installation.SiteName</td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Type</td>
+                            <td class="text-muted">ประเภทอุปกรณ์</td>
                             <td>@Model.Equipment.EquipmentType</td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Brand</td>
+                            <td class="text-muted">ยี่ห้อ</td>
                             <td>@Model.Equipment.Brand</td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Model</td>
+                            <td class="text-muted">รุ่น</td>
                             <td>@Model.Equipment.Model</td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Serial Number</td>
+                            <td class="text-muted">หมายเลขเครื่อง</td>
                             <td>@(Model.Equipment.SerialNumber ?? "-")</td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Quantity</td>
+                            <td class="text-muted">จำนวน</td>
                             <td>@Model.Equipment.Quantity</td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Installed Date</td>
+                            <td class="text-muted">วันที่ติดตั้ง</td>
                             <td>@Model.Equipment.InstalledDate.ToString("dd/MM/yyyy")</td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Warranty Expiry</td>
+                            <td class="text-muted">ประกันหมดอายุ</td>
                             <td>@(Model.Equipment.WarrantyExpiryDate?.ToString("dd/MM/yyyy") ?? "-")</td>
                         </tr>
                         @if (!string.IsNullOrEmpty(Model.Equipment.Notes))
                         {
                             <tr>
-                                <td class="text-muted">Notes</td>
+                                <td class="text-muted">หมายเหตุ</td>
                                 <td>@Model.Equipment.Notes</td>
                             </tr>
                         }
@@ -61,8 +61,8 @@
                 </div>
 
                 <form method="post" class="d-flex justify-content-between mt-3">
-                    <a asp-page="Detail" asp-route-id="@Model.Equipment.InstallationId" class="btn btn-outline-secondary">Cancel</a>
-                    <button type="submit" class="btn btn-danger">Delete Equipment</button>
+                    <a asp-page="Detail" asp-route-id="@Model.Equipment.InstallationId" class="btn btn-outline-secondary">ยกเลิก</a>
+                    <button type="submit" class="btn btn-danger">ยืนยันลบอุปกรณ์</button>
                 </form>
             </div>
         </div>

@@ -2,7 +2,7 @@
 @model SolarApp.Pages.Admin.UsersModel
 @using SolarApp.Models.Enums
 @{
-    ViewData["Title"] = "User Management";
+    ViewData["Title"] = "จัดการผู้ใช้";
 }
 
 @if (!string.IsNullOrEmpty(Model.StatusMessage))
@@ -23,17 +23,17 @@
 <ul class="nav nav-tabs mb-4">
     <li class="nav-item">
         <a class="nav-link active" data-bs-toggle="tab" href="#users">
-            <i class="bi bi-person"></i> Users (@Model.Users.Count)
+            <i class="bi bi-person"></i> ผู้ใช้ระบบ (@Model.Users.Count)
         </a>
     </li>
     <li class="nav-item">
         <a class="nav-link" data-bs-toggle="tab" href="#customers">
-            <i class="bi bi-people"></i> Customers (@Model.CustomerList.Count)
+            <i class="bi bi-people"></i> ลูกค้า (@Model.CustomerList.Count)
         </a>
     </li>
     <li class="nav-item">
         <a class="nav-link" data-bs-toggle="tab" href="#partners">
-            <i class="bi bi-building"></i> Partners (@Model.PartnerList.Count)
+            <i class="bi bi-building"></i> พาร์ทเนอร์ (@Model.PartnerList.Count)
         </a>
     </li>
 </ul>
@@ -42,9 +42,9 @@
     <!-- ───── USERS TAB ───── -->
     <div class="tab-pane fade show active" id="users">
         <div class="d-flex justify-content-between mb-3">
-            <h5>System Users</h5>
+            <h5>ผู้ใช้ระบบ</h5>
             <button class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#createUserModal">
-                <i class="bi bi-person-plus"></i> Add User
+                <i class="bi bi-person-plus"></i> เพิ่มผู้ใช้
             </button>
         </div>
         <div class="card border-0 shadow-sm">
@@ -53,14 +53,14 @@
                     <table class="table table-hover mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Phone</th>
-                                <th>Role</th>
-                                <th>Partner</th>
-                                <th>Status</th>
-                                <th>Last Login</th>
-                                <th class="text-end">Actions</th>
+                                <th>ชื่อ</th>
+                                <th>อีเมล</th>
+                                <th>โทรศัพท์</th>
+                                <th>บทบาท</th>
+                                <th>พาร์ทเนอร์</th>
+                                <th>สถานะ</th>
+                                <th>เข้าระบบล่าสุด</th>
+                                <th class="text-end">จัดการ</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -75,7 +75,7 @@
                                     <td>@(u.PartnerName ?? "-")</td>
                                     <td>
                                         <span class="badge @(u.IsActive ? "bg-success" : "bg-secondary")">
-                                            @(u.IsActive ? "Active" : "Inactive")
+                                            @(u.IsActive ? "ใช้งาน" : "ปิดใช้งาน")
                                         </span>
                                     </td>
                                     <td><small>@(u.LastLoginAt?.ToString("dd/MM HH:mm") ?? "-")</small></td>
@@ -91,17 +91,17 @@
                                             </button>
                                             <button class="btn btn-outline-warning reset-pw-btn" type="button"
                                                     data-id="@u.Id" data-email="@u.Email"
-                                                    data-bs-toggle="modal" data-bs-target="#resetPwModal" title="Reset Password">
+                                                    data-bs-toggle="modal" data-bs-target="#resetPwModal" title="รีเซ็ตรหัสผ่าน">
                                                 <i class="bi bi-key"></i>
                                             </button>
                                             <form method="post" asp-page-handler="ToggleUserActive" class="d-inline">
                                                 <input type="hidden" name="userId" value="@u.Id" />
-                                                <button type="submit" class="btn btn-outline-secondary" title="@(u.IsActive ? "Deactivate" : "Activate")">
+                                                <button type="submit" class="btn btn-outline-secondary" title="@(u.IsActive ? "ปิดใช้งาน" : "เปิดใช้งาน")">
                                                     <i class="bi bi-@(u.IsActive ? "lock" : "unlock")"></i>
                                                 </button>
                                             </form>
                                             <form method="post" asp-page-handler="DeleteUser" class="d-inline"
-                                                  onsubmit="return confirm('Delete user @u.Email?');">
+                                                  onsubmit="return confirm('ลบผู้ใช้ @u.Email?');">
                                                 <input type="hidden" name="userId" value="@u.Id" />
                                                 <button type="submit" class="btn btn-outline-danger">
                                                     <i class="bi bi-trash"></i>
@@ -121,9 +121,9 @@
     <!-- ───── CUSTOMERS TAB ───── -->
     <div class="tab-pane fade" id="customers">
         <div class="d-flex justify-content-between mb-3">
-            <h5>Customers</h5>
+            <h5>ลูกค้า</h5>
             <button class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#createCustomerModal">
-                <i class="bi bi-person-plus"></i> Add Customer
+                <i class="bi bi-person-plus"></i> เพิ่มลูกค้า
             </button>
         </div>
         <div class="card border-0 shadow-sm">
@@ -132,14 +132,14 @@
                     <table class="table table-hover mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Phone</th>
-                                <th>Address</th>
+                                <th>ชื่อ</th>
+                                <th>อีเมล</th>
+                                <th>โทรศัพท์</th>
+                                <th>ที่อยู่</th>
                                 <th>LINE</th>
-                                <th>Sites</th>
-                                <th>Status</th>
-                                <th class="text-end">Actions</th>
+                                <th>ไซต์</th>
+                                <th>สถานะ</th>
+                                <th class="text-end">จัดการ</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -150,9 +150,9 @@
                                     <td>@(c.Email ?? "-")</td>
                                     <td>@c.Phone</td>
                                     <td><small>@c.Address @(string.IsNullOrEmpty(c.City) ? "" : ", " + c.City)</small></td>
-                                    <td>@(string.IsNullOrEmpty(c.LineUserId) ? "-" : "Yes")</td>
+                                    <td>@(string.IsNullOrEmpty(c.LineUserId) ? "-" : "ผูกแล้ว")</td>
                                     <td><span class="badge bg-info">@c.Installations.Count</span></td>
-                                    <td><span class="badge @(c.IsActive ? "bg-success" : "bg-secondary")">@(c.IsActive ? "Active" : "Inactive")</span></td>
+                                    <td><span class="badge @(c.IsActive ? "bg-success" : "bg-secondary")">@(c.IsActive ? "ใช้งาน" : "ปิดใช้งาน")</span></td>
                                     <td class="text-end">
                                         <div class="btn-group btn-group-sm">
                                             <button class="btn btn-outline-primary edit-customer-btn" type="button"
@@ -167,21 +167,21 @@
                                             @if (string.IsNullOrEmpty(c.UserId) && !string.IsNullOrEmpty(c.Email))
                                             {
                                                 <form method="post" asp-page-handler="InviteCustomer" class="d-inline"
-                                                      onsubmit="return confirm('Create login account for @c.FullName (@c.Email)?');">
+                                                      onsubmit="return confirm('สร้างบัญชีเข้าระบบให้ @c.FullName (@c.Email)?');">
                                                     <input type="hidden" name="customerId" value="@c.Id" />
-                                                    <button type="submit" class="btn btn-outline-success" title="Create login account">
+                                                    <button type="submit" class="btn btn-outline-success" title="สร้างบัญชีเข้าระบบ">
                                                         <i class="bi bi-person-plus"></i>
                                                     </button>
                                                 </form>
                                             }
                                             else if (!string.IsNullOrEmpty(c.UserId))
                                             {
-                                                <button type="button" class="btn btn-outline-secondary" disabled title="Login account linked">
+                                                <button type="button" class="btn btn-outline-secondary" disabled title="ผูกบัญชีเข้าระบบแล้ว">
                                                     <i class="bi bi-check-circle"></i>
                                                 </button>
                                             }
                                             <form method="post" asp-page-handler="DeleteCustomer" class="d-inline"
-                                                  onsubmit="return confirm('Delete customer @c.FullName?');">
+                                                  onsubmit="return confirm('ลบลูกค้า @c.FullName?');">
                                                 <input type="hidden" name="customerId" value="@c.Id" />
                                                 <button type="submit" class="btn btn-outline-danger">
                                                     <i class="bi bi-trash"></i>
@@ -193,7 +193,7 @@
                             }
                             @if (!Model.CustomerList.Any())
                             {
-                                <tr><td colspan="8" class="text-center text-muted py-3">No customers</td></tr>
+                                <tr><td colspan="8" class="text-center text-muted py-3">ยังไม่มีลูกค้า</td></tr>
                             }
                         </tbody>
                     </table>
@@ -205,9 +205,9 @@
     <!-- ───── PARTNERS TAB ───── -->
     <div class="tab-pane fade" id="partners">
         <div class="d-flex justify-content-between mb-3">
-            <h5>Partners</h5>
+            <h5>พาร์ทเนอร์</h5>
             <button class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#createPartnerModal">
-                <i class="bi bi-building-add"></i> Add Partner
+                <i class="bi bi-building-add"></i> เพิ่มพาร์ทเนอร์
             </button>
         </div>
         <div class="card border-0 shadow-sm">
@@ -216,14 +216,14 @@
                     <table class="table table-hover mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>Company</th>
-                                <th>Email</th>
-                                <th>Phone</th>
-                                <th>Commission</th>
-                                <th>Sites</th>
-                                <th>Contract</th>
-                                <th>Status</th>
-                                <th class="text-end">Actions</th>
+                                <th>บริษัท</th>
+                                <th>อีเมล</th>
+                                <th>โทรศัพท์</th>
+                                <th>ค่าคอมมิชชั่น</th>
+                                <th>ไซต์</th>
+                                <th>สัญญาถึง</th>
+                                <th>สถานะ</th>
+                                <th class="text-end">จัดการ</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -236,7 +236,7 @@
                                     <td>@(p.CommissionRate?.ToString("N1") ?? "-")%</td>
                                     <td><span class="badge bg-info">@p.Installations.Count</span></td>
                                     <td><small>@(p.ContractEndDate?.ToString("dd/MM/yyyy") ?? "-")</small></td>
-                                    <td><span class="badge @(p.IsActive ? "bg-success" : "bg-secondary")">@(p.IsActive ? "Active" : "Inactive")</span></td>
+                                    <td><span class="badge @(p.IsActive ? "bg-success" : "bg-secondary")">@(p.IsActive ? "ใช้งาน" : "ปิดใช้งาน")</span></td>
                                     <td class="text-end">
                                         <div class="btn-group btn-group-sm">
                                             <button class="btn btn-outline-primary edit-partner-btn" type="button"
@@ -257,21 +257,21 @@
                                             @if (!hasPartnerUser && !string.IsNullOrEmpty(p.ContactEmail))
                                             {
                                                 <form method="post" asp-page-handler="InvitePartner" class="d-inline"
-                                                      onsubmit="return confirm('Create login account for partner @p.CompanyName (@p.ContactEmail)?');">
+                                                      onsubmit="return confirm('สร้างบัญชีเข้าระบบให้พาร์ทเนอร์ @p.CompanyName (@p.ContactEmail)?');">
                                                     <input type="hidden" name="partnerId" value="@p.Id" />
-                                                    <button type="submit" class="btn btn-outline-success" title="Create login account">
+                                                    <button type="submit" class="btn btn-outline-success" title="สร้างบัญชีเข้าระบบ">
                                                         <i class="bi bi-person-plus"></i>
                                                     </button>
                                                 </form>
                                             }
                                             else if (hasPartnerUser)
                                             {
-                                                <button type="button" class="btn btn-outline-secondary" disabled title="Partner user(s) linked">
+                                                <button type="button" class="btn btn-outline-secondary" disabled title="มีผู้ใช้ในสังกัดแล้ว">
                                                     <i class="bi bi-check-circle"></i>
                                                 </button>
                                             }
                                             <form method="post" asp-page-handler="DeletePartner" class="d-inline"
-                                                  onsubmit="return confirm('Delete partner @p.CompanyName?');">
+                                                  onsubmit="return confirm('ลบพาร์ทเนอร์ @p.CompanyName?');">
                                                 <input type="hidden" name="partnerId" value="@p.Id" />
                                                 <button type="submit" class="btn btn-outline-danger">
                                                     <i class="bi bi-trash"></i>
@@ -283,7 +283,7 @@
                             }
                             @if (!Model.PartnerList.Any())
                             {
-                                <tr><td colspan="8" class="text-center text-muted py-3">No partners</td></tr>
+                                <tr><td colspan="8" class="text-center text-muted py-3">ยังไม่มีพาร์ทเนอร์</td></tr>
                             }
                         </tbody>
                     </table>
@@ -300,34 +300,34 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <form method="post" asp-page-handler="CreateUser">
-                <div class="modal-header"><h5 class="modal-title">Add User</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">เพิ่มผู้ใช้</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-2"><label class="form-label">Full Name *</label><input asp-for="NewUser.FullName" class="form-control" required /></div>
-                    <div class="mb-2"><label class="form-label">Email *</label><input asp-for="NewUser.Email" class="form-control" type="email" required /></div>
-                    <div class="mb-2"><label class="form-label">Password *</label><input asp-for="NewUser.Password" class="form-control" type="password" required minlength="8" />
-                        <small class="text-muted">Min 8 chars, uppercase, digit, special char</small></div>
-                    <div class="mb-2"><label class="form-label">Role *</label>
+                    <div class="mb-2"><label class="form-label">ชื่อ-นามสกุล *</label><input asp-for="NewUser.FullName" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">อีเมล *</label><input asp-for="NewUser.Email" class="form-control" type="email" required /></div>
+                    <div class="mb-2"><label class="form-label">รหัสผ่าน *</label><input asp-for="NewUser.Password" class="form-control" type="password" required minlength="8" />
+                        <small class="text-muted">อย่างน้อย 8 ตัวอักษร มีตัวพิมพ์ใหญ่ ตัวเลข และอักขระพิเศษ</small></div>
+                    <div class="mb-2"><label class="form-label">บทบาท *</label>
                         <select asp-for="NewUser.Role" class="form-select" id="newUserRole">
-                            <option value="@UserRoles.Customer">Customer</option>
-                            <option value="@UserRoles.Partner">Partner</option>
-                            <option value="@UserRoles.Admin">Admin</option>
+                            <option value="@UserRoles.Customer">ลูกค้า</option>
+                            <option value="@UserRoles.Partner">พาร์ทเนอร์</option>
+                            <option value="@UserRoles.Admin">ผู้ดูแลระบบ</option>
                         </select>
                     </div>
                     <div class="mb-2 partner-select" style="display:none">
-                        <label class="form-label">Partner Company</label>
+                        <label class="form-label">สังกัดพาร์ทเนอร์</label>
                         <select asp-for="NewUser.PartnerId" class="form-select">
-                            <option value="">-- Select Partner --</option>
+                            <option value="">-- เลือกพาร์ทเนอร์ --</option>
                             @foreach (var p in Model.PartnerList)
                             {
                                 <option value="@p.Id">@p.CompanyName</option>
                             }
                         </select>
                     </div>
-                    <div class="mb-2"><label class="form-label">Phone</label><input asp-for="NewUser.Phone" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">โทรศัพท์</label><input asp-for="NewUser.Phone" class="form-control" /></div>
                     <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="NewUser.LineUserId" class="form-control" /></div>
-                    <div class="mb-2"><label class="form-label">Company</label><input asp-for="NewUser.CompanyName" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">บริษัท</label><input asp-for="NewUser.CompanyName" class="form-control" /></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Create</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button type="submit" class="btn btn-warning">สร้าง</button></div>
             </form>
         </div>
     </div>
@@ -339,33 +339,33 @@
         <div class="modal-content">
             <form method="post" asp-page-handler="EditUser">
                 <input type="hidden" asp-for="EditUser.Id" id="editUserId" />
-                <div class="modal-header"><h5 class="modal-title">Edit User</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">แก้ไขผู้ใช้</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-2"><label class="form-label">Full Name *</label><input asp-for="EditUser.FullName" id="editFullName" class="form-control" required /></div>
-                    <div class="mb-2"><label class="form-label">Email *</label><input asp-for="EditUser.Email" id="editEmail" class="form-control" type="email" required /></div>
-                    <div class="mb-2"><label class="form-label">Role *</label>
+                    <div class="mb-2"><label class="form-label">ชื่อ-นามสกุล *</label><input asp-for="EditUser.FullName" id="editFullName" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">อีเมล *</label><input asp-for="EditUser.Email" id="editEmail" class="form-control" type="email" required /></div>
+                    <div class="mb-2"><label class="form-label">บทบาท *</label>
                         <select asp-for="EditUser.Role" id="editRole" class="form-select">
-                            <option value="@UserRoles.Customer">Customer</option>
-                            <option value="@UserRoles.Partner">Partner</option>
-                            <option value="@UserRoles.Admin">Admin</option>
+                            <option value="@UserRoles.Customer">ลูกค้า</option>
+                            <option value="@UserRoles.Partner">พาร์ทเนอร์</option>
+                            <option value="@UserRoles.Admin">ผู้ดูแลระบบ</option>
                         </select>
                     </div>
                     <div class="mb-2 partner-select-edit">
-                        <label class="form-label">Partner Company</label>
+                        <label class="form-label">สังกัดพาร์ทเนอร์</label>
                         <select asp-for="EditUser.PartnerId" id="editPartnerId" class="form-select">
-                            <option value="">-- None --</option>
+                            <option value="">-- ไม่ระบุ --</option>
                             @foreach (var p in Model.PartnerList)
                             {
                                 <option value="@p.Id">@p.CompanyName</option>
                             }
                         </select>
                     </div>
-                    <div class="mb-2"><label class="form-label">Phone</label><input asp-for="EditUser.Phone" id="editPhone" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">โทรศัพท์</label><input asp-for="EditUser.Phone" id="editPhone" class="form-control" /></div>
                     <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="EditUser.LineUserId" id="editLineUserId" class="form-control" /></div>
-                    <div class="mb-2"><label class="form-label">Company</label><input asp-for="EditUser.CompanyName" id="editCompany" class="form-control" /></div>
-                    <div class="form-check"><input asp-for="EditUser.IsActive" id="editIsActive" class="form-check-input" /><label class="form-check-label">Active</label></div>
+                    <div class="mb-2"><label class="form-label">บริษัท</label><input asp-for="EditUser.CompanyName" id="editCompany" class="form-control" /></div>
+                    <div class="form-check"><input asp-for="EditUser.IsActive" id="editIsActive" class="form-check-input" /><label class="form-check-label">เปิดใช้งาน</label></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button type="submit" class="btn btn-primary">บันทึก</button></div>
             </form>
         </div>
     </div>
@@ -377,16 +377,16 @@
         <div class="modal-content">
             <form method="post" asp-page-handler="ResetPassword">
                 <input type="hidden" asp-for="PwReset.UserId" id="resetUserId" />
-                <div class="modal-header"><h5 class="modal-title">Reset Password</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">รีเซ็ตรหัสผ่าน</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <p>Reset password for <strong id="resetEmail"></strong></p>
+                    <p>รีเซ็ตรหัสผ่านของ <strong id="resetEmail"></strong></p>
                     <div class="mb-2">
-                        <label class="form-label">New Password *</label>
+                        <label class="form-label">รหัสผ่านใหม่ *</label>
                         <input asp-for="PwReset.NewPassword" class="form-control" type="password" required minlength="8" />
-                        <small class="text-muted">Min 8 chars, uppercase, digit, special char (e.g. Test@1234)</small>
+                        <small class="text-muted">อย่างน้อย 8 ตัวอักษร มีตัวพิมพ์ใหญ่ ตัวเลข และอักขระพิเศษ (เช่น Test@1234)</small>
                     </div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Reset</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button type="submit" class="btn btn-warning">รีเซ็ต</button></div>
             </form>
         </div>
     </div>
@@ -397,28 +397,28 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="post" asp-page-handler="CreateCustomer">
-                <div class="modal-header"><h5 class="modal-title">Add Customer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">เพิ่มลูกค้า</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">First Name *</label><input asp-for="NewCustomer.FirstName" class="form-control" required /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Last Name *</label><input asp-for="NewCustomer.LastName" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">ชื่อ *</label><input asp-for="NewCustomer.FirstName" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">นามสกุล *</label><input asp-for="NewCustomer.LastName" class="form-control" required /></div>
                     </div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Email</label><input asp-for="NewCustomer.Email" class="form-control" type="email" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Phone *</label><input asp-for="NewCustomer.Phone" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">อีเมล</label><input asp-for="NewCustomer.Email" class="form-control" type="email" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">โทรศัพท์ *</label><input asp-for="NewCustomer.Phone" class="form-control" required /></div>
                     </div>
                     <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="NewCustomer.LineUserId" class="form-control" /></div>
-                    <div class="mb-2"><label class="form-label">Address *</label><input asp-for="NewCustomer.Address" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">ที่อยู่ *</label><input asp-for="NewCustomer.Address" class="form-control" required /></div>
                     <div class="row">
-                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="NewCustomer.City" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="NewCustomer.Province" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="NewCustomer.PostalCode" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">อำเภอ/เขต</label><input asp-for="NewCustomer.City" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">จังหวัด</label><input asp-for="NewCustomer.Province" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">รหัสไปรษณีย์</label><input asp-for="NewCustomer.PostalCode" class="form-control" /></div>
                     </div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="NewCustomer.TaxId" class="form-control" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Link to User Account</label>
+                        <div class="col-6 mb-2"><label class="form-label">เลขผู้เสียภาษี</label><input asp-for="NewCustomer.TaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">ผูกกับบัญชีเข้าระบบ</label>
                             <select asp-for="NewCustomer.UserId" class="form-select">
-                                <option value="">-- None --</option>
+                                <option value="">-- ไม่ระบุ --</option>
                                 @foreach (var u in Model.Users.Where(x => x.Role == "Customer"))
                                 {
                                     <option value="@u.Id">@u.FullName (@u.Email)</option>
@@ -427,7 +427,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Create</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button type="submit" class="btn btn-warning">สร้าง</button></div>
             </form>
         </div>
     </div>
@@ -439,28 +439,28 @@
         <div class="modal-content">
             <form method="post" asp-page-handler="EditCustomer">
                 <input type="hidden" asp-for="EditCustomer.Id" id="editCustId" />
-                <div class="modal-header"><h5 class="modal-title">Edit Customer</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">แก้ไขข้อมูลลูกค้า</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">First Name *</label><input asp-for="EditCustomer.FirstName" id="editCustFirst" class="form-control" required /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Last Name *</label><input asp-for="EditCustomer.LastName" id="editCustLast" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">ชื่อ *</label><input asp-for="EditCustomer.FirstName" id="editCustFirst" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">นามสกุล *</label><input asp-for="EditCustomer.LastName" id="editCustLast" class="form-control" required /></div>
                     </div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Email</label><input asp-for="EditCustomer.Email" id="editCustEmail" class="form-control" type="email" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Phone *</label><input asp-for="EditCustomer.Phone" id="editCustPhone" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">อีเมล</label><input asp-for="EditCustomer.Email" id="editCustEmail" class="form-control" type="email" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">โทรศัพท์ *</label><input asp-for="EditCustomer.Phone" id="editCustPhone" class="form-control" required /></div>
                     </div>
                     <div class="mb-2"><label class="form-label">LINE User ID</label><input asp-for="EditCustomer.LineUserId" id="editCustLine" class="form-control" /></div>
-                    <div class="mb-2"><label class="form-label">Address *</label><input asp-for="EditCustomer.Address" id="editCustAddress" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">ที่อยู่ *</label><input asp-for="EditCustomer.Address" id="editCustAddress" class="form-control" required /></div>
                     <div class="row">
-                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="EditCustomer.City" id="editCustCity" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="EditCustomer.Province" id="editCustProvince" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="EditCustomer.PostalCode" id="editCustPostal" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">อำเภอ/เขต</label><input asp-for="EditCustomer.City" id="editCustCity" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">จังหวัด</label><input asp-for="EditCustomer.Province" id="editCustProvince" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">รหัสไปรษณีย์</label><input asp-for="EditCustomer.PostalCode" id="editCustPostal" class="form-control" /></div>
                     </div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="EditCustomer.TaxId" id="editCustTaxId" class="form-control" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Link to User</label>
+                        <div class="col-6 mb-2"><label class="form-label">เลขผู้เสียภาษี</label><input asp-for="EditCustomer.TaxId" id="editCustTaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">ผูกกับบัญชีเข้าระบบ</label>
                             <select asp-for="EditCustomer.UserId" id="editCustUserId" class="form-select">
-                                <option value="">-- None --</option>
+                                <option value="">-- ไม่ระบุ --</option>
                                 @foreach (var u in Model.Users.Where(x => x.Role == "Customer"))
                                 {
                                     <option value="@u.Id">@u.FullName (@u.Email)</option>
@@ -468,10 +468,10 @@
                             </select>
                         </div>
                     </div>
-                    <div class="mb-2"><label class="form-label">Notes</label><textarea asp-for="EditCustomer.Notes" id="editCustNotes" class="form-control" rows="2"></textarea></div>
-                    <div class="form-check"><input asp-for="EditCustomer.IsActive" id="editCustActive" class="form-check-input" /><label class="form-check-label">Active</label></div>
+                    <div class="mb-2"><label class="form-label">หมายเหตุ</label><textarea asp-for="EditCustomer.Notes" id="editCustNotes" class="form-control" rows="2"></textarea></div>
+                    <div class="form-check"><input asp-for="EditCustomer.IsActive" id="editCustActive" class="form-check-input" /><label class="form-check-label">เปิดใช้งาน</label></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button type="submit" class="btn btn-primary">บันทึก</button></div>
             </form>
 
             @* ── Login account management (out of the Save-Customer form so a
@@ -502,7 +502,7 @@
                         </div>
                     </form>
                     <small class="text-muted d-block mt-1">
-                        รหัสใหม่จะแสดงในข้อความผลลัพธ์ — แจ้งลูกค้าและให้เปลี่ยนเองในหน้า Manage Account
+                        รหัสใหม่จะแสดงในข้อความผลลัพธ์ — แจ้งลูกค้าและให้เปลี่ยนเองในหน้าจัดการบัญชี
                     </small>
                 </div>
 
@@ -522,7 +522,7 @@
                         </div>
                         <div class="col-md-5">
                             <button type="submit" class="btn btn-sm btn-success w-100">
-                                <i class="bi bi-person-plus"></i> สร้าง Login Account
+                                <i class="bi bi-person-plus"></i> สร้างบัญชีเข้าระบบ
                             </button>
                         </div>
                     </form>
@@ -531,8 +531,8 @@
                 @* No email: warn *@
                 <div id="editCustLoginNoEmail" class="alert alert-warning py-2 small mb-0" style="display:none">
                     <i class="bi bi-exclamation-triangle"></i>
-                    ต้องกรอก <strong>Email</strong> ให้ลูกค้าก่อน จึงจะสร้าง login account ได้
-                    (email = username สำหรับ login)
+                    ต้องกรอก <strong>อีเมล</strong> ให้ลูกค้าก่อน จึงจะสร้างบัญชีเข้าระบบได้
+                    (อีเมลใช้เป็นชื่อผู้ใช้สำหรับเข้าระบบ)
                 </div>
             </div>
         </div>
@@ -544,29 +544,29 @@
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <form method="post" asp-page-handler="CreatePartner">
-                <div class="modal-header"><h5 class="modal-title">Add Partner</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">เพิ่มพาร์ทเนอร์</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-2"><label class="form-label">Company Name *</label><input asp-for="NewPartner.CompanyName" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">ชื่อบริษัท *</label><input asp-for="NewPartner.CompanyName" class="form-control" required /></div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Contact Email *</label><input asp-for="NewPartner.ContactEmail" class="form-control" type="email" required /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Contact Phone *</label><input asp-for="NewPartner.ContactPhone" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">อีเมลติดต่อ *</label><input asp-for="NewPartner.ContactEmail" class="form-control" type="email" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">เบอร์ติดต่อ *</label><input asp-for="NewPartner.ContactPhone" class="form-control" required /></div>
                     </div>
-                    <div class="mb-2"><label class="form-label">Address</label><input asp-for="NewPartner.Address" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">ที่อยู่</label><input asp-for="NewPartner.Address" class="form-control" /></div>
                     <div class="row">
-                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="NewPartner.City" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="NewPartner.Province" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="NewPartner.PostalCode" class="form-control" /></div>
-                    </div>
-                    <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="NewPartner.TaxId" class="form-control" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Commission Rate (%)</label><input asp-for="NewPartner.CommissionRate" class="form-control" type="number" step="any" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">อำเภอ/เขต</label><input asp-for="NewPartner.City" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">จังหวัด</label><input asp-for="NewPartner.Province" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">รหัสไปรษณีย์</label><input asp-for="NewPartner.PostalCode" class="form-control" /></div>
                     </div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Contract Start</label><input asp-for="NewPartner.ContractStartDate" class="form-control" type="date" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Contract End</label><input asp-for="NewPartner.ContractEndDate" class="form-control" type="date" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">เลขผู้เสียภาษี</label><input asp-for="NewPartner.TaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">อัตราค่าคอมมิชชั่น (%)</label><input asp-for="NewPartner.CommissionRate" class="form-control" type="number" step="any" /></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">สัญญาเริ่ม</label><input asp-for="NewPartner.ContractStartDate" class="form-control" type="date" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">สัญญาสิ้นสุด</label><input asp-for="NewPartner.ContractEndDate" class="form-control" type="date" /></div>
                     </div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-warning">Create</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button type="submit" class="btn btn-warning">สร้าง</button></div>
             </form>
         </div>
     </div>
@@ -578,31 +578,31 @@
         <div class="modal-content">
             <form method="post" asp-page-handler="EditPartner">
                 <input type="hidden" asp-for="EditPartner.Id" id="editPartnerId" />
-                <div class="modal-header"><h5 class="modal-title">Edit Partner</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-header"><h5 class="modal-title">แก้ไขข้อมูลพาร์ทเนอร์</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
-                    <div class="mb-2"><label class="form-label">Company Name *</label><input asp-for="EditPartner.CompanyName" id="editPartnerCompany" class="form-control" required /></div>
+                    <div class="mb-2"><label class="form-label">ชื่อบริษัท *</label><input asp-for="EditPartner.CompanyName" id="editPartnerCompany" class="form-control" required /></div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Contact Email *</label><input asp-for="EditPartner.ContactEmail" id="editPartnerEmail" class="form-control" type="email" required /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Contact Phone *</label><input asp-for="EditPartner.ContactPhone" id="editPartnerPhone" class="form-control" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">อีเมลติดต่อ *</label><input asp-for="EditPartner.ContactEmail" id="editPartnerEmail" class="form-control" type="email" required /></div>
+                        <div class="col-6 mb-2"><label class="form-label">เบอร์ติดต่อ *</label><input asp-for="EditPartner.ContactPhone" id="editPartnerPhone" class="form-control" required /></div>
                     </div>
-                    <div class="mb-2"><label class="form-label">Address</label><input asp-for="EditPartner.Address" id="editPartnerAddress" class="form-control" /></div>
+                    <div class="mb-2"><label class="form-label">ที่อยู่</label><input asp-for="EditPartner.Address" id="editPartnerAddress" class="form-control" /></div>
                     <div class="row">
-                        <div class="col-4 mb-2"><label class="form-label">City</label><input asp-for="EditPartner.City" id="editPartnerCity" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Province</label><input asp-for="EditPartner.Province" id="editPartnerProvince" class="form-control" /></div>
-                        <div class="col-4 mb-2"><label class="form-label">Postal Code</label><input asp-for="EditPartner.PostalCode" id="editPartnerPostal" class="form-control" /></div>
-                    </div>
-                    <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Tax ID</label><input asp-for="EditPartner.TaxId" id="editPartnerTaxId" class="form-control" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Commission Rate (%)</label><input asp-for="EditPartner.CommissionRate" id="editPartnerCommission" class="form-control" type="number" step="any" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">อำเภอ/เขต</label><input asp-for="EditPartner.City" id="editPartnerCity" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">จังหวัด</label><input asp-for="EditPartner.Province" id="editPartnerProvince" class="form-control" /></div>
+                        <div class="col-4 mb-2"><label class="form-label">รหัสไปรษณีย์</label><input asp-for="EditPartner.PostalCode" id="editPartnerPostal" class="form-control" /></div>
                     </div>
                     <div class="row">
-                        <div class="col-6 mb-2"><label class="form-label">Contract Start</label><input asp-for="EditPartner.ContractStartDate" id="editPartnerStart" class="form-control" type="date" /></div>
-                        <div class="col-6 mb-2"><label class="form-label">Contract End</label><input asp-for="EditPartner.ContractEndDate" id="editPartnerEnd" class="form-control" type="date" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">เลขผู้เสียภาษี</label><input asp-for="EditPartner.TaxId" id="editPartnerTaxId" class="form-control" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">อัตราค่าคอมมิชชั่น (%)</label><input asp-for="EditPartner.CommissionRate" id="editPartnerCommission" class="form-control" type="number" step="any" /></div>
                     </div>
-                    <div class="mb-2"><label class="form-label">Notes</label><textarea asp-for="EditPartner.Notes" id="editPartnerNotes" class="form-control" rows="2"></textarea></div>
-                    <div class="form-check"><input asp-for="EditPartner.IsActive" id="editPartnerActive" class="form-check-input" /><label class="form-check-label">Active</label></div>
+                    <div class="row">
+                        <div class="col-6 mb-2"><label class="form-label">สัญญาเริ่ม</label><input asp-for="EditPartner.ContractStartDate" id="editPartnerStart" class="form-control" type="date" /></div>
+                        <div class="col-6 mb-2"><label class="form-label">สัญญาสิ้นสุด</label><input asp-for="EditPartner.ContractEndDate" id="editPartnerEnd" class="form-control" type="date" /></div>
+                    </div>
+                    <div class="mb-2"><label class="form-label">หมายเหตุ</label><textarea asp-for="EditPartner.Notes" id="editPartnerNotes" class="form-control" rows="2"></textarea></div>
+                    <div class="form-check"><input asp-for="EditPartner.IsActive" id="editPartnerActive" class="form-check-input" /><label class="form-check-label">เปิดใช้งาน</label></div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button><button type="submit" class="btn btn-primary">บันทึก</button></div>
             </form>
         </div>
     </div>

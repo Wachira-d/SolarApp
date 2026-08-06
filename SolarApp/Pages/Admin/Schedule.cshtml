@@ -1,7 +1,7 @@
 @page
 @model SolarApp.Pages.Admin.ScheduleModel
 @{
-    ViewData["Title"] = "Background Job Schedule";
+    ViewData["Title"] = "ตารางงานเบื้องหลัง";
 }
 
 @if (!string.IsNullOrEmpty(Model.StatusMessage))
@@ -19,11 +19,11 @@
     </div>
 }
 
-<h4 class="mb-4">Background Job Schedule</h4>
+<h4 class="mb-4">ตารางงานเบื้องหลัง</h4>
 
 <!-- Recommended Settings Info -->
 <div class="alert alert-info">
-    <h6><i class="bi bi-lightbulb"></i> Recommended Settings</h6>
+    <h6><i class="bi bi-lightbulb"></i> ค่าที่แนะนำ</h6>
     <p class="mb-2">ระบบแนะนำให้ใช้ค่า default เหล่านี้ (เหมาะสมกับ API rate limits ของทุกแบรนด์):</p>
     <ul class="mb-2">
         <li><strong>Data Sync: ทุก 15 นาที</strong> (96 ครั้ง/วัน/installation) -- ปลอดภัยกับทุก API</li>
@@ -38,16 +38,16 @@
     <!-- Schedule Configuration -->
     <div class="col-md-7">
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white"><h6 class="mb-0">Configure Schedule</h6></div>
+            <div class="card-header bg-white"><h6 class="mb-0">ตั้งค่าตารางงาน</h6></div>
             <div class="card-body">
                 <form method="post" asp-page-handler="Save">
                     <div class="mb-3">
                         <label class="form-label fw-bold">
-                            <i class="bi bi-cloud-download text-primary"></i> Data Sync (ดึงข้อมูลจาก Cloud)
+                            <i class="bi bi-cloud-download text-primary"></i> ดึงข้อมูลจากคลาวด์ผู้ผลิต
                         </label>
                         <input asp-for="DataSyncCron" class="form-control font-monospace" />
                         <small class="text-muted">
-                            Cron expression (5 fields: minute hour day month weekday)
+                            Cron expression (5 ช่อง: นาที ชั่วโมง วันที่ เดือน วันในสัปดาห์)
                         </small>
                         <div class="mt-2">
                             <button type="button" class="btn btn-sm btn-outline-secondary cron-preset"
@@ -63,7 +63,7 @@
 
                     <div class="mb-3">
                         <label class="form-label fw-bold">
-                            <i class="bi bi-heart-pulse text-danger"></i> Health Monitor (ตรวจสอบระบบ)
+                            <i class="bi bi-heart-pulse text-danger"></i> ตรวจสอบสุขภาพระบบ
                         </label>
                         <input asp-for="HealthMonitorCron" class="form-control font-monospace" />
                         <small class="text-muted">
@@ -83,7 +83,7 @@
 
                     <div class="mb-3">
                         <label class="form-label fw-bold">
-                            <i class="bi bi-bell text-warning"></i> Work Order Reminders (LINE แจ้งช่าง/ลูกค้า)
+                            <i class="bi bi-bell text-warning"></i> เตือนใบสั่งงาน (แจ้ง LINE ถึงช่าง/ลูกค้า)
                         </label>
                         <input asp-for="WorkOrderRemindersCron" class="form-control font-monospace" />
                         <small class="text-muted">
@@ -103,10 +103,10 @@
 
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-warning">
-                            <i class="bi bi-save"></i> Save Schedule
+                            <i class="bi bi-save"></i> บันทึกตารางงาน
                         </button>
                         <button type="submit" asp-page-handler="ApplyRecommended" class="btn btn-outline-primary">
-                            <i class="bi bi-magic"></i> Apply Recommended
+                            <i class="bi bi-magic"></i> ใช้ค่าที่แนะนำ
                         </button>
                     </div>
                 </form>
@@ -115,12 +115,12 @@
 
         <!-- Cron Guide -->
         <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white"><h6 class="mb-0">Cron Expression Guide</h6></div>
+            <div class="card-header bg-white"><h6 class="mb-0">คู่มือ Cron Expression</h6></div>
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-sm mb-0">
                         <thead class="table-light">
-                            <tr><th>Expression</th><th>Meaning</th></tr>
+                            <tr><th>รูปแบบ</th><th>ความหมาย</th></tr>
                         </thead>
                         <tbody>
                             <tr><td class="font-monospace">* * * * *</td><td>ทุกนาที</td></tr>
@@ -144,9 +144,9 @@
     <div class="col-md-5">
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                <h6 class="mb-0">Current Jobs</h6>
+                <h6 class="mb-0">งานที่ตั้งไว้ตอนนี้</h6>
                 <a href="/hangfire" target="_blank" class="btn btn-sm btn-outline-info">
-                    <i class="bi bi-gear"></i> Hangfire Dashboard
+                    <i class="bi bi-gear"></i> หน้า Hangfire
                 </a>
             </div>
             <div class="card-body p-0">
@@ -158,18 +158,18 @@
                             <div class="d-flex justify-content-between">
                                 <strong>@j.Id</strong>
                                 <span class="badge bg-@(j.LastJobState == "Succeeded" ? "success" : j.LastJobState == "Failed" ? "danger" : "secondary")">
-                                    @(j.LastJobState ?? "Unknown")
+                                    @(j.LastJobState ?? "ไม่ทราบสถานะ")
                                 </span>
                             </div>
                             <div class="small text-muted mt-1">
-                                <div><strong>Schedule:</strong> <code>@j.Cron</code></div>
-                                <div><strong>Last:</strong> @(j.LastExecution?.ToString("dd/MM HH:mm:ss") ?? "Never")</div>
-                                <div><strong>Next:</strong> @(j.NextExecution?.ToString("dd/MM HH:mm:ss") ?? "Not scheduled")</div>
+                                <div><strong>ตารางเวลา:</strong> <code>@j.Cron</code></div>
+                                <div><strong>รันล่าสุด:</strong> @(j.LastExecution?.ToString("dd/MM HH:mm:ss") ?? "ยังไม่เคยรัน")</div>
+                                <div><strong>รันครั้งถัดไป:</strong> @(j.NextExecution?.ToString("dd/MM HH:mm:ss") ?? "ยังไม่ได้ตั้งเวลา")</div>
                             </div>
                             <form method="post" asp-page-handler="RunNow" class="mt-2">
                                 <input type="hidden" name="jobId" value="@j.Id" />
                                 <button type="submit" class="btn btn-sm btn-outline-success">
-                                    <i class="bi bi-play-fill"></i> Run Now
+                                    <i class="bi bi-play-fill"></i> รันเดี๋ยวนี้
                                 </button>
                             </form>
                         </div>
@@ -178,7 +178,7 @@
                 else
                 {
                     <div class="p-3 text-center text-muted">
-                        No jobs registered (Hangfire may still be starting up)
+                        ยังไม่มีงานลงทะเบียน (Hangfire อาจกำลังเริ่มทำงาน)
                     </div>
                 }
             </div>
@@ -186,23 +186,23 @@
 
         <!-- What the jobs do -->
         <div class="card border-0 shadow-sm">
-            <div class="card-header bg-white"><h6 class="mb-0">What each job does</h6></div>
+            <div class="card-header bg-white"><h6 class="mb-0">แต่ละงานทำอะไรบ้าง</h6></div>
             <div class="card-body small">
                 <p class="mb-2"><strong><i class="bi bi-cloud-download text-primary"></i> sync-production-data</strong></p>
                 <ul class="mb-3">
-                    <li>Loop through all active installations</li>
-                    <li>Call cloud API: realtime power, energy, battery SOC</li>
-                    <li>Save to <code>EnergyData</code> table</li>
-                    <li>Update <code>LastOnlineAt</code> + Status</li>
-                    <li>Log every API call to <code>InverterApiLogs</code></li>
+                    <li>วนดูไซต์งานที่เปิดใช้งานทั้งหมด</li>
+                    <li>เรียก cloud API: กำลังไฟเรียลไทม์ พลังงาน และ SOC แบตเตอรี่</li>
+                    <li>บันทึกลงตาราง <code>EnergyData</code></li>
+                    <li>อัปเดต <code>LastOnlineAt</code> และสถานะไซต์</li>
+                    <li>บันทึกทุกการเรียก API ลง <code>InverterApiLogs</code></li>
                 </ul>
                 <p class="mb-2"><strong><i class="bi bi-heart-pulse text-danger"></i> check-system-health</strong></p>
                 <ul class="mb-3">
-                    <li>Check installations offline &gt; threshold -&gt; create alert</li>
-                    <li>Check cleaning due -&gt; create alert</li>
-                    <li>Check warranty expiring in 90 days -&gt; create alert</li>
-                    <li>Send LINE notifications for new alerts</li>
-                    <li>Auto-resolve alerts when systems come back online</li>
+                    <li>ตรวจไซต์ที่ออฟไลน์เกินเกณฑ์ → สร้างการแจ้งเตือน</li>
+                    <li>ตรวจไซต์ที่ครบกำหนดล้างแผง → สร้างการแจ้งเตือน</li>
+                    <li>ตรวจประกันที่จะหมดใน 90 วัน → สร้างการแจ้งเตือน</li>
+                    <li>ส่งแจ้งเตือนใหม่เข้า LINE</li>
+                    <li>ปิดการแจ้งเตือนอัตโนมัติเมื่อระบบกลับมาออนไลน์</li>
                 </ul>
                 <p class="mb-2"><strong><i class="bi bi-bell text-warning"></i> workorder-reminders</strong></p>
                 <ul class="mb-0">

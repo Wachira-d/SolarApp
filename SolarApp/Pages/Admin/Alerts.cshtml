@@ -2,7 +2,7 @@
 @using SolarApp.Models.Enums
 @model SolarApp.Pages.Admin.AlertsModel
 @{
-    ViewData["Title"] = "System Alerts";
+    ViewData["Title"] = "แจ้งเตือนทั้งหมด";
 
     // Split into two operator-facing buckets so a routine cleaning reminder
     // doesn't sit in the same list as a plant fault.
@@ -19,7 +19,7 @@
 }
 
 <div class="d-flex align-items-center gap-2 mb-3">
-    <h4 class="mb-0">System Alerts</h4>
+    <h4 class="mb-0">แจ้งเตือนทั้งหมด</h4>
     <span class="badge bg-danger">ปัญหาระบบ @systemProblems.Count</span>
     <span class="badge bg-warning text-dark">งานตามกำหนด @reminders.Count</span>
 </div>
@@ -27,16 +27,16 @@
 @* ── Section 1: system problems (faults) ── *@
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-danger text-white">
-        <i class="bi bi-exclamation-triangle-fill"></i> ปัญหาระบบ (System Problems)
-        <small class="ms-1">— offline / error / low performance / predictive</small>
+        <i class="bi bi-exclamation-triangle-fill"></i> ปัญหาระบบ
+        <small class="ms-1">— ออฟไลน์ / ข้อผิดพลาด / ผลผลิตต่ำ / คาดการณ์ล่วงหน้า</small>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Severity</th><th>Type</th><th>Site</th><th>Title</th>
-                        <th>Root Cause Analysis</th><th>Time</th><th>Notified</th><th>Actions</th>
+                        <th>ความรุนแรง</th><th>ประเภท</th><th>ไซต์งาน</th><th>หัวข้อ</th>
+                        <th>สาเหตุที่วิเคราะห์ได้</th><th>เวลา</th><th>ส่งแจ้งแล้ว</th><th>จัดการ</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -64,12 +64,12 @@
                                 {
                                     <form method="post" asp-page-handler="Acknowledge" class="d-inline">
                                         <input type="hidden" name="alertId" value="@alert.Id" />
-                                        <button type="submit" class="btn btn-sm btn-outline-primary">ACK</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">รับทราบ</button>
                                     </form>
                                 }
                                 <form method="post" asp-page-handler="Resolve" class="d-inline">
                                     <input type="hidden" name="alertId" value="@alert.Id" />
-                                    <button type="submit" class="btn btn-sm btn-outline-success">Resolve</button>
+                                    <button type="submit" class="btn btn-sm btn-outline-success">ปิดเรื่อง</button>
                                 </form>
                             </td>
                         </tr>
@@ -89,7 +89,7 @@
 @* ── Section 2: scheduled reminders (cleaning / warranty) ── *@
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-warning text-dark">
-        <i class="bi bi-calendar-check"></i> งานตามกำหนด (Scheduled Reminders)
+        <i class="bi bi-calendar-check"></i> งานตามกำหนด
         <small class="ms-1">— ล้างแผง / ประกันใกล้หมด</small>
     </div>
     <div class="card-body p-0">
@@ -97,7 +97,7 @@
             <table class="table table-hover mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Type</th><th>Site</th><th>Title</th><th>Time</th><th>Notified</th><th>Actions</th>
+                        <th>ประเภท</th><th>ไซต์งาน</th><th>หัวข้อ</th><th>เวลา</th><th>ส่งแจ้งแล้ว</th><th>จัดการ</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -132,12 +132,12 @@
                                 {
                                     <form method="post" asp-page-handler="Acknowledge" class="d-inline">
                                         <input type="hidden" name="alertId" value="@alert.Id" />
-                                        <button type="submit" class="btn btn-sm btn-outline-primary">ACK</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">รับทราบ</button>
                                     </form>
                                 }
                                 <form method="post" asp-page-handler="Resolve" class="d-inline">
                                     <input type="hidden" name="alertId" value="@alert.Id" />
-                                    <button type="submit" class="btn btn-sm btn-outline-success">Resolve</button>
+                                    <button type="submit" class="btn btn-sm btn-outline-success">ปิดเรื่อง</button>
                                 </form>
                             </td>
                         </tr>
