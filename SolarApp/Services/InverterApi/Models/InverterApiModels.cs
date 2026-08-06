@@ -90,6 +90,69 @@ public class AlarmRecord
     public DateTime? ClearedAt { get; set; }
     public string? DeviceName { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Never-empty label for this alarm. Every adapter falls back to "" when the
+    /// vendor JSON doesn't carry the name field, and storing that straight
+    /// through produced dashboard rows that were a severity badge and nothing
+    /// else — the operator could see something was wrong but not what, and
+    /// couldn't look it up in the vendor portal either. Falls back through the
+    /// other identifying fields so the row always says something actionable.
+    /// </summary>
+    public string DisplayTitle
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(AlarmName)) return AlarmName.Trim();
+            if (!string.IsNullOrWhiteSpace(Description)) return Description.Trim();
+
+            var code = !string.IsNullOrWhiteSpace(AlarmCode) ? AlarmCode!.Trim()
+                     : !string.IsNullOrWhiteSpace(AlarmId) ? AlarmId.Trim()
+                     : null;
+            var device = !string.IsNullOrWhiteSpace(DeviceName) ? DeviceName!.Trim() : null;
+
+            return (code, device) switch
+            {
+                (not null, not null) => $"แจ้งเตือนจากอินเวอร์เตอร์ {device} (รหัส {code})",
+                (not null, null)     => $"แจ้งเตือนจากอินเวอร์เตอร์ (รหัส {code})",
+                (null, not null)     => $"แจ้งเตือนจากอินเวอร์เตอร์ {device} — ผู้ผลิตไม่ได้ส่งชื่อ alarm มา",
+                _                    => "แจ้งเตือนจากผู้ผลิต — ไม่ได้ส่งรายละเอียดมา"
+            };
+        }
+    }
+
+    /// <summary>
+    /// Body text for the stored alert. The old format interpolated the raw
+    /// fields, so an unnamed alarm with no description rendered as the literal
+    /// string " (Device: N/A)" — blank title, blank body, nothing to act on.
+    /// </summary>
+    public string DisplayMessage
+    {
+        get
+        {
+            var parts = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(Description) && Description!.Trim() != DisplayTitle)
+                parts.Add(Description.Trim());
+
+            if (!string.IsNullOrWhiteSpace(DeviceName))
+                parts.Add($"อุปกรณ์: {DeviceName!.Trim()}");
+
+            var code = !string.IsNullOrWhiteSpace(AlarmCode) ? AlarmCode!.Trim()
+                     : !string.IsNullOrWhiteSpace(AlarmId) ? AlarmId.Trim()
+                     : null;
+            if (code != null)
+                parts.Add($"รหัส alarm: {code}");
+
+            // Say so explicitly rather than leaving a blank body — "the vendor
+            // sent nothing" is itself the thing the operator needs to know,
+            // because it means the details have to come from the vendor portal.
+            if (parts.Count == 0)
+                return "ผู้ผลิตส่งการแจ้งเตือนมาโดยไม่มีรายละเอียด — ตรวจสอบ alarm list ในพอร์ทัลของผู้ผลิตโดยตรง";
+
+            return string.Join(" · ", parts);
+        }
+    }
 }
 
 public class DeviceInfo

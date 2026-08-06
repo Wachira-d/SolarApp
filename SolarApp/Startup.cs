@@ -2185,10 +2185,13 @@ BEGIN {sql}; END");
                 var addedAlarms = 0;
                 foreach (var a in alarmRecords)
                 {
+                    // Vendors sometimes omit the alarm name; DisplayTitle is what
+                    // gets stored, so it has to be what we dedupe on too.
+                    var alarmTitle = a.DisplayTitle;
                     var exists = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
                         .AnyAsync(db.SystemAlerts,
                             x => x.InstallationId == installation.Id
-                              && x.Title == a.AlarmName
+                              && x.Title == alarmTitle
                               && x.OccurredAt == a.OccurredAt);
                     if (!exists)
                     {
@@ -2203,8 +2206,8 @@ BEGIN {sql}; END");
                                 3 => Models.Enums.AlertSeverity.Medium,
                                 _ => Models.Enums.AlertSeverity.Low
                             },
-                            Title = a.AlarmName,
-                            Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
+                            Title = alarmTitle,
+                            Message = a.DisplayMessage,
                             OccurredAt = a.OccurredAt,
                             ResolvedAt = a.ClearedAt,
                             IsNotified = a.ClearedAt.HasValue

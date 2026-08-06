@@ -24,4 +24,30 @@ public class SystemAlert
 
     public bool IsNotified { get; set; }
     public bool IsResolved => ResolvedAt.HasValue;
+
+    /// <summary>
+    /// Title as it should be shown. Vendor alarms imported before the adapters
+    /// gained a name fallback were stored with an empty Title, and rendered on
+    /// the dashboard as a severity badge with no text beside it. This keeps
+    /// those rows readable without rewriting history.
+    /// </summary>
+    public string DisplayTitle => TitleFor(Title, Message);
+
+    /// <summary>
+    /// Same fallback as <see cref="DisplayTitle"/>, callable on a projection —
+    /// EF can't translate an instance property into SQL, so pages that select
+    /// columns instead of entities apply it after materialising.
+    /// </summary>
+    public static string TitleFor(string? title, string? message)
+    {
+        if (!string.IsNullOrWhiteSpace(title)) return title;
+
+        // The old import built the body by interpolation, so a nameless alarm
+        // with no description left only the scaffolding behind.
+        var body = message?.Trim();
+        if (!string.IsNullOrEmpty(body) && body != "(Device: N/A)")
+            return body;
+
+        return "แจ้งเตือนจากผู้ผลิต — ไม่ได้ส่งรายละเอียดมา";
+    }
 }

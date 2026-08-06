@@ -908,11 +908,16 @@ public class HuaweiAdapter : IInverterApiAdapter
                 {
                     AlarmId = SafeGetString(item, "alarmId") ?? "",
                     AlarmName = SafeGetString(item, "alarmName") ?? "",
-                    Severity = SafeGetInt(item, "severity") ?? 3,
+                    // FusionSolar NBI names the level field "lev"; reading only
+                    // "severity" meant every alarm fell to the ?? 3 default, so a
+                    // critical inverter fault arrived labelled Medium.
+                    Severity = SafeGetInt(item, "severity") ?? SafeGetInt(item, "lev") ?? 3,
                     OccurredAt = raiseTime.HasValue
                         ? DateTimeOffset.FromUnixTimeMilliseconds(raiseTime.Value).UtcDateTime
                         : DateTime.UtcNow,
-                    DeviceName = SafeGetString(item, "devName")
+                    DeviceName = SafeGetString(item, "devName"),
+                    AlarmCode = SafeGetString(item, "causeId") ?? SafeGetString(item, "alarmType"),
+                    Description = SafeGetString(item, "alarmCause")
                 });
             }
 
@@ -983,11 +988,14 @@ public class HuaweiAdapter : IInverterApiAdapter
                     {
                         AlarmId = SafeGetString(item, "alarmId") ?? "",
                         AlarmName = SafeGetString(item, "alarmName") ?? "",
-                        Severity = SafeGetInt(item, "severity") ?? 3,
+                        // See GetBatchAlarms — the level field is "lev", not "severity".
+                        Severity = SafeGetInt(item, "severity") ?? SafeGetInt(item, "lev") ?? 3,
                         OccurredAt = raiseTime.HasValue
                             ? DateTimeOffset.FromUnixTimeMilliseconds(raiseTime.Value).UtcDateTime
                             : DateTime.UtcNow,
-                        DeviceName = SafeGetString(item, "devName")
+                        DeviceName = SafeGetString(item, "devName"),
+                        AlarmCode = SafeGetString(item, "causeId") ?? SafeGetString(item, "alarmType"),
+                        Description = SafeGetString(item, "alarmCause")
                     });
                 }
                 catch (Exception itemEx)

@@ -755,10 +755,12 @@ public class SolarDataSyncJob
                         // this installation in ONE query, then check in-memory.
                         // Before: N AnyAsync calls per installation (100 alarms = 100 round-trips).
                         // After:  1 query + N HashSet lookups.
+                        // Dedupe on DisplayTitle, not AlarmName — that's what
+                        // gets stored, so an unnamed alarm must match itself.
                         var alarmKeys = alarmsForThisInstallation
-                            .Select(a => new { a.AlarmName, a.OccurredAt })
+                            .Select(a => new { Title = a.DisplayTitle, a.OccurredAt })
                             .ToList();
-                        var titles = alarmKeys.Select(k => k.AlarmName).Distinct().ToList();
+                        var titles = alarmKeys.Select(k => k.Title).Distinct().ToList();
                         var earliest = alarmKeys.Min(k => k.OccurredAt);
 
                         var existingKeys = await _context.SystemAlerts
@@ -773,7 +775,8 @@ public class SolarDataSyncJob
 
                         foreach (var a in alarmsForThisInstallation)
                         {
-                            if (existingSet.Contains((a.AlarmName, a.OccurredAt))) continue;
+                            var alarmTitle = a.DisplayTitle;
+                            if (existingSet.Contains((alarmTitle, a.OccurredAt))) continue;
 
                             _context.SystemAlerts.Add(new SystemAlert
                             {
@@ -786,14 +789,14 @@ public class SolarDataSyncJob
                                     3 => AlertSeverity.Medium,
                                     _ => AlertSeverity.Low
                                 },
-                                Title = a.AlarmName,
-                                Message = $"{a.Description ?? a.AlarmName} (Device: {a.DeviceName ?? "N/A"})",
+                                Title = alarmTitle,
+                                Message = a.DisplayMessage,
                                 OccurredAt = a.OccurredAt,
                                 ResolvedAt = a.ClearedAt,
                                 IsNotified = false
                             });
                             // Prevent dup-add within same batch (same alarm appearing twice in source)
-                            existingSet.Add((a.AlarmName, a.OccurredAt));
+                            existingSet.Add((alarmTitle, a.OccurredAt));
                             totalAlarms++;
                         }
                     }

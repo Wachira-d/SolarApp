@@ -46,7 +46,7 @@
                             <td><span class="badge @SeverityClass(alert.Severity)">@alert.Severity</span></td>
                             <td>@alert.AlertType</td>
                             <td>@alert.Installation.SiteName</td>
-                            <td>@alert.Title</td>
+                            <td>@alert.DisplayTitle</td>
                             <td><small>@(alert.RootCauseAnalysis ?? "-")</small></td>
                             <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
                             <td>
@@ -115,7 +115,7 @@
                                 }
                             </td>
                             <td>@alert.Installation.SiteName</td>
-                            <td>@alert.Title</td>
+                            <td>@alert.DisplayTitle</td>
                             <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
                             <td>
                                 @if (alert.IsNotified)

@@ -41,7 +41,7 @@ public class AlertsModel : PageModel
         // Filter to customer-relevant alert types — same set used by
         // CustomerAlertMessageBuilder so what the customer sees here
         // matches what hits their LINE channel.
-        var rows = await _context.SystemAlerts
+        var raw = await _context.SystemAlerts
             .Where(a => a.Installation.CustomerId == customerId
                 && (a.AlertType == AlertType.Offline
                     || a.AlertType == AlertType.Error
@@ -50,14 +50,28 @@ public class AlertsModel : PageModel
                     || a.AlertType == AlertType.WarrantyExpiring))
             .OrderByDescending(a => a.OccurredAt)
             .Take(50)
-            .Select(a => new AlertRow(
+            // Title comes back raw so SystemAlert.TitleFor can fill in for the
+            // vendor alarms that were stored without one — EF can't translate it.
+            .Select(a => new
+            {
                 a.Installation.SiteName,
                 a.InstallationId,
                 a.Title,
+                a.Message,
+                a.Severity,
+                a.OccurredAt,
+                a.ResolvedAt
+            })
+            .ToListAsync();
+
+        var rows = raw.Select(a => new AlertRow(
+                a.SiteName,
+                a.InstallationId,
+                SystemAlert.TitleFor(a.Title, a.Message),
                 a.Severity.ToString().ToLowerInvariant(),
                 a.OccurredAt,
                 a.ResolvedAt))
-            .ToListAsync();
+            .ToList();
 
         Active = rows.Where(r => r.Resolved == null).ToList();
         Resolved = rows.Where(r => r.Resolved != null).Take(20).ToList();

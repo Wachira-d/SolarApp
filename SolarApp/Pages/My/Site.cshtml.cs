@@ -141,17 +141,22 @@ public class SiteModel : PageModel
         // would deliver to LINE (offline / system errors).  Internal stuff
         // (API failure, low production internal) is hidden — they get the
         // technical channel.
-        RecentAlerts = await _context.SystemAlerts
+        var recentRaw = await _context.SystemAlerts
             .Where(a => a.InstallationId == id
                 && (a.AlertType == AlertType.Offline || a.AlertType == AlertType.Error))
             .OrderByDescending(a => a.OccurredAt)
             .Take(5)
-            .Select(a => new AlertVm(
-                a.Title,
+            // Raw title + message so SystemAlert.TitleFor can fill in for vendor
+            // alarms stored without a name — EF can't translate that in SQL.
+            .Select(a => new { a.Title, a.Message, a.Severity, a.OccurredAt, a.ResolvedAt })
+            .ToListAsync();
+
+        RecentAlerts = recentRaw.Select(a => new AlertVm(
+                SystemAlert.TitleFor(a.Title, a.Message),
                 a.Severity.ToString().ToLowerInvariant(),
                 a.OccurredAt,
                 a.ResolvedAt != null))
-            .ToListAsync();
+            .ToList();
 
         return Page();
     }
