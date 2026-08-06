@@ -18,7 +18,10 @@
         @if (User.IsInRole("Customer"))
         {
             <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/myhome")" asp-page="/MyHome/Index">
+                @* There were two customer portals and this link pointed at the
+                   weaker one. /My/* is the maintained portal (PWA shell, sites,
+                   history, alerts, settings); /MyHome was a single page. *@
+                <a class="nav-link text-white @ActiveClass("/my/")" asp-page="/My/Index">
                     <i class="bi bi-sun-fill me-2 text-warning"></i>โซลาร์ของฉัน
                 </a>
             </li>

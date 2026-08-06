@@ -197,6 +197,11 @@ try
     Log("Mapping endpoints...");
     app.MapRazorPages();
     Log("  • MapRazorPages");
+    // /MyHome was a second, thinner customer home page that duplicated /My.
+    // It's gone, but customers may have it bookmarked or installed as a PWA
+    // shortcut, so the old URL keeps working.
+    app.MapGet("/MyHome", () => Results.Redirect("/My", permanent: false));
+    app.MapGet("/MyHome/Index", () => Results.Redirect("/My", permanent: false));
     app.MapControllers();
     Log("  • MapControllers");
     app.MapHub<SolarApp.Hubs.DashboardHub>("/hubs/dashboard");
