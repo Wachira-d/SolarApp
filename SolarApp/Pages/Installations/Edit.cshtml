@@ -217,9 +217,10 @@
                                 @if (Model.Input.InverterBrand == SolarApp.Models.Enums.InverterBrand.FoxESS)
                                 {
                                     <span class="d-block text-warning">
-                                        <strong>FoxESS:</strong> ต้องใส่ <strong>Serial Number (SN) ของ inverter</strong>
-                                        เช่น <code>60P1103061FM046</code> — ไม่ใช่ GUID จาก URL เว็บ portal.
-                                        ดู SN ได้จากตาราง "อุปกรณ์" หลังกดรีเฟรชอุปกรณ์
+                                        <strong>FoxESS</strong> รับได้ 2 แบบ:<br>
+                                        • <strong>Plant/Station ID</strong> — รวมผลผลิตของ inverter <em>ทุกตัว</em>ในไซต์ (แนะนำ)<br>
+                                        • <strong>SN ของ inverter</strong> เช่น <code>60P1103061FM046</code> — เฉพาะตัวนั้นตัวเดียว<br>
+                                        เว้นว่าง = ใช้ทุกอุปกรณ์ในบัญชี. ดูค่าได้จากตาราง "อุปกรณ์" หลังกดรีเฟรชอุปกรณ์
                                     </span>
                                 }
                             </div>

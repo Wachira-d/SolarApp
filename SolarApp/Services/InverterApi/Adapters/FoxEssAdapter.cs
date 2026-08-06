@@ -31,7 +31,13 @@ namespace SolarApp.Services.InverterApi.Adapters;
 ///   Username = Client ID, ApiSecret = Client Secret
 ///   POST /oauth/token -> access_token -> "Authorization: Bearer {token}" header
 ///
-/// PlantId = Device Serial Number (SN) for device-specific queries.
+/// PlantId accepts EITHER:
+///   • a plant/station id  → every inverter in that plant is queried and
+///     summed (correct for multi-inverter sites), or
+///   • a single device serial number → only that inverter.
+/// FoxESS's data endpoints are device-scoped, so the adapter resolves the
+/// configured value to a device list via ResolveDeviceSnsAsync and
+/// aggregates. Leaving it blank uses every device on the account.
 ///
 /// Docs: https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html
 /// </summary>
@@ -126,17 +132,17 @@ public class FoxEssAdapter : IInverterApiAdapter
 
     public async Task<RealtimeData?> GetRealtimeDataAsync(ApiCredentials credentials)
     {
-        if (string.IsNullOrEmpty(credentials.PlantId))
-        {
-            _logger.LogWarning("FOX ESS: PlantId (device SN) is required for realtime data");
-            return null;
-        }
-
         try
         {
+            // One call covers every inverter in the plant — real/query takes a
+            // list of serial numbers — so multi-inverter sites cost no extra
+            // requests against the 10/min budget.
+            var sns = await ResolveDeviceSnsAsync(credentials);
+            if (sns.Count == 0) return null;
+
             var json = await SendPostAsync(credentials, "/op/v1/device/real/query", new
             {
-                sns = new[] { credentials.PlantId },
+                sns = sns.ToArray(),
                 variables = new[]
                 {
                     "pvPower", "generationPower", "feedinPower",
@@ -147,29 +153,45 @@ public class FoxEssAdapter : IInverterApiAdapter
 
             if (!json.HasValue || GetErrno(json.Value) != 0) return null;
 
-            var device = json.Value.GetProperty("result").EnumerateArray().FirstOrDefault();
-            if (device.ValueKind == JsonValueKind.Undefined) return null;
-
-            // Build a dictionary of variable -> value (safe against null/wrong-type)
+            // Sum power/energy across devices; SoC is a percentage so average
+            // it rather than adding (two 50% batteries are not 100%).
             var values = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-            if (device.TryGetProperty("datas", out var datas) && datas.ValueKind == JsonValueKind.Array)
+            var socReadings = new List<decimal>();
+            long? timeMs = null;
+            var deviceCount = 0;
+
+            foreach (var device in json.Value.GetProperty("result").EnumerateArray())
             {
-                foreach (var d in datas.EnumerateArray())
+                if (device.ValueKind != JsonValueKind.Object) continue;
+                deviceCount++;
+
+                if (device.TryGetProperty("datas", out var datas) && datas.ValueKind == JsonValueKind.Array)
                 {
-                    if (d.ValueKind != JsonValueKind.Object) continue;
-                    var name = GetString(d, "variable");
-                    if (string.IsNullOrEmpty(name)) continue;
-                    var dec = GetDecimal(d, "value");
-                    if (dec != 0 || (d.TryGetProperty("value", out var vv) && vv.ValueKind == JsonValueKind.Number))
-                        values[name] = dec;
+                    foreach (var d in datas.EnumerateArray())
+                    {
+                        if (d.ValueKind != JsonValueKind.Object) continue;
+                        var name = GetString(d, "variable");
+                        if (string.IsNullOrEmpty(name)) continue;
+                        if (!d.TryGetProperty("value", out var vv) || vv.ValueKind != JsonValueKind.Number)
+                            continue;
+                        var dec = GetDecimal(d, "value");
+
+                        if (name.Equals("SoC", StringComparison.OrdinalIgnoreCase))
+                            socReadings.Add(dec);
+                        else
+                            values[name] = values.TryGetValue(name, out var prev) ? prev + dec : dec;
+                    }
                 }
+
+                // Keep the most recent reading time across the devices.
+                if (device.TryGetProperty("time", out var t)
+                    && t.ValueKind == JsonValueKind.Number && t.TryGetInt64(out var tms))
+                    timeMs = timeMs.HasValue ? Math.Max(timeMs.Value, tms) : tms;
             }
 
-            decimal Get(string k) => values.TryGetValue(k, out var v) ? v : 0;
+            if (deviceCount == 0) return null;
 
-            long? timeMs = null;
-            if (device.TryGetProperty("time", out var t) && t.ValueKind == JsonValueKind.Number && t.TryGetInt64(out var tms))
-                timeMs = tms;
+            decimal Get(string k) => values.TryGetValue(k, out var v) ? v : 0;
 
             return new RealtimeData
             {
@@ -181,7 +203,9 @@ public class FoxEssAdapter : IInverterApiAdapter
                 TotalEnergyKwh = Get("generationTotal"),
                 GridExportKw = Get("feedinPower"),
                 GridImportKw = Get("gridConsumptionPower"),
-                BatterySocPercent = values.TryGetValue("SoC", out var soc) ? soc : null,
+                BatterySocPercent = socReadings.Count > 0
+                    ? Math.Round(socReadings.Average(), 1)
+                    : null,
                 IsOnline = values.Count > 0
             };
         }
@@ -197,17 +221,20 @@ public class FoxEssAdapter : IInverterApiAdapter
     {
         var records = new List<EnergyRecord>();
         Common.AdapterCallState.Reset();
-        if (string.IsNullOrEmpty(credentials.PlantId))
+
+        // Resolve the plant to its inverters.  report/query is per-device, so
+        // a multi-inverter site needs one call per device per month and the
+        // results summed — querying only one device silently under-reported
+        // the site's production.
+        var deviceSns = await ResolveDeviceSnsAsync(credentials);
+        if (deviceSns.Count == 0)
         {
-            // Surface WHY nothing came back — this used to return an empty
-            // list silently, so the UI just said "0 records" with no clue that
-            // the required field was simply blank.
             Common.AdapterCallState.Fail(
-                "FoxESS: Plant/Station ID is empty. For FoxESS this field must be the inverter's " +
-                "Serial Number (SN) — the device-level endpoints (real/query, report/query) are keyed by SN, " +
-                "not by the plant/station GUID from the web portal URL.");
+                "FoxESS: could not determine which inverters belong to this site. Set Plant/Station ID to the " +
+                "plant id (all its inverters are then summed) or to a single inverter serial number, then retry.");
             return records;
         }
+
         int monthsOk = 0, monthsFailed = 0;
         string? lastMonthError = null;
         try
@@ -217,68 +244,73 @@ public class FoxEssAdapter : IInverterApiAdapter
 
             foreach (var ym in years)
             {
-                var json = await SendPostAsync(credentials, "/op/v0/device/report/query", new
+                // Accumulate every device's output for this month before
+                // turning it into day records.
+                var monthGeneration = new decimal[DateTime.DaysInMonth(ym.Year, ym.Month)];
+                var monthExport = new decimal[monthGeneration.Length];
+                var monthImport = new decimal[monthGeneration.Length];
+                var anyDeviceOk = false;
+
+                foreach (var sn in deviceSns)
                 {
-                    sn = credentials.PlantId,
-                    year = ym.Year,
-                    month = ym.Month,
-                    dimension = "month",
-                    variables = new[] { "generation", "feedin", "gridConsumption" }
-                });
-
-                if (!json.HasValue || GetErrno(json.Value) != 0)
-                {
-                    monthsFailed++;
-                    lastMonthError = !json.HasValue
-                        ? "no/failed response"
-                        : DescribeError(json);
-                    continue;
-                }
-                monthsOk++;
-
-                var daysInMonth = DateTime.DaysInMonth(ym.Year, ym.Month);
-                var dayValues = new decimal[daysInMonth];
-                var exportValues = new decimal[daysInMonth];
-                var importValues = new decimal[daysInMonth];
-
-                foreach (var variable in json.Value.GetProperty("result").EnumerateArray())
-                {
-                    var name = GetString(variable, "variable");
-                    if (!variable.TryGetProperty("values", out var vals)) continue;
-
-                    var arr = vals.EnumerateArray().Select(v =>
+                    var json = await SendPostAsync(credentials, "/op/v0/device/report/query", new
                     {
-                        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
-                        if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(),
-                            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
-                            return d2;
-                        return 0m;
-                    }).ToArray();
-                    var target = name switch
-                    {
-                        "generation" => dayValues,
-                        "feedin" => exportValues,
-                        "gridConsumption" => importValues,
-                        _ => null
-                    };
-                    if (target == null) continue;
-                    for (int i = 0; i < Math.Min(arr.Length, target.Length); i++)
-                        target[i] = arr[i];
-                }
+                        sn,
+                        year = ym.Year,
+                        month = ym.Month,
+                        dimension = "month",
+                        variables = new[] { "generation", "feedin", "gridConsumption" }
+                    });
 
-                for (int i = 0; i < daysInMonth; i++)
+                    if (!json.HasValue || GetErrno(json.Value) != 0)
+                    {
+                        lastMonthError = !json.HasValue
+                            ? "no/failed response"
+                            : DescribeError(json);
+                        continue;
+                    }
+                    foreach (var variable in json.Value.GetProperty("result").EnumerateArray())
+                    {
+                        var name = GetString(variable, "variable");
+                        if (!variable.TryGetProperty("values", out var vals)) continue;
+
+                        var arr = vals.EnumerateArray().Select(v =>
+                        {
+                            if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)) return d;
+                            if (v.ValueKind == JsonValueKind.String && decimal.TryParse(v.GetString(),
+                                System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2))
+                                return d2;
+                            return 0m;
+                        }).ToArray();
+                        var target = name switch
+                        {
+                            "generation" => monthGeneration,
+                            "feedin" => monthExport,
+                            "gridConsumption" => monthImport,
+                            _ => null
+                        };
+                        if (target == null) continue;
+                        // ADD, don't assign — this device's output joins the others'.
+                        for (int i = 0; i < Math.Min(arr.Length, target.Length); i++)
+                            target[i] += arr[i];
+                    }
+                } // end per-device loop
+
+                if (anyDeviceOk) monthsOk++; else monthsFailed++;
+
+                for (int i = 0; i < monthGeneration.Length; i++)
                 {
                     var date = new DateTime(ym.Year, ym.Month, i + 1);
                     if (date < from.Date || date > to.Date) continue;
-                    if (dayValues[i] == 0 && exportValues[i] == 0 && importValues[i] == 0) continue;
+                    if (monthGeneration[i] == 0 && monthExport[i] == 0 && monthImport[i] == 0) continue;
 
                     records.Add(new EnergyRecord
                     {
                         Timestamp = date,
-                        EnergyGenerationKwh = dayValues[i],
-                        GridExportKwh = exportValues[i],
-                        GridImportKwh = importValues[i],
-                        SelfConsumptionKwh = Math.Max(0, dayValues[i] - exportValues[i])
+                        EnergyGenerationKwh = monthGeneration[i],
+                        GridExportKwh = monthExport[i],
+                        GridImportKwh = monthImport[i],
+                        SelfConsumptionKwh = Math.Max(0, monthGeneration[i] - monthExport[i])
                     });
                 }
             }
@@ -464,6 +496,105 @@ public class FoxEssAdapter : IInverterApiAdapter
             _logger.LogError(ex, "FOX ESS GetDevices failed");
         }
         return devices;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  DEVICE RESOLUTION
+    // ══════════════════════════════════════════════════════════════
+
+    // Resolved SN lists, cached briefly.  FoxESS allows only 10 req/min, and
+    // resolving costs a device/list call, so we must not repeat it per query.
+    private static readonly Dictionary<string, (List<string> Sns, DateTime ExpiresAt)> _snCache = new();
+    private static readonly object _snLock = new();
+    private static readonly TimeSpan SnCacheTtl = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Works out which inverter serial numbers make up this installation.
+    ///
+    /// FoxESS's data endpoints are device-scoped (real/query, report/query
+    /// take serial numbers), but a site is a PLANT that may contain several
+    /// inverters.  Keying an installation to a single SN silently reported
+    /// only one inverter's output — a 3-inverter site would under-report by
+    /// two thirds.  So Plant/Station ID is interpreted as a plant, and every
+    /// inverter inside it is queried and summed.
+    ///
+    /// Accepted values, in priority order:
+    ///   1. A device serial number → that one device (explicit override, and
+    ///      keeps existing single-inverter setups working unchanged).
+    ///   2. A plant/station id → all devices belonging to that plant.
+    ///   3. Empty → all devices on the account (single-plant accounts).
+    /// </summary>
+    private async Task<List<string>> ResolveDeviceSnsAsync(ApiCredentials credentials)
+    {
+        var plantId = credentials.PlantId?.Trim() ?? "";
+        var cacheKey = $"{credentials.ApiKey}|{plantId}";
+
+        lock (_snLock)
+        {
+            if (_snCache.TryGetValue(cacheKey, out var hit) && DateTime.UtcNow < hit.ExpiresAt)
+                return hit.Sns;
+        }
+
+        var resolved = new List<string>();
+        try
+        {
+            var json = await SendPostAsync(credentials, "/op/v0/device/list",
+                new { currentPage = 1, pageSize = 100 });
+
+            if (json.HasValue && GetErrno(json.Value) == 0
+                && json.Value.TryGetProperty("result", out var result)
+                && result.TryGetProperty("data", out var data)
+                && data.ValueKind == JsonValueKind.Array)
+            {
+                var all = new List<(string Sn, string? StationId, string? StationName)>();
+                foreach (var item in data.EnumerateArray())
+                {
+                    var sn = GetString(item, "deviceSN");
+                    if (string.IsNullOrWhiteSpace(sn)) continue;
+                    all.Add((sn!, GetString(item, "stationID"), GetString(item, "stationName")));
+                }
+
+                // 1. Exact device match — the operator pinned one inverter.
+                if (!string.IsNullOrEmpty(plantId)
+                    && all.Any(d => string.Equals(d.Sn, plantId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    resolved.Add(all.First(d =>
+                        string.Equals(d.Sn, plantId, StringComparison.OrdinalIgnoreCase)).Sn);
+                }
+                // 2. Plant match — sum every inverter in that plant.
+                else if (!string.IsNullOrEmpty(plantId))
+                {
+                    resolved.AddRange(all
+                        .Where(d => string.Equals(d.StationId, plantId, StringComparison.OrdinalIgnoreCase))
+                        .Select(d => d.Sn));
+                }
+                // 3. Nothing configured — use the whole account.
+                else
+                {
+                    resolved.AddRange(all.Select(d => d.Sn));
+                }
+
+                if (resolved.Count > 1)
+                    _logger.LogInformation(
+                        "FoxESS: plant '{PlantId}' resolved to {Count} devices — output will be summed across {Sns}",
+                        plantId, resolved.Count, string.Join(", ", resolved));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FoxESS: device resolution failed for '{PlantId}'", plantId);
+        }
+
+        // Fall back to treating the configured value as a serial number so a
+        // resolution outage doesn't take the site offline entirely.
+        if (resolved.Count == 0 && !string.IsNullOrEmpty(plantId))
+            resolved.Add(plantId);
+
+        lock (_snLock)
+        {
+            _snCache[cacheKey] = (resolved, DateTime.UtcNow.Add(SnCacheTtl));
+        }
+        return resolved;
     }
 
     // ══════════════════════════════════════════════════════════════
