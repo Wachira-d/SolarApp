@@ -111,4 +111,100 @@ public sealed record BrandCapability(
     ConnectionMethod[] SupportedMethods,
     int MinIntervalMinutes,
     int DefaultIntervalMinutes,
-    string Notes);
+    string Notes)
+{
+    /// <summary>What this brand calls the Plant/Station ID field.</summary>
+    public string PlantIdLabel { get; init; } = "Plant/Station ID";
+
+    /// <summary>What value to type in — the single most-asked question per brand.</summary>
+    public string PlantIdWhat { get; init; } = "";
+
+    /// <summary>Where in the vendor's portal to find it.</summary>
+    public string PlantIdWhere { get; init; } = "";
+
+    /// <summary>Example value, so the expected shape is obvious at a glance.</summary>
+    public string PlantIdExample { get; init; } = "";
+
+    /// <summary>What the credential fields mean for this brand.</summary>
+    public string CredentialHint { get; init; } = "";
+}
+
+/// <summary>
+/// Per-brand field guidance shown next to the inputs.  Kept beside the
+/// capability table so "what does this brand call things / where do I get
+/// them" lives in exactly one place instead of being folklore spread
+/// across support chats.
+/// </summary>
+public static class BrandFieldGuide
+{
+
+    public static BrandCapability Get(InverterBrand brand)
+    {
+        var cap = BrandCapabilities.Get(brand);
+        return brand switch
+        {
+            InverterBrand.Hoymiles => cap with
+            {
+                PlantIdLabel = "Station ID (sid)",
+                PlantIdWhat = "ตัวเลข Station ID ของไซต์",
+                PlantIdWhere = "เข้า global.hoymiles.com → เลือกไซต์ → ดูตัวเลขท้าย URL (…/station/<sid>)",
+                PlantIdExample = "1298491919450550810",
+                CredentialHint = "Username/Password = อีเมลกับรหัสผ่านของ S-Miles Cloud (ไม่มี API key ให้ใช้)",
+            },
+            InverterBrand.Huawei => cap with
+            {
+                PlantIdLabel = "Station Code",
+                PlantIdWhat = "รหัสสถานี ขึ้นต้นด้วย NE= (ระบบเติม NE= ให้อัตโนมัติถ้าลืม)",
+                PlantIdWhere = "FusionSolar → Plant Management → คอลัมน์ Plant Code",
+                PlantIdExample = "NE=56946102",
+                CredentialHint = "ต้องใช้บัญชี Northbound API (ไม่ใช่บัญชี login ปกติ) — ขอจาก Huawei/ผู้ติดตั้ง",
+            },
+            InverterBrand.FoxESS => cap with
+            {
+                PlantIdLabel = "Plant ID หรือ Inverter SN",
+                PlantIdWhat = "ใส่ Plant/Station ID เพื่อรวมผลผลิตของ inverter ทุกตัวในไซต์ (แนะนำ) " +
+                              "หรือใส่ SN ของ inverter ตัวเดียวถ้าต้องการเจาะจง — เว้นว่าง = ใช้ทุกอุปกรณ์ในบัญชี",
+                PlantIdWhere = "กดปุ่ม \"ดึงรายการจาก Cloud\" แล้วเลือกได้เลย " +
+                               "(หรือดูที่ foxesscloud.com → Device → คอลัมน์ SN)",
+                PlantIdExample = "60P1103061FM046",
+                CredentialHint = "API Key = Private Token จาก foxesscloud.com → User Profile → API Management " +
+                                 "(กด Generate แล้ว copy ทันที เห็นครั้งเดียว) — ไม่ต้องใส่ Secret/Username",
+            },
+            InverterBrand.Solis => cap with
+            {
+                PlantIdLabel = "Station ID",
+                PlantIdWhat = "ตัวเลข Station ID ของไซต์",
+                PlantIdWhere = "SolisCloud → เลือกไซต์ → ดูตัวเลขใน URL",
+                PlantIdExample = "1298491919450550810",
+                CredentialHint = "แนะนำ API Key + Secret (SolisCloud → API Management). " +
+                                 "โหมด user/password ใช้ได้แต่พังบ่อยเมื่อ Solis อัปเดตเว็บ",
+            },
+            InverterBrand.GoodWe => cap with
+            {
+                PlantIdLabel = "Power Station ID",
+                PlantIdWhat = "GUID ของไซต์ (มีขีดคั่น)",
+                PlantIdWhere = "SEMS Portal → เลือกไซต์ → คัดลอกค่า powerStationId จาก URL",
+                PlantIdExample = "04acf5fb-3843-4b9f-aff3-c67796bd91c2",
+                CredentialHint = "Username/Password = บัญชี SEMS Portal (GoodWe ไม่มี public API key)",
+            },
+            InverterBrand.Deye => cap with
+            {
+                PlantIdLabel = "Station ID",
+                PlantIdWhat = "ตัวเลข Station ID",
+                PlantIdWhere = "Solarman/Deye Cloud → เลือกไซต์ → ดูใน URL",
+                PlantIdExample = "1234567",
+                CredentialHint = "ต้องใช้ครบ 4 ค่า: AppId (API Key), AppSecret, อีเมล, รหัสผ่าน " +
+                                 "— ขอ AppId/Secret จาก Solarman Business",
+            },
+            InverterBrand.Sigenergy => cap with
+            {
+                PlantIdLabel = "System ID",
+                PlantIdWhat = "รหัสระบบของไซต์",
+                PlantIdWhere = "Sigen Cloud → System → ดูรหัสในหน้า System info",
+                PlantIdExample = "123456",
+                CredentialHint = "API Key ใช้ระบุ region (eu/apac/us/cn) — ค่าเริ่มต้นคือ apac",
+            },
+            _ => cap,
+        };
+    }
+}

@@ -41,7 +41,7 @@ namespace SolarApp.Services.InverterApi.Adapters;
 ///
 /// Docs: https://www.foxesscloud.com/public/i18n/en/OpenApiDocument.html
 /// </summary>
-public class FoxEssAdapter : IInverterApiAdapter
+public class FoxEssAdapter : IInverterApiAdapter, IPlantDiscovery
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FoxEssAdapter> _logger;
@@ -496,6 +496,71 @@ public class FoxEssAdapter : IInverterApiAdapter
             _logger.LogError(ex, "FOX ESS GetDevices failed");
         }
         return devices;
+    }
+
+    /// <summary>
+    /// Lists the account's plants and inverters so the operator can pick a
+    /// Plant/Station ID instead of digging one out of a portal URL.  Plants
+    /// are marked Recommended because choosing one aggregates every inverter
+    /// beneath it; a device is offered too for pinning a single unit.
+    /// </summary>
+    public async Task<List<PlantOption>> DiscoverAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var options = new List<PlantOption>();
+
+        // Plants first — the recommended choice.
+        try
+        {
+            var plants = await SendPostAsync(credentials, "/op/v0/plant/list",
+                new { currentPage = 1, pageSize = 100 });
+            if (plants.HasValue && GetErrno(plants.Value) == 0
+                && plants.Value.TryGetProperty("result", out var pr)
+                && pr.TryGetProperty("data", out var pdata)
+                && pdata.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var p in pdata.EnumerateArray())
+                {
+                    var id = GetString(p, "stationID");
+                    if (string.IsNullOrWhiteSpace(id)) continue;
+                    options.Add(new PlantOption(
+                        id!,
+                        GetString(p, "name") ?? "(unnamed plant)",
+                        "plant",
+                        "รวมผลผลิตของ inverter ทุกตัวในไซต์นี้",
+                        Recommended: true));
+                }
+            }
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "FoxESS discover: plant list failed"); }
+
+        // Then individual devices, for pinning one inverter.
+        try
+        {
+            var devices = await SendPostAsync(credentials, "/op/v0/device/list",
+                new { currentPage = 1, pageSize = 100 });
+            if (devices.HasValue && GetErrno(devices.Value) == 0
+                && devices.Value.TryGetProperty("result", out var dr)
+                && dr.TryGetProperty("data", out var ddata)
+                && ddata.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var d in ddata.EnumerateArray())
+                {
+                    var sn = GetString(d, "deviceSN");
+                    if (string.IsNullOrWhiteSpace(sn)) continue;
+                    var model = GetString(d, "productType");
+                    var station = GetString(d, "stationName");
+                    var bits = new[] { model, station }.Where(x => !string.IsNullOrWhiteSpace(x));
+                    options.Add(new PlantOption(
+                        sn!,
+                        string.IsNullOrWhiteSpace(model) ? sn! : $"{model} — {sn}",
+                        "device",
+                        bits.Any() ? string.Join(" · ", bits) : null));
+                }
+            }
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "FoxESS discover: device list failed"); }
+
+        return options;
     }
 
     // ══════════════════════════════════════════════════════════════

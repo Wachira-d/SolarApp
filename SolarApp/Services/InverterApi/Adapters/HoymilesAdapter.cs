@@ -28,7 +28,7 @@ namespace SolarApp.Services.InverterApi.Adapters;
 ///   Password = S-Miles Cloud password (plain text — we hash it)
 ///   PlantId  = Station ID (sid)
 /// </summary>
-public class HoymilesAdapter : IInverterApiAdapter
+public class HoymilesAdapter : IInverterApiAdapter, IPlantDiscovery
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<HoymilesAdapter> _logger;
@@ -892,6 +892,45 @@ public class HoymilesAdapter : IInverterApiAdapter
             return (false, "Hoymiles: logged in but station list call failed.");
 
         return (true, "Connected to Hoymiles S-Miles Cloud!");
+    }
+
+    /// <summary>
+    /// Lists the S-Miles account's stations so the operator can pick a sid
+    /// instead of reading it off the end of a portal URL.
+    /// </summary>
+    public async Task<List<PlantOption>> DiscoverAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var options = new List<PlantOption>();
+        var (token, apiBase, _) = await LoginAsync(credentials);
+        if (token == null) return options;
+
+        var data = await CallApiAsync(token, apiBase ?? DefaultApiBase, "pvm/api/0/station/select_by_page",
+            new { page = 1, page_size = 100 });
+        if (data == null) return options;
+
+        JsonElement list;
+        if (data.Value.ValueKind == JsonValueKind.Array) list = data.Value;
+        else if (data.Value.ValueKind == JsonValueKind.Object
+                 && data.Value.TryGetProperty("list", out var l) && l.ValueKind == JsonValueKind.Array) list = l;
+        else return options;
+
+        foreach (var station in list.EnumerateArray())
+        {
+            if (station.ValueKind != JsonValueKind.Object) continue;
+            var sid = SafeGetString(station, "id")
+                   ?? SafeGetString(station, "station_id")
+                   ?? SafeGetString(station, "sid");
+            if (string.IsNullOrWhiteSpace(sid)) continue;
+
+            var capacity = SafeGetDecimal(station, "installed_capacity");
+            options.Add(new PlantOption(
+                sid!,
+                SafeGetString(station, "station_name") ?? SafeGetString(station, "name") ?? "(unnamed)",
+                "plant",
+                capacity > 0 ? $"{capacity:0.##} kW" : null,
+                Recommended: true));
+        }
+        return options;
     }
 
     public async Task<PlantInfo?> GetPlantInfoAsync(ApiCredentials credentials)

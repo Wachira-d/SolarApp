@@ -200,30 +200,50 @@
                                 Brand <strong>@Model.Input.InverterBrand</strong> รองรับ:
                                 <code>@string.Join(", ", capTop.SupportedMethods)</code>.
                                 @capTop.Notes
+                                @{ var credGuide = SolarApp.Services.InverterApi.Common.BrandFieldGuide.Get(Model.Input.InverterBrand); }
+                                @if (!string.IsNullOrEmpty(credGuide.CredentialHint))
+                                {
+                                    <span class="d-block mt-1 text-primary">
+                                        <i class="bi bi-key"></i> @credGuide.CredentialHint
+                                    </span>
+                                }
                             </div>
                         </div>
                     </div>
                     <div class="row mb-3">
+                        @{ var guide = SolarApp.Services.InverterApi.Common.BrandFieldGuide.Get(Model.Input.InverterBrand); }
                         <div class="col-md-6">
                             @* PlantId is NOT a secret — show actual value for verification *@
-                            <label asp-for="Input.PlantId" class="form-label">
-                                Plant/Station ID
-                                @if (Model.HasPlantId) { <span class="badge bg-success ms-1">Saved</span> }
-                            </label>
-                            <input asp-for="Input.PlantId" class="form-control"
-                                   placeholder="Enter Plant/Station ID" />
-                            <div class="form-text">
-                                แสดงค่าจริง — <strong>ลบให้ว่างแล้ว Save = ล้างค่า</strong>
-                                @if (Model.Input.InverterBrand == SolarApp.Models.Enums.InverterBrand.FoxESS)
+                            <label asp-for="Input.PlantId" class="form-label d-flex align-items-center gap-2">
+                                <span>@guide.PlantIdLabel</span>
+                                @if (Model.HasPlantId) { <span class="badge bg-success">Saved</span> }
+                                @if (!string.IsNullOrEmpty(guide.PlantIdWhat))
                                 {
-                                    <span class="d-block text-warning">
-                                        <strong>FoxESS</strong> รับได้ 2 แบบ:<br>
-                                        • <strong>Plant/Station ID</strong> — รวมผลผลิตของ inverter <em>ทุกตัว</em>ในไซต์ (แนะนำ)<br>
-                                        • <strong>SN ของ inverter</strong> เช่น <code>60P1103061FM046</code> — เฉพาะตัวนั้นตัวเดียว<br>
-                                        เว้นว่าง = ใช้ทุกอุปกรณ์ในบัญชี. ดูค่าได้จากตาราง "อุปกรณ์" หลังกดรีเฟรชอุปกรณ์
-                                    </span>
+                                    <button type="button" class="btn btn-link p-0 border-0 lh-1"
+                                            data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true"
+                                            data-bs-title="@guide.PlantIdLabel — @Model.Input.InverterBrand"
+                                            data-bs-content="<strong>ใส่อะไร:</strong> @guide.PlantIdWhat<br><br><strong>หาจากไหน:</strong> @guide.PlantIdWhere<br><br><strong>ตัวอย่าง:</strong> <code>@guide.PlantIdExample</code>"
+                                            title="ดูคำอธิบาย">
+                                        <i class="bi bi-question-circle-fill text-primary"></i>
+                                    </button>
                                 }
+                            </label>
+                            <div class="input-group">
+                                <input asp-for="Input.PlantId" class="form-control"
+                                       placeholder="@(string.IsNullOrEmpty(guide.PlantIdExample) ? "Enter Plant/Station ID" : $"เช่น {guide.PlantIdExample}")" />
+                                <button type="button" id="discoverPlantsBtn" class="btn btn-outline-primary"
+                                        title="ดึงรายการไซต์/อุปกรณ์จาก Cloud มาให้เลือก">
+                                    <i class="bi bi-cloud-download"></i> ดึงรายการ
+                                </button>
                             </div>
+                            <div class="form-text">
+                                @if (!string.IsNullOrEmpty(guide.PlantIdWhat))
+                                {
+                                    <span class="d-block">@guide.PlantIdWhat</span>
+                                }
+                                <span class="text-muted">ลบให้ว่างแล้ว Save = ล้างค่า</span>
+                            </div>
+                            <div id="discoverResult" class="mt-2"></div>
                         </div>
                         <div class="col-md-6 cred-api-row">
                             <label asp-for="Input.CloudApiKey" class="form-label">
@@ -1039,6 +1059,83 @@
         }
         document.getElementById('Input_HasBattery')?.addEventListener('change', applyBatteryVisibility);
         applyBatteryVisibility();
+
+        // Vendor-supplied names/ids are rendered into markup below, so escape
+        // them rather than trusting whatever the cloud returns.
+        function escapeHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[c]);
+        }
+
+        // Enable the per-field help popovers (Plant/Station ID etc.).
+        document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
+            if (window.bootstrap?.Popover) new bootstrap.Popover(el);
+        });
+
+        // ── "ดึงรายการ": list the account's sites/devices and let the
+        //    operator click one, instead of hunting for an id in a portal URL.
+        document.getElementById('discoverPlantsBtn')?.addEventListener('click', async () => {
+            const btn = document.getElementById('discoverPlantsBtn');
+            const box = document.getElementById('discoverResult');
+            const orig = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            box.innerHTML = '<div class="text-muted small">กำลังดึงรายการจาก Cloud…</div>';
+
+            const fd = new FormData();
+            fd.append('brand', document.querySelector('[name="Input.InverterBrand"]').value);
+            fd.append('apiKey', document.querySelector('[name="Input.CloudApiKey"]').value);
+            fd.append('apiSecret', document.querySelector('[name="Input.CloudApiSecret"]').value);
+            fd.append('username', document.querySelector('[name="Input.CloudUsername"]').value);
+            fd.append('password', document.querySelector('[name="Input.CloudPassword"]').value);
+            fd.append('apiBaseUrl', document.querySelector('[name="Input.CloudApiBaseUrl"]').value);
+            fd.append('installationId', '@Model.Input.Id');
+
+            try {
+                const r = await fetch('/api/discover-plants', { method: 'POST', body: fd });
+                const data = await r.json();
+
+                if (!data.success) {
+                    box.innerHTML = `<div class="alert alert-warning py-2 small mb-0">${escapeHtml(data.message || 'ดึงรายการไม่สำเร็จ')}</div>`;
+                    return;
+                }
+                if (!data.options || data.options.length === 0) {
+                    box.innerHTML = `<div class="alert alert-info py-2 small mb-0">${escapeHtml(data.message)}</div>`;
+                    return;
+                }
+
+                let html = `<div class="list-group small">`;
+                for (const o of data.options) {
+                    const badge = o.kind === 'plant'
+                        ? '<span class="badge bg-primary">ไซต์</span>'
+                        : '<span class="badge bg-secondary">อุปกรณ์</span>';
+                    const rec = o.recommended ? ' <span class="badge bg-success">แนะนำ</span>' : '';
+                    html +=
+                        `<button type="button" class="list-group-item list-group-item-action py-2 discover-pick" data-id="${escapeHtml(o.id)}">` +
+                        `<div class="d-flex justify-content-between align-items-start gap-2">` +
+                        `<div><strong>${escapeHtml(o.name)}</strong>${rec}` +
+                        (o.detail ? `<br><small class="text-muted">${escapeHtml(o.detail)}</small>` : '') +
+                        `<br><code class="small">${escapeHtml(o.id)}</code></div>` +
+                        `<div>${badge}</div></div></button>`;
+                }
+                html += `</div><div class="form-text">คลิกเพื่อใส่ค่าในช่อง แล้วกด Save Changes</div>`;
+                box.innerHTML = html;
+
+                box.querySelectorAll('.discover-pick').forEach(el => {
+                    el.addEventListener('click', () => {
+                        document.querySelector('[name="Input.PlantId"]').value = el.dataset.id;
+                        box.innerHTML = `<div class="alert alert-success py-2 small mb-0">` +
+                            `เลือกแล้ว: <code>${escapeHtml(el.dataset.id)}</code> — อย่าลืมกด <strong>Save Changes</strong></div>`;
+                    });
+                });
+            } catch (e) {
+                box.innerHTML = `<div class="alert alert-danger py-2 small mb-0">${escapeHtml(e.message)}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = orig;
+            }
+        });
 
         // ── Delete-installation 2-step verify ──────────────────────────
         // Step 1: random math captcha (1..9 + 1..9).  Operands posted as

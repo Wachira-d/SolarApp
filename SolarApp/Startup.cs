@@ -1426,6 +1426,89 @@ BEGIN {sql}; END");
             });
         }).RequireAuthorization();
 
+        // Plant/device discovery for the settings form.  Lets the operator
+        // press "ดึงรายการจาก Cloud" and pick a real Plant/Station ID rather
+        // than hand-copying one out of a vendor portal URL — the single
+        // biggest source of "connected but no data" misconfiguration.
+        // Accepts credentials straight from the form (possibly unsaved) and
+        // falls back to the stored ones for any blank field.
+        app.MapPost("/api/discover-plants", async (
+            HttpRequest req,
+            Services.InverterApi.IInverterApiAdapterFactory factory,
+            Data.ApplicationDbContext db,
+            Services.Security.ICredentialProtector credProtector,
+            UserManager<Models.ApplicationUser> userManager) =>
+        {
+            var currentUser = await userManager.GetUserAsync(req.HttpContext.User);
+            if (currentUser == null) return Results.Json(new { success = false, message = "Not authenticated." });
+
+            var form = await req.ReadFormAsync();
+            if (!Enum.TryParse<Models.Enums.InverterBrand>(form["brand"].ToString(), out var brand))
+                return Results.Json(new { success = false, message = "Invalid brand" });
+
+            var apiKey = form["apiKey"].ToString().Trim();
+            var apiSecret = form["apiSecret"].ToString().Trim();
+            var username = form["username"].ToString().Trim();
+            var password = form["password"].ToString().Trim();
+            var apiBaseUrl = form["apiBaseUrl"].ToString().Trim();
+
+            if (int.TryParse(form["installationId"].ToString(), out var installId) && installId > 0)
+            {
+                var inst = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                    .FirstOrDefaultAsync(db.Installations, i => i.Id == installId);
+                if (inst != null)
+                {
+                    var isAdmin = await userManager.IsInRoleAsync(currentUser, "Admin");
+                    var isPartnerMatch = currentUser.PartnerId.HasValue && inst.PartnerId == currentUser.PartnerId;
+                    if (!isAdmin && !isPartnerMatch)
+                        return Results.Json(new { success = false, message = "Access denied to this installation." });
+
+                    if (string.IsNullOrEmpty(apiKey)) apiKey = credProtector.Unprotect(inst.CloudApiKey) ?? "";
+                    if (string.IsNullOrEmpty(apiSecret)) apiSecret = credProtector.Unprotect(inst.CloudApiSecret) ?? "";
+                    if (string.IsNullOrEmpty(username)) username = credProtector.Unprotect(inst.CloudUsername) ?? "";
+                    if (string.IsNullOrEmpty(password)) password = credProtector.Unprotect(inst.CloudPassword) ?? "";
+                    if (string.IsNullOrEmpty(apiBaseUrl)) apiBaseUrl = inst.CloudApiBaseUrl ?? "";
+                }
+            }
+
+            var adapter = factory.GetAdapter(brand);
+            if (adapter is not Services.InverterApi.IPlantDiscovery discovery)
+            {
+                var guide = Services.InverterApi.Common.BrandFieldGuide.Get(brand);
+                return Results.Json(new
+                {
+                    success = false,
+                    supported = false,
+                    message = $"{brand} ยังไม่รองรับการดึงรายการอัตโนมัติ — กรอกเอง: {guide.PlantIdWhere}",
+                });
+            }
+
+            try
+            {
+                var creds = new Services.InverterApi.Models.ApiCredentials
+                {
+                    ApiKey = apiKey, ApiSecret = apiSecret,
+                    Username = username, Password = password,
+                    ApiBaseUrl = string.IsNullOrEmpty(apiBaseUrl) ? null : apiBaseUrl,
+                };
+                var options = await discovery.DiscoverAsync(creds);
+                return Results.Json(new
+                {
+                    success = true,
+                    supported = true,
+                    count = options.Count,
+                    message = options.Count == 0
+                        ? "เชื่อมต่อได้ แต่ไม่พบไซต์/อุปกรณ์ในบัญชีนี้ — ตรวจว่าใช้บัญชีถูกต้อง"
+                        : $"พบ {options.Count} รายการ",
+                    options = options.Select(o => new { o.Id, o.Name, o.Kind, o.Detail, o.Recommended }),
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { success = false, supported = true, message = $"ดึงรายการไม่สำเร็จ: {ex.Message}" });
+            }
+        }).RequireAuthorization(p => p.RequireRole("Admin", "Partner"));
+
         // FoxESS endpoint probe — same idea as the Hoymiles one: ask the
         // vendor cloud directly which endpoints/parameters it accepts and
         // report its own errno + msg, instead of inferring from the spec.

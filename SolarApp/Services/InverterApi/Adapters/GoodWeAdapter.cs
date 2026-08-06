@@ -30,7 +30,7 @@ namespace SolarApp.Services.InverterApi.Adapters;
 ///   PlantId  = Power Station ID (GUID from URL)
 ///   ApiKey   = "SEMSPLUS" (optional flag to use v2 endpoint)
 /// </summary>
-public class GoodWeAdapter : IInverterApiAdapter
+public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GoodWeAdapter> _logger;
@@ -175,6 +175,23 @@ public class GoodWeAdapter : IInverterApiAdapter
     /// host this list under slightly different paths.
     /// Returns an empty list rather than throwing on any error.
     /// </summary>
+    /// <summary>
+    /// Lists the SEMS account's power stations so the operator can pick the
+    /// GUID rather than copy it out of a portal URL — the mismatch that
+    /// makes GoodWe look "connected but returning no data".
+    /// </summary>
+    public async Task<List<PlantOption>> DiscoverAsync(ApiCredentials credentials, CancellationToken ct = default)
+    {
+        var options = new List<PlantOption>();
+        var session = await LoginAsync(credentials);
+        if (session == null) return options;
+
+        foreach (var (id, name) in await ListStationsAsync(session))
+            options.Add(new PlantOption(id, name, "plant", Recommended: true));
+
+        return options;
+    }
+
     private async Task<List<(string Id, string Name)>> ListStationsAsync(Session session)
     {
         var results = new List<(string Id, string Name)>();
