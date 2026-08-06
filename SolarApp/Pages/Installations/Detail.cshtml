@@ -101,9 +101,9 @@
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-sm table-borderless mb-0">
-                        <tr><td class="text-muted">Inverter Brand</td><td class="text-end fw-bold">@inst.InverterBrand @(string.IsNullOrEmpty(inst.InverterModel) ? "" : $"({inst.InverterModel})")</td></tr>
+                        <tr><td class="text-muted">ยี่ห้ออินเวอร์เตอร์</td><td class="text-end fw-bold">@inst.InverterBrand @(string.IsNullOrEmpty(inst.InverterModel) ? "" : $"({inst.InverterModel})")</td></tr>
                         <tr>
-                            <td class="text-muted">Inverter Size</td>
+                            <td class="text-muted">ขนาดอินเวอร์เตอร์</td>
                             <td class="text-end">
                                 @if (inst.InverterSizeKw > 0)
                                 {
@@ -111,16 +111,16 @@
                                 }
                                 else
                                 {
-                                    <span class="text-muted">Not set</span>
+                                    <span class="text-muted">ยังไม่ระบุ</span>
                                 }
                             </td>
                         </tr>
-                        <tr><td class="text-muted">System Capacity</td><td class="text-end">@inst.SystemCapacityKw kWp (DC)</td></tr>
-                        <tr><td class="text-muted">Panels</td><td class="text-end">@inst.NumberOfPanels × @inst.PanelWattage W</td></tr>
+                        <tr><td class="text-muted">กำลังติดตั้งรวม</td><td class="text-end">@inst.SystemCapacityKw kWp (DC)</td></tr>
+                        <tr><td class="text-muted">จำนวนแผง</td><td class="text-end">@inst.NumberOfPanels × @inst.PanelWattage W</td></tr>
                         <tr><td class="text-muted">ลูกค้า</td><td class="text-end">@inst.Customer.FullName</td></tr>
-                        <tr><td class="text-muted">Partner</td><td class="text-end">@(inst.Partner?.CompanyName ?? "Direct")</td></tr>
-                        <tr><td class="text-muted">Installed</td><td class="text-end">@inst.InstallationDate.ToString("dd/MM/yyyy")</td></tr>
-                        <tr><td class="text-muted">Last Online</td><td class="text-end">@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "N/A")</td></tr>
+                        <tr><td class="text-muted">พาร์ทเนอร์</td><td class="text-end">@(inst.Partner?.CompanyName ?? "Direct")</td></tr>
+                        <tr><td class="text-muted">วันที่ติดตั้ง</td><td class="text-end">@inst.InstallationDate.ToString("dd/MM/yyyy")</td></tr>
+                        <tr><td class="text-muted">ออนไลน์ล่าสุด</td><td class="text-end">@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "N/A")</td></tr>
                     </table>
                 </div>
             </div>
@@ -134,14 +134,14 @@
                     <table class="table table-sm table-borderless mb-0">
                         <tr><td class="text-muted">ระยะเวลา</td><td class="text-end">@inst.WarrantyYears ปี</td></tr>
                         <tr>
-                            <td class="text-muted">Expires</td>
+                            <td class="text-muted">ประกันหมดอายุ</td>
                             <td class="text-end @(inst.IsWarrantyExpired ? "text-danger fw-bold" : "text-success")">
                                 @inst.WarrantyExpiryDate.ToString("dd/MM/yyyy")
                                 @(inst.IsWarrantyExpired ? " (หมดอายุ)" : "")
                             </td>
                         </tr>
                         <tr>
-                            <td class="text-muted">Days Left</td>
+                            <td class="text-muted">เหลืออีก</td>
                             <td class="text-end">
                                 @{
                                     var daysLeft = (inst.WarrantyExpiryDate - DateTime.UtcNow).Days;
@@ -173,7 +173,7 @@
                         <tr><td class="text-muted">คงเหลือ</td><td class="text-end fw-bold">@inst.RemainingCleanings ครั้ง</td></tr>
                         <tr><td class="text-muted">ล้างล่าสุด</td><td class="text-end">@(inst.LastCleaningDate?.ToString("dd/MM/yyyy") ?? "ยังไม่เคย")</td></tr>
                         <tr>
-                            <td class="text-muted">Next Due</td>
+                            <td class="text-muted">ครบกำหนดถัดไป</td>
                             <td class="text-end @(inst.IsCleaningDue ? "text-warning fw-bold" : "")">
                                 @(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "N/A")
                                 @(inst.IsCleaningDue ? " (DUE!)" : "")
@@ -261,7 +261,7 @@
                 }
                 @if (!inst.Equipment.Any())
                 {
-                    <tr><td colspan="9" class="text-center text-muted">No equipment recorded</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted">ยังไม่ได้บันทึกอุปกรณ์</td></tr>
                 }
             </tbody>
         </table>
@@ -335,7 +335,7 @@
                     }
                     @if (!Model.MaintenanceRecords.Any())
                     {
-                        <tr><td colspan="6" class="text-center text-muted">No maintenance records</td></tr>
+                        <tr><td colspan="6" class="text-center text-muted">ยังไม่มีประวัติบำรุงรักษา</td></tr>
                     }
                 </tbody>
             </table>
@@ -404,39 +404,39 @@
 
                     // Row 1: Status + Today's Production
                     html += '<div class="row mt-3 g-2">';
-                    html += '<div class="col-md-2"><small class="text-muted">Status</small><br/><span class="badge bg-' + (d.isOnline ? 'success' : 'secondary') + '">' + (d.isOnline ? 'ONLINE' : 'OFFLINE') + '</span></div>';
-                    html += '<div class="col-md-2"><small class="text-muted">Current Power</small><br/><strong>' + (d.currentPowerKw || 0).toFixed(2) + ' kW</strong></div>';
-                    html += '<div class="col-md-2"><small class="text-muted">Today</small><br/><strong class="text-warning">' + (d.todayEnergyKwh || 0).toFixed(2) + ' kWh</strong></div>';
-                    html += '<div class="col-md-2"><small class="text-muted">Total</small><br/><strong>' + (d.totalEnergyKwh || 0).toFixed(0) + ' kWh</strong></div>';
-                    html += '<div class="col-md-2"><small class="text-muted">History synced</small><br/><strong>' + (d.historicalDaysAdded || 0) + ' days</strong></div>';
-                    html += '<div class="col-md-2"><small class="text-muted">Alarms added</small><br/><strong>' + (d.alarmsAdded || 0) + '</strong></div>';
+                    html += '<div class="col-md-2"><small class="text-muted">สถานะ</small><br/><span class="badge bg-' + (d.isOnline ? 'success' : 'secondary') + '">' + (d.isOnline ? 'ONLINE' : 'OFFLINE') + '</span></div>';
+                    html += '<div class="col-md-2"><small class="text-muted">กำลังผลิตขณะนี้</small><br/><strong>' + (d.currentPowerKw || 0).toFixed(2) + ' kW</strong></div>';
+                    html += '<div class="col-md-2"><small class="text-muted">วันนี้</small><br/><strong class="text-warning">' + (d.todayEnergyKwh || 0).toFixed(2) + ' kWh</strong></div>';
+                    html += '<div class="col-md-2"><small class="text-muted">สะสมทั้งหมด</small><br/><strong>' + (d.totalEnergyKwh || 0).toFixed(0) + ' kWh</strong></div>';
+                    html += '<div class="col-md-2"><small class="text-muted">ดึงข้อมูลย้อนหลัง</small><br/><strong>' + (d.historicalDaysAdded || 0) + ' วัน</strong></div>';
+                    html += '<div class="col-md-2"><small class="text-muted">แจ้งเตือนที่เพิ่ม</small><br/><strong>' + (d.alarmsAdded || 0) + '</strong></div>';
                     html += '</div>';
 
                     // Row 2: Grid + Battery
                     html += '<div class="row mt-3 g-2">';
                     if (d.gridExportKw !== null && d.gridExportKw !== undefined) {
-                        html += '<div class="col-md-3"><small class="text-muted">Grid Export (selling)</small><br/><strong class="text-success">' + (d.gridExportKw || 0).toFixed(2) + ' kW</strong></div>';
+                        html += '<div class="col-md-3"><small class="text-muted">ขายไฟเข้ากริด</small><br/><strong class="text-success">' + (d.gridExportKw || 0).toFixed(2) + ' kW</strong></div>';
                     }
                     if (d.gridImportKw !== null && d.gridImportKw !== undefined) {
-                        html += '<div class="col-md-3"><small class="text-muted">Grid Import (buying)</small><br/><strong class="text-danger">' + (d.gridImportKw || 0).toFixed(2) + ' kW</strong></div>';
+                        html += '<div class="col-md-3"><small class="text-muted">ซื้อไฟจากกริด</small><br/><strong class="text-danger">' + (d.gridImportKw || 0).toFixed(2) + ' kW</strong></div>';
                     }
                     // Only render battery tiles when the site is flagged as
                     // having a battery — Razor stamps HAS_BATTERY at render
                     // time so the JS doesn't need a server roundtrip.
                     const HAS_BATTERY = @(inst.HasBattery ? "true" : "false");
                     if (HAS_BATTERY && d.batterySocPercent !== null && d.batterySocPercent !== undefined) {
-                        html += '<div class="col-md-3"><small class="text-muted">Battery SOC</small><br/><strong class="text-info">' + d.batterySocPercent + '%</strong></div>';
+                        html += '<div class="col-md-3"><small class="text-muted">ระดับแบตเตอรี่</small><br/><strong class="text-info">' + d.batterySocPercent + '%</strong></div>';
                     }
                     if (HAS_BATTERY && d.batteryPowerKw !== null && d.batteryPowerKw !== undefined && d.batteryPowerKw !== 0) {
                         const bp = d.batteryPowerKw;
                         const bpLabel = bp > 0 ? 'Charging' : 'Discharging';
                         const bpClass = bp > 0 ? 'text-primary' : 'text-warning';
-                        html += '<div class="col-md-3"><small class="text-muted">Battery ' + bpLabel + '</small><br/><strong class="' + bpClass + '">' + Math.abs(bp).toFixed(2) + ' kW</strong></div>';
+                        html += '<div class="col-md-3"><small class="text-muted">แบตเตอรี่ ' + bpLabel + '</small><br/><strong class="' + bpClass + '">' + Math.abs(bp).toFixed(2) + ' kW</strong></div>';
                     }
                     html += '</div>';
 
                     html += '<hr class="my-2" />';
-                    html += '<small class="text-muted">Synced at: ' + new Date().toLocaleString() + ' | Data appears in Dashboard/Reports. <a href="" onclick="location.reload();return false;">Refresh page</a> to see updated alerts/charts.</small>';
+                    html += '<small class="text-muted">ดึงข้อมูลเมื่อ ' + new Date().toLocaleString() + ' — ข้อมูลจะไปแสดงในหน้าหลักและรายงาน <a href="" onclick="location.reload();return false;">รีเฟรชหน้านี้</a> เพื่อดูแจ้งเตือน/กราฟล่าสุด</small>';
                     html += '<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
                     result.innerHTML = html;
                 } else {

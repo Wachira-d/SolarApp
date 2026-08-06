@@ -27,12 +27,12 @@
 
             <div class="row g-3">
                 <div class="col-md-6">
-                    <label asp-for="Input.Title" class="form-label">Title</label>
+                    <label asp-for="Input.Title" class="form-label">หัวข้องาน</label>
                     <input asp-for="Input.Title" class="form-control" />
                     <span asp-validation-for="Input.Title" class="text-danger small"></span>
                 </div>
                 <div class="col-md-3">
-                    <label asp-for="Input.Type" class="form-label">Type</label>
+                    <label asp-for="Input.Type" class="form-label">ประเภทงาน</label>
                     <select asp-for="Input.Type" class="form-select"
                             asp-items="Html.GetEnumSelectList<WorkOrderType>()"></select>
                 </div>
@@ -43,12 +43,12 @@
                 </div>
 
                 <div class="col-md-4">
-                    <label asp-for="Input.ScheduledDate" class="form-label">Scheduled Date</label>
+                    <label asp-for="Input.ScheduledDate" class="form-label">วันที่นัดหมาย</label>
                     <input asp-for="Input.ScheduledDate" type="date" class="form-control" />
                     <span asp-validation-for="Input.ScheduledDate" class="text-danger small"></span>
                 </div>
                 <div class="col-md-4">
-                    <label asp-for="Input.ScheduledTimeStr" class="form-label">Scheduled Time</label>
+                    <label asp-for="Input.ScheduledTimeStr" class="form-label">เวลานัดหมาย</label>
                     <input asp-for="Input.ScheduledTimeStr" type="time" class="form-control" />
                 </div>
                 <div class="col-md-4">
@@ -58,32 +58,32 @@
                 </div>
 
                 <div class="col-md-6">
-                    <label asp-for="Input.AssignedToUserId" class="form-label">Assigned To</label>
+                    <label asp-for="Input.AssignedToUserId" class="form-label">ผู้รับผิดชอบ</label>
                     <select asp-for="Input.AssignedToUserId" class="form-select" asp-items="Model.Users">
                         <option value="">— unassigned —</option>
                     </select>
                 </div>
                 <div class="col-md-6">
-                    <label asp-for="Input.AssignedTeam" class="form-label">Assigned Team</label>
+                    <label asp-for="Input.AssignedTeam" class="form-label">ทีมที่มอบหมาย</label>
                     <input asp-for="Input.AssignedTeam" class="form-control" placeholder="e.g. Cleaning Crew A" />
                 </div>
 
                 <div class="col-12">
-                    <label asp-for="Input.Description" class="form-label">Description</label>
+                    <label asp-for="Input.Description" class="form-label">รายละเอียด</label>
                     <textarea asp-for="Input.Description" class="form-control" rows="2"></textarea>
                 </div>
                 <div class="col-md-6">
-                    <label asp-for="Input.Scope" class="form-label">Scope</label>
+                    <label asp-for="Input.Scope" class="form-label">ขอบเขตงาน</label>
                     <textarea asp-for="Input.Scope" class="form-control" rows="3"></textarea>
                 </div>
                 <div class="col-md-6">
-                    <label asp-for="Input.SpecialInstructions" class="form-label">Special Instructions</label>
+                    <label asp-for="Input.SpecialInstructions" class="form-label">คำแนะนำพิเศษ</label>
                     <textarea asp-for="Input.SpecialInstructions" class="form-control" rows="3"></textarea>
                 </div>
             </div>
 
             <div class="d-flex justify-content-end gap-2 mt-3">
-                <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary">Cancel</a>
+                <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary">ยกเลิก</a>
                 <button type="submit" class="btn btn-warning">
                     <i class="bi bi-save"></i> Save Changes
                 </button>

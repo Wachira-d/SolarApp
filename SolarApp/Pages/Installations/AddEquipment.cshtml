@@ -35,7 +35,7 @@
                             <span asp-validation-for="Input.Model" class="text-danger"></span>
                         </div>
                         <div class="col-md-6">
-                            <label asp-for="Input.SerialNumber" class="form-label">Serial Number</label>
+                            <label asp-for="Input.SerialNumber" class="form-label">หมายเลขเครื่อง</label>
                             <input asp-for="Input.SerialNumber" class="form-control" />
                         </div>
                     </div>
@@ -48,13 +48,13 @@
                         </div>
                         <div class="col-md-3" id="ratingKwWrap">
                             <label asp-for="Input.RatingKw" class="form-label">
-                                Rating (kW) <span class="text-muted small" id="ratingKwHint">Power per unit</span>
+                                Rating (kW) <span class="text-muted small" id="ratingKwHint">กำลังต่อหน่วย</span>
                             </label>
-                            <input asp-for="Input.RatingKw" class="form-control" type="number" step="any" placeholder="e.g. 10" />
+                            <input asp-for="Input.RatingKw" class="form-control" type="number" step="any" placeholder="เช่น 10" />
                         </div>
                         <div class="col-md-3" id="ratingWattsWrap" style="display:none">
-                            <label asp-for="Input.RatingWatts" class="form-label">Wattage per Panel (W)</label>
-                            <input asp-for="Input.RatingWatts" class="form-control" type="number" placeholder="e.g. 450" />
+                            <label asp-for="Input.RatingWatts" class="form-label">กำลังต่อแผง (W)</label>
+                            <input asp-for="Input.RatingWatts" class="form-control" type="number" placeholder="เช่น 450" />
                         </div>
                         <div class="col-md-3">
                             <label asp-for="Input.WarrantyYears" class="form-label">Warranty (Years) *</label>
@@ -67,13 +67,13 @@
                     </div>
 
                     <div class="mb-3">
-                        <label asp-for="Input.Notes" class="form-label">Notes</label>
+                        <label asp-for="Input.Notes" class="form-label">หมายเหตุ</label>
                         <textarea asp-for="Input.Notes" class="form-control" rows="3"></textarea>
                     </div>
 
                     <div class="d-flex justify-content-between">
-                        <a asp-page="Detail" asp-route-id="@Model.Installation.Id" class="btn btn-outline-secondary">Cancel</a>
-                        <button type="submit" class="btn btn-warning">Add Equipment</button>
+                        <a asp-page="Detail" asp-route-id="@Model.Installation.Id" class="btn btn-outline-secondary">ยกเลิก</a>
+                        <button type="submit" class="btn btn-warning">เพิ่มอุปกรณ์</button>
                     </div>
                 </form>
             </div>

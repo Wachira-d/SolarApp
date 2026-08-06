@@ -9,7 +9,7 @@
     <div class="col-md-10">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white">
-                <h5 class="mb-0">Edit Installation</h5>
+                <h5 class="mb-0">แก้ไขไซต์งาน</h5>
             </div>
             <div class="card-body">
                 <form method="post">
@@ -24,7 +24,7 @@
                        bug because the reassign guards saw no change. *@
 
                     <!-- Site Information -->
-                    <h6 class="text-muted mb-3">Site Information</h6>
+                    <h6 class="text-muted mb-3">ข้อมูลไซต์งาน</h6>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label asp-for="Input.SiteName" class="form-label">Site Name *</label>
@@ -39,11 +39,11 @@
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-5">
-                            <label asp-for="Input.Latitude" class="form-label">Latitude</label>
+                            <label asp-for="Input.Latitude" class="form-label">ละติจูด</label>
                             <input asp-for="Input.Latitude" id="edtLat" class="form-control" step="any" />
                         </div>
                         <div class="col-md-5">
-                            <label asp-for="Input.Longitude" class="form-label">Longitude</label>
+                            <label asp-for="Input.Longitude" class="form-label">ลองจิจูด</label>
                             <input asp-for="Input.Longitude" id="edtLng" class="form-control" step="any" />
                         </div>
                         <div class="col-md-2 d-flex align-items-end gap-1">
@@ -55,15 +55,15 @@
                     </div>
 
                     <!-- Customer & Partner -->
-                    <h6 class="text-muted mb-3 mt-4">Customer & Partner</h6>
+                    <h6 class="text-muted mb-3 mt-4">ลูกค้าและพาร์ทเนอร์</h6>
                     <div class="row mb-3">
                         <div class="col-md-6">
-                            <label asp-for="Input.CustomerId" class="form-label">Customer</label>
+                            <label asp-for="Input.CustomerId" class="form-label">ลูกค้า</label>
                             <select asp-for="Input.CustomerId" asp-items="Model.Customers" class="form-select" id="customerSelect">
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label asp-for="Input.PartnerId" class="form-label">Partner</label>
+                            <label asp-for="Input.PartnerId" class="form-label">พาร์ทเนอร์</label>
                             <select asp-for="Input.PartnerId" asp-items="Model.Partners" class="form-select">
                                 <option value="">-- No Partner (Direct Sale) --</option>
                             </select>
@@ -92,7 +92,7 @@
                                     <input asp-for="Input.CustomerPhone" class="form-control" />
                                 </div>
                                 <div class="col-md-3">
-                                    <label asp-for="Input.CustomerEmail" class="form-label">Email</label>
+                                    <label asp-for="Input.CustomerEmail" class="form-label">อีเมล</label>
                                     <input asp-for="Input.CustomerEmail" class="form-control" type="email" />
                                 </div>
                             </div>
@@ -101,14 +101,14 @@
                     </div>
 
                     <!-- System Specs -->
-                    <h6 class="text-muted mb-3 mt-4">System Specifications</h6>
+                    <h6 class="text-muted mb-3 mt-4">สเปกระบบ</h6>
                     <div class="row mb-3">
                         <div class="col-md-3">
                             <label asp-for="Input.InverterBrand" class="form-label">Inverter Brand *</label>
                             <select asp-for="Input.InverterBrand" asp-items="Html.GetEnumSelectList<InverterBrand>()" class="form-select"></select>
                         </div>
                         <div class="col-md-3">
-                            <label asp-for="Input.InverterModel" class="form-label">Inverter Model</label>
+                            <label asp-for="Input.InverterModel" class="form-label">รุ่นอินเวอร์เตอร์</label>
                             <input asp-for="Input.InverterModel" class="form-control" />
                         </div>
                         <div class="col-md-3">
@@ -138,7 +138,7 @@
                     <!-- Battery storage — opt-in.  When unchecked, ALL battery
                          UI (SOC tiles, charge/discharge columns, BatterySoc
                          alert rules) hides system-wide. -->
-                    <h6 class="text-muted mb-2 mt-4">Battery Storage</h6>
+                    <h6 class="text-muted mb-2 mt-4">แบตเตอรี่สำรอง</h6>
                     <div class="row mb-2">
                         <div class="col-12">
                             <div class="form-check">
@@ -152,11 +152,11 @@
                     </div>
                     <div class="row mb-3 battery-fields-row">
                         <div class="col-md-3">
-                            <label asp-for="Input.BatteryBrand" class="form-label">Battery Brand</label>
+                            <label asp-for="Input.BatteryBrand" class="form-label">ยี่ห้อแบตเตอรี่</label>
                             <input asp-for="Input.BatteryBrand" class="form-control" placeholder="e.g. BYD, Pylontech" />
                         </div>
                         <div class="col-md-3">
-                            <label asp-for="Input.BatteryModel" class="form-label">Battery Model</label>
+                            <label asp-for="Input.BatteryModel" class="form-label">รุ่นแบตเตอรี่</label>
                             <input asp-for="Input.BatteryModel" class="form-control" />
                         </div>
                         <div class="col-md-3">
@@ -216,7 +216,7 @@
                             @* PlantId is NOT a secret — show actual value for verification *@
                             <label asp-for="Input.PlantId" class="form-label d-flex align-items-center gap-2">
                                 <span>@guide.PlantIdLabel</span>
-                                @if (Model.HasPlantId) { <span class="badge bg-success">Saved</span> }
+                                @if (Model.HasPlantId) { <span class="badge bg-success">บันทึกแล้ว</span> }
                                 @if (!string.IsNullOrEmpty(guide.PlantIdWhat))
                                 {
                                     <button type="button" class="btn btn-link p-0 border-0 lh-1"
@@ -248,7 +248,7 @@
                         <div class="col-md-6 cred-api-row">
                             <label asp-for="Input.CloudApiKey" class="form-label">
                                 API Key
-                                @if (Model.HasApiKey) { <span class="badge bg-success ms-1">Saved</span> }
+                                @if (Model.HasApiKey) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
                             </label>
                             <div class="input-group">
                                 <input asp-for="Input.CloudApiKey" class="form-control" type="password"
@@ -265,7 +265,7 @@
                         <div class="col-md-6 cred-userpass-row">
                             <label asp-for="Input.CloudUsername" class="form-label">
                                 Cloud Username
-                                @if (Model.HasUsername) { <span class="badge bg-success ms-1">Saved</span> }
+                                @if (Model.HasUsername) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
                             </label>
                             @* Username is NOT a secret — show the actual value for verification *@
                             <div class="input-group">
@@ -281,7 +281,7 @@
                         <div class="col-md-6 cred-userpass-row">
                             <label asp-for="Input.CloudPassword" class="form-label">
                                 Cloud Password
-                                @if (Model.HasPassword) { <span class="badge bg-success ms-1">Saved</span> }
+                                @if (Model.HasPassword) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
                             </label>
                             <div class="input-group">
                                 <input asp-for="Input.CloudPassword" class="form-control" type="password"
@@ -300,7 +300,7 @@
                         <div class="col-12">
                             <label asp-for="Input.CloudApiBaseUrl" class="form-label">
                                 <i class="bi bi-gear"></i> API Endpoint Override
-                                <span class="badge bg-secondary ms-1">Advanced</span>
+                                <span class="badge bg-secondary ms-1">ขั้นสูง</span>
                             </label>
                             <input asp-for="Input.CloudApiBaseUrl" class="form-control"
                                    placeholder="เว้นว่างเพื่อให้ระบบเลือกอัตโนมัติ — กรอกเมื่อ login ผิด region" />
@@ -318,7 +318,7 @@
                         <div class="col-md-6 cred-api-row">
                             <label asp-for="Input.CloudApiSecret" class="form-label">
                                 API Secret
-                                @if (Model.HasApiSecret) { <span class="badge bg-success ms-1">Saved</span> }
+                                @if (Model.HasApiSecret) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
                             </label>
                             <div class="input-group">
                                 <input asp-for="Input.CloudApiSecret" class="form-control" type="password"
@@ -365,14 +365,14 @@
                     }
 
                     <!-- Warranty & Maintenance -->
-                    <h6 class="text-muted mb-3 mt-4">Warranty & Maintenance</h6>
+                    <h6 class="text-muted mb-3 mt-4">ประกันและการบำรุงรักษา</h6>
                     <div class="row mb-3">
                         <div class="col-md-3">
                             <label asp-for="Input.InstallationDate" class="form-label">Installation Date *</label>
                             <input asp-for="Input.InstallationDate" class="form-control" type="date" />
                         </div>
                         <div class="col-md-3">
-                            <label asp-for="Input.CommissionDate" class="form-label">Commission Date</label>
+                            <label asp-for="Input.CommissionDate" class="form-label">วันที่เริ่มจ่ายไฟ</label>
                             <input asp-for="Input.CommissionDate" class="form-control" type="date" />
                         </div>
                         <div class="col-md-3">
@@ -618,13 +618,13 @@
                     @* ─── End LINE Alerts ──────────────────────────────────────────────── *@
 
                     <div class="mb-3">
-                        <label asp-for="Input.Notes" class="form-label">Notes</label>
+                        <label asp-for="Input.Notes" class="form-label">หมายเหตุ</label>
                         <textarea asp-for="Input.Notes" class="form-control" rows="3"></textarea>
                     </div>
 
                     <div class="d-flex justify-content-between">
-                        <a asp-page="Index" class="btn btn-outline-secondary">Cancel</a>
-                        <button type="submit" class="btn btn-warning">Save Changes</button>
+                        <a asp-page="Index" class="btn btn-outline-secondary">ยกเลิก</a>
+                        <button type="submit" class="btn btn-warning">บันทึกการแก้ไข</button>
                     </div>
                 </form>
 
@@ -794,7 +794,7 @@
 
                     if (data.plantInfo) {
                         html += '<div class="card mt-2 border-success"><div class="card-body p-2">';
-                        html += '<h6 class="mb-2 text-success">Plant Info</h6>';
+                        html += '<h6 class="mb-2 text-success">ข้อมูลโรงไฟฟ้า</h6>';
                         html += '<div><strong>ID:</strong> ' + (data.plantInfo.plantId || '-') + '</div>';
                         html += '<div><strong>Name:</strong> ' + (data.plantInfo.plantName || '-') + '</div>';
                         html += '<div><strong>Capacity:</strong> ' + (data.plantInfo.capacityKw || 0) + ' kW</div>';
@@ -805,7 +805,7 @@
                     if (data.realtime) {
                         const rt = data.realtime;
                         html += '<div class="card mt-2 border-info"><div class="card-body p-2">';
-                        html += '<h6 class="mb-2 text-info">Live Data</h6>';
+                        html += '<h6 class="mb-2 text-info">ข้อมูลสด</h6>';
                         html += '<div><strong>Status:</strong> <span class="badge bg-' + (rt.isOnline ? 'success' : 'secondary') + '">' + (rt.isOnline ? 'ONLINE' : 'OFFLINE') + '</span></div>';
                         html += '<div><strong>Current Power:</strong> ' + (rt.currentPowerKw || 0).toFixed(2) + ' kW</div>';
                         html += '<div><strong>Today Energy:</strong> ' + (rt.todayEnergyKwh || 0).toFixed(2) + ' kWh</div>';
@@ -817,7 +817,7 @@
 
                     if (data.deviceCount > 0) {
                         html += '<div class="card mt-2 border-warning"><div class="card-body p-2">';
-                        html += '<h6 class="mb-2 text-warning">Devices (' + data.deviceCount + ')</h6>';
+                        html += '<h6 class="mb-2 text-warning">อุปกรณ์ (' + data.deviceCount + ')</h6>';
                         for (const d of data.devices) {
                             html += '<div>• ' + d.deviceName + ' (' + (d.model || d.deviceId) + ') - ' + (d.isOnline ? 'Online' : 'Offline') + '</div>';
                         }
@@ -1126,7 +1126,7 @@
                     el.addEventListener('click', () => {
                         document.querySelector('[name="Input.PlantId"]').value = el.dataset.id;
                         box.innerHTML = `<div class="alert alert-success py-2 small mb-0">` +
-                            `เลือกแล้ว: <code>${escapeHtml(el.dataset.id)}</code> — อย่าลืมกด <strong>Save Changes</strong></div>`;
+                            `เลือกแล้ว: <code>${escapeHtml(el.dataset.id)}</code> — อย่าลืมกด <strong>บันทึกการแก้ไข</strong></div>`;
                     });
                 });
             } catch (e) {

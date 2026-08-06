@@ -3,7 +3,7 @@
 @{
     var r = Model.Report;
     var inst = r.Installation;
-    ViewData["Title"] = $"Performance - {inst.SiteName}";
+    ViewData["Title"] = $"ผลการผลิต - {inst.SiteName}";
     var seriesJson = System.Text.Json.JsonSerializer.Serialize(
         r.DailySeries.Select(d => new { d = d.Date.ToString("yyyy-MM-dd"), a = d.ActualKwh, e = d.ExpectedKwh, pr = d.PerformanceRatio * 100 })
     );
@@ -57,7 +57,7 @@
 <div class="row g-2 mb-3">
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">Performance Ratio</div>
+            <div class="text-muted small">อัตราส่วนสมรรถนะ (PR)</div>
             <div class="fs-3 fw-bold text-@(r.PerformanceRatio >= 0.85m ? "success" : r.PerformanceRatio >= 0.7m ? "warning" : "danger")">
                 @((r.PerformanceRatio * 100).ToString("0.0"))%
             </div>
@@ -66,7 +66,7 @@
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">Uptime</div>
+            <div class="text-muted small">เวลาที่ระบบทำงาน</div>
             <div class="fs-3 fw-bold text-@(r.UptimePercent >= 98 ? "success" : r.UptimePercent >= 90 ? "warning" : "danger")">
                 @r.UptimePercent%
             </div>
@@ -75,14 +75,14 @@
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">Specific Yield</div>
+            <div class="text-muted small">ผลผลิตจำเพาะ</div>
             <div class="fs-3 fw-bold">@r.SpecificYieldKwhPerKw.ToString("0.0")</div>
-            <small class="text-muted">kWh / kW installed</small>
+            <small class="text-muted">kWh ต่อ kW ที่ติดตั้ง</small>
         </div></div>
     </div>
     <div class="col-6 col-md-3">
         <div class="card border-0 shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">Capacity Factor</div>
+            <div class="text-muted small">ค่าตัวประกอบกำลังผลิต</div>
             <div class="fs-3 fw-bold">@((r.CapacityFactor * 100).ToString("0.0"))%</div>
             <small class="text-muted">vs 24h theoretical max</small>
         </div></div>
@@ -96,20 +96,20 @@
             <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-cash-stack"></i> Financial Summary</h6></div>
             <div class="card-body">
                 <div class="d-flex justify-content-between mb-2">
-                    <span class="text-muted">Energy Generated</span>
+                    <span class="text-muted">พลังงานที่ผลิตได้</span>
                     <strong>@r.TotalActualKwh.ToString("N1") kWh</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-2">
-                    <span class="text-muted">Estimated Savings</span>
+                    <span class="text-muted">ประหยัดค่าไฟโดยประมาณ</span>
                     <strong class="text-success">฿@r.EstimatedSavings.ToString("N2")</strong>
                 </div>
                 <div class="d-flex justify-content-between mb-2">
-                    <span class="text-muted">Export Revenue</span>
+                    <span class="text-muted">รายได้จากการขายไฟ</span>
                     <strong class="text-info">฿@r.EstimatedRevenue.ToString("N2")</strong>
                 </div>
                 <hr />
                 <div class="d-flex justify-content-between">
-                    <span><strong>Total Value</strong></span>
+                    <span><strong>มูลค่ารวม</strong></span>
                     <strong class="fs-5">฿@((r.EstimatedSavings + r.EstimatedRevenue).ToString("N2"))</strong>
                 </div>
             </div>
@@ -142,7 +142,7 @@
 <!-- Daily table (collapsed on mobile) -->
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <h6 class="mb-0">Daily Production</h6>
+        <h6 class="mb-0">ผลผลิตรายวัน</h6>
         <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#dailyTable">
             <i class="bi bi-chevron-expand"></i> Toggle
         </button>
@@ -151,7 +151,7 @@
         <div class="table-responsive">
             <table class="table table-sm mb-0">
                 <thead class="table-light">
-                    <tr><th>Date</th><th class="text-end">Actual (kWh)</th><th class="text-end">Expected (kWh)</th><th class="text-end">PR %</th></tr>
+                    <tr><th>วันที่</th><th class="text-end">ผลิตจริง (kWh)</th><th class="text-end">คาดการณ์ (kWh)</th><th class="text-end">PR (%)</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var d in r.DailySeries)
