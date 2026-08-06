@@ -1,0 +1,254 @@
+@page "{id:int}"
+@using SolarApp.Models.Enums
+@model SolarApp.Pages.Partners.DetailModel
+@{
+    var p = Model.Partner;
+    ViewData["Title"] = p.CompanyName;
+
+    string SeverityClass(AlertSeverity s) => s switch
+    {
+        AlertSeverity.Critical => "bg-danger",
+        AlertSeverity.High => "bg-warning text-dark",
+        AlertSeverity.Medium => "bg-info",
+        _ => "bg-secondary"
+    };
+
+    var contractAtRisk = p.ContractEndDate.HasValue && p.ContractEndDate.Value <= DateTime.UtcNow.AddDays(30);
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+        @if (Model.IsAdmin)
+        {
+            <a asp-page="/Partners/Index" class="text-decoration-none small">
+                <i class="bi bi-arrow-left"></i> กลับไปรายชื่อพาร์ทเนอร์
+            </a>
+        }
+        <h4 class="mb-0 mt-1">
+            <i class="bi bi-building text-warning"></i> @p.CompanyName
+            @if (!p.IsActive)
+            {
+                <span class="badge bg-secondary align-middle">ปิดใช้งาน</span>
+            }
+        </h4>
+    </div>
+    @if (Model.IsAdmin)
+    {
+        <a asp-page="/Admin/Users" class="btn btn-outline-warning btn-sm">
+            <i class="bi bi-pencil"></i> แก้ไขข้อมูลพาร์ทเนอร์
+        </a>
+    }
+</div>
+
+@if (contractAtRisk)
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        สัญญาสิ้นสุด <strong>@p.ContractEndDate!.Value.ToString("dd/MM/yyyy")</strong> — ควรต่อสัญญาหรือย้ายไซต์ก่อนหมดอายุ
+    </div>
+}
+
+<!-- ═══ SUMMARY ═══ -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold">@Model.OnlineSites/@Model.Sites.Count</div>
+            <small class="text-muted">ไซต์ที่ออนไลน์</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold">@Model.CustomerCount</div>
+            <small class="text-muted">ลูกค้าที่ดูแล</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold">@Model.TotalCapacityKw.ToString("N1")</div>
+            <small class="text-muted">kWp ติดตั้ง</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold text-warning">@Model.TodayKwh.ToString("N1")</div>
+            <small class="text-muted">kWh วันนี้</small>
+        </div></div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- ═══ COMPANY ═══ -->
+    <div class="col-lg-4 mb-3">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0">ข้อมูลบริษัท</h6></div>
+            <div class="card-body">
+                <dl class="row mb-0 small">
+                    <dt class="col-5 text-muted">โทรศัพท์</dt>
+                    <dd class="col-7">
+                        @if (!string.IsNullOrWhiteSpace(p.ContactPhone))
+                        {
+                            <a href="tel:@p.ContactPhone" class="text-decoration-none">@p.ContactPhone</a>
+                        }
+                        else
+                        {
+                            <span class="text-muted">-</span>
+                        }
+                    </dd>
+
+                    <dt class="col-5 text-muted">อีเมล</dt>
+                    <dd class="col-7">@(string.IsNullOrWhiteSpace(p.ContactEmail) ? "-" : p.ContactEmail)</dd>
+
+                    <dt class="col-5 text-muted">ที่อยู่</dt>
+                    <dd class="col-7">
+                        @p.Address
+                        @if (!string.IsNullOrWhiteSpace(p.City) || !string.IsNullOrWhiteSpace(p.Province))
+                        {
+                            <br /><span>@p.City @p.Province @p.PostalCode</span>
+                        }
+                    </dd>
+
+                    @if (!string.IsNullOrWhiteSpace(p.TaxId))
+                    {
+                        <dt class="col-5 text-muted">เลขผู้เสียภาษี</dt>
+                        <dd class="col-7">@p.TaxId</dd>
+                    }
+
+                    <dt class="col-5 text-muted">สัญญา</dt>
+                    <dd class="col-7">
+                        @if (p.ContractStartDate.HasValue || p.ContractEndDate.HasValue)
+                        {
+                            <span class="@(contractAtRisk ? "text-danger fw-bold" : "")">
+                                @(p.ContractStartDate?.ToString("dd/MM/yyyy") ?? "?")
+                                – @(p.ContractEndDate?.ToString("dd/MM/yyyy") ?? "ไม่กำหนด")
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">ไม่ระบุ</span>
+                        }
+                    </dd>
+
+                    @if (p.CommissionRate.HasValue)
+                    {
+                        <dt class="col-5 text-muted">ค่าคอมมิชชั่น</dt>
+                        <dd class="col-7">@p.CommissionRate.Value.ToString("N2")%</dd>
+                    }
+                </dl>
+
+                @if (!string.IsNullOrWhiteSpace(p.Notes))
+                {
+                    <hr />
+                    <small class="text-muted d-block">หมายเหตุ</small>
+                    <small>@p.Notes</small>
+                }
+            </div>
+        </div>
+
+        <!-- ═══ USERS ═══ -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white"><h6 class="mb-0">ผู้ใช้ในสังกัด (@Model.Users.Count)</h6></div>
+            <div class="card-body p-0">
+                @foreach (var u in Model.Users)
+                {
+                    <div class="border-bottom p-2 px-3">
+                        <strong>@u.FullName</strong>
+                        @if (!u.IsActive)
+                        {
+                            <span class="badge bg-secondary ms-1">ปิดใช้งาน</span>
+                        }
+                        <br /><small class="text-muted">@u.Email</small>
+                        @if (string.IsNullOrWhiteSpace(u.LineUserId))
+                        {
+                            <br /><small class="text-warning">ยังไม่ผูก LINE — จะไม่ได้รับแจ้งเตือน</small>
+                        }
+                    </div>
+                }
+                @if (!Model.Users.Any())
+                {
+                    <p class="text-center text-warning py-3 mb-0 small">
+                        ยังไม่มีผู้ใช้ — ไม่มีใครเข้าระบบแทนพาร์ทเนอร์รายนี้ได้
+                    </p>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ SITES ═══ -->
+    <div class="col-lg-8 mb-3">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0">ไซต์งานที่ดูแล (@Model.Sites.Count)</h6></div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>สถานะ</th><th>ไซต์งาน</th><th>ลูกค้า</th>
+                                <th>อินเวอร์เตอร์</th><th class="text-end">กำลัง</th><th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in Model.Sites)
+                            {
+                                var badge = s.Status switch
+                                {
+                                    InstallationStatus.Active => "bg-success",
+                                    InstallationStatus.Offline => "bg-danger",
+                                    InstallationStatus.Maintenance => "bg-warning text-dark",
+                                    _ => "bg-secondary"
+                                };
+                                <tr>
+                                    <td><span class="badge @badge">@s.Status</span></td>
+                                    <td>
+                                        <strong>@s.SiteName</strong>
+                                        <br /><small class="text-muted">@s.SiteCode</small>
+                                    </td>
+                                    <td>
+                                        <a asp-page="/Customers/Detail" asp-route-id="@s.CustomerId"
+                                           class="text-decoration-none">
+                                            <small>@s.Customer.FullName</small>
+                                        </a>
+                                    </td>
+                                    <td><small>@s.InverterBrand</small></td>
+                                    <td class="text-end">@s.SystemCapacityKw.ToString("N1") kWp</td>
+                                    <td class="text-end">
+                                        <a asp-page="/Installations/Detail" asp-route-id="@s.Id"
+                                           class="btn btn-sm btn-outline-secondary">ดู</a>
+                                    </td>
+                                </tr>
+                            }
+                            @if (!Model.Sites.Any())
+                            {
+                                <tr><td colspan="6" class="text-center text-muted py-4">ยังไม่มีไซต์งาน</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ OPEN ALERTS ═══ -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-bell-fill text-warning"></i> แจ้งเตือนที่ยังไม่จัดการ (@Model.OpenAlerts.Count)</h6>
+            </div>
+            <div class="card-body p-0" style="max-height:300px;overflow-y:auto">
+                @foreach (var a in Model.OpenAlerts)
+                {
+                    <div class="d-flex align-items-start border-bottom p-2 px-3">
+                        <span class="badge @SeverityClass(a.Severity) me-2 mt-1" style="min-width:70px">@a.Severity</span>
+                        <div class="flex-grow-1">
+                            <strong>@a.Title</strong>
+                            <br /><small class="text-muted">@a.Installation.SiteName • @a.OccurredAt.ToString("dd/MM HH:mm")</small>
+                        </div>
+                    </div>
+                }
+                @if (!Model.OpenAlerts.Any())
+                {
+                    <p class="text-center text-success py-4 mb-0">
+                        <i class="bi bi-check-circle-fill"></i> ไม่มีแจ้งเตือนค้าง
+                    </p>
+                }
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,244 @@
+@page "{id:int}"
+@using SolarApp.Models.Enums
+@model SolarApp.Pages.Customers.DetailModel
+@{
+    var c = Model.Customer;
+    ViewData["Title"] = c.FullName;
+
+    string SeverityClass(AlertSeverity s) => s switch
+    {
+        AlertSeverity.Critical => "bg-danger",
+        AlertSeverity.High => "bg-warning text-dark",
+        AlertSeverity.Medium => "bg-info",
+        _ => "bg-secondary"
+    };
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+        <a asp-page="/Customers/Index" class="text-decoration-none small">
+            <i class="bi bi-arrow-left"></i> กลับไปรายชื่อลูกค้า
+        </a>
+        <h4 class="mb-0 mt-1">
+            <i class="bi bi-person-circle text-warning"></i> @c.FullName
+            @if (!c.IsActive)
+            {
+                <span class="badge bg-secondary align-middle">ปิดใช้งาน</span>
+            }
+        </h4>
+    </div>
+    @if (Model.IsAdmin)
+    {
+        <a asp-page="/Admin/Users" class="btn btn-outline-warning btn-sm">
+            <i class="bi bi-pencil"></i> แก้ไขข้อมูลลูกค้า
+        </a>
+    }
+</div>
+
+<!-- ═══ SUMMARY ═══ -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold">@Model.OnlineSites/@Model.Sites.Count</div>
+            <small class="text-muted">ไซต์ที่ออนไลน์</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold">@Model.TotalCapacityKw.ToString("N1")</div>
+            <small class="text-muted">kWp ติดตั้ง</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold text-warning">@Model.TodayKwh.ToString("N1")</div>
+            <small class="text-muted">kWh วันนี้</small>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body text-center">
+            <div class="fs-4 fw-bold text-success">@Model.Month30dKwh.ToString("N0")</div>
+            <small class="text-muted">kWh 30 วัน</small>
+        </div></div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- ═══ CONTACT ═══ -->
+    <div class="col-lg-4 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white"><h6 class="mb-0">ข้อมูลติดต่อ</h6></div>
+            <div class="card-body">
+                <dl class="row mb-0 small">
+                    <dt class="col-4 text-muted">โทรศัพท์</dt>
+                    <dd class="col-8">
+                        @if (!string.IsNullOrWhiteSpace(c.Phone))
+                        {
+                            <a href="tel:@c.Phone" class="text-decoration-none">@c.Phone</a>
+                        }
+                        else
+                        {
+                            <span class="text-muted">-</span>
+                        }
+                    </dd>
+
+                    <dt class="col-4 text-muted">อีเมล</dt>
+                    <dd class="col-8">@(string.IsNullOrWhiteSpace(c.Email) ? "-" : c.Email)</dd>
+
+                    <dt class="col-4 text-muted">ที่อยู่</dt>
+                    <dd class="col-8">
+                        @c.Address
+                        @if (!string.IsNullOrWhiteSpace(c.City) || !string.IsNullOrWhiteSpace(c.Province))
+                        {
+                            <br /><span>@c.City @c.Province @c.PostalCode</span>
+                        }
+                    </dd>
+
+                    @if (!string.IsNullOrWhiteSpace(c.TaxId))
+                    {
+                        <dt class="col-4 text-muted">เลขผู้เสียภาษี</dt>
+                        <dd class="col-8">@c.TaxId</dd>
+                    }
+
+                    @* An unlinked customer silently receives no alerts at all,
+                       so this belongs on the summary, not buried in a form. *@
+                    <dt class="col-4 text-muted">LINE</dt>
+                    <dd class="col-8">
+                        @if (!string.IsNullOrWhiteSpace(c.LineUserId))
+                        {
+                            <span class="badge bg-success">ผูกแล้ว</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">ยังไม่ผูก — จะไม่ได้รับแจ้งเตือน</span>
+                        }
+                    </dd>
+
+                    <dt class="col-4 text-muted">บัญชีเข้าระบบ</dt>
+                    <dd class="col-8">
+                        @if (!string.IsNullOrWhiteSpace(c.UserId))
+                        {
+                            <span class="badge bg-success">มีบัญชี</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">ยังไม่มีบัญชี</span>
+                        }
+                    </dd>
+                </dl>
+
+                @if (!string.IsNullOrWhiteSpace(c.Notes))
+                {
+                    <hr />
+                    <small class="text-muted d-block">หมายเหตุ</small>
+                    <small>@c.Notes</small>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ SITES ═══ -->
+    <div class="col-lg-8 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white"><h6 class="mb-0">ไซต์งาน (@Model.Sites.Count)</h6></div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>สถานะ</th><th>ไซต์งาน</th><th>อินเวอร์เตอร์</th>
+                                <th class="text-end">กำลัง</th><th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in Model.Sites)
+                            {
+                                var badge = s.Status switch
+                                {
+                                    InstallationStatus.Active => "bg-success",
+                                    InstallationStatus.Offline => "bg-danger",
+                                    InstallationStatus.Maintenance => "bg-warning text-dark",
+                                    _ => "bg-secondary"
+                                };
+                                <tr>
+                                    <td><span class="badge @badge">@s.Status</span></td>
+                                    <td>
+                                        <strong>@s.SiteName</strong>
+                                        <br /><small class="text-muted">@s.SiteCode</small>
+                                    </td>
+                                    <td><small>@s.InverterBrand</small></td>
+                                    <td class="text-end">@s.SystemCapacityKw.ToString("N1") kWp</td>
+                                    <td class="text-end">
+                                        <a asp-page="/Installations/Detail" asp-route-id="@s.Id"
+                                           class="btn btn-sm btn-outline-secondary">ดู</a>
+                                    </td>
+                                </tr>
+                            }
+                            @if (!Model.Sites.Any())
+                            {
+                                <tr><td colspan="5" class="text-center text-muted py-4">ยังไม่มีไซต์งาน</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- ═══ OPEN ALERTS ═══ -->
+    <div class="col-lg-6 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-bell-fill text-warning"></i> แจ้งเตือนที่ยังไม่จัดการ (@Model.OpenAlerts.Count)</h6>
+            </div>
+            <div class="card-body p-0" style="max-height:320px;overflow-y:auto">
+                @foreach (var a in Model.OpenAlerts)
+                {
+                    <div class="d-flex align-items-start border-bottom p-2 px-3">
+                        <span class="badge @SeverityClass(a.Severity) me-2 mt-1" style="min-width:70px">@a.Severity</span>
+                        <div class="flex-grow-1">
+                            <strong>@a.Title</strong>
+                            <br /><small class="text-muted">@a.Installation.SiteName • @a.OccurredAt.ToString("dd/MM HH:mm")</small>
+                        </div>
+                    </div>
+                }
+                @if (!Model.OpenAlerts.Any())
+                {
+                    <p class="text-center text-success py-4 mb-0">
+                        <i class="bi bi-check-circle-fill"></i> ไม่มีแจ้งเตือนค้าง
+                    </p>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ OPEN TICKETS ═══ -->
+    <div class="col-lg-6 mb-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-ticket-detailed"></i> แจ้งซ่อมที่ยังไม่ปิด (@Model.OpenTickets.Count)</h6>
+            </div>
+            <div class="card-body p-0" style="max-height:320px;overflow-y:auto">
+                @foreach (var t in Model.OpenTickets)
+                {
+                    <div class="d-flex justify-content-between align-items-center border-bottom p-2 px-3">
+                        <div>
+                            <strong>@t.Subject</strong>
+                            <br /><small class="text-muted">
+                                @t.TicketNumber • @t.Installation.SiteName • @t.CreatedAt.ToString("dd/MM/yyyy")
+                            </small>
+                        </div>
+                        <a asp-page="/ServiceTickets/Edit" asp-route-id="@t.Id"
+                           class="btn btn-sm btn-outline-secondary">ดู</a>
+                    </div>
+                }
+                @if (!Model.OpenTickets.Any())
+                {
+                    <p class="text-center text-muted py-4 mb-0">ไม่มีงานแจ้งซ่อมค้าง</p>
+                }
+            </div>
+        </div>
+    </div>
+</div>

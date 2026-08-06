@@ -36,6 +36,22 @@
                 <i class="bi bi-geo-alt me-2"></i>แผนที่
             </a>
         </li>
+        @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+        {
+            <li class="nav-item">
+                <a class="nav-link text-white @ActiveClass("/customers")" asp-page="/Customers/Index">
+                    <i class="bi bi-people me-2"></i>ลูกค้า
+                </a>
+            </li>
+        }
+        @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+        {
+            <li class="nav-item">
+                <a class="nav-link text-white @ActiveClass("/partners")" asp-page="/Partners/Index">
+                    <i class="bi bi-building me-2"></i>พาร์ทเนอร์
+                </a>
+            </li>
+        }
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/workorders")" asp-page="/WorkOrders/Index">
                 <i class="bi bi-clipboard2-check me-2"></i>ใบสั่งงาน

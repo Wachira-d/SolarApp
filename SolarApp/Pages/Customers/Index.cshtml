@@ -1,0 +1,132 @@
+@page
+@model SolarApp.Pages.Customers.IndexModel
+@{
+    ViewData["Title"] = "ลูกค้า";
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-people-fill text-warning"></i> ลูกค้า</h4>
+        <small class="text-muted">
+            @Model.TotalCustomers ราย · @Model.TotalSites ไซต์ · @Model.TotalCapacityKw.ToString("N1") kWp
+        </small>
+    </div>
+    @if (Model.IsAdmin)
+    {
+        <a asp-page="/Admin/Users" class="btn btn-warning btn-sm">
+            <i class="bi bi-plus-lg"></i> เพิ่ม / แก้ไขลูกค้า
+        </a>
+    }
+</div>
+
+<form method="get" class="card border-0 shadow-sm mb-3">
+    <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+        <input type="text" name="q" value="@Model.Q" class="form-control form-control-sm"
+               style="max-width:280px" placeholder="ค้นหาชื่อ / อีเมล / เบอร์โทร / จังหวัด..." />
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="needsAttention" value="true"
+                   id="needsAttention" @(Model.NeedsAttention ? "checked" : "") />
+            <label class="form-check-label small" for="needsAttention">เฉพาะที่ต้องดูแล</label>
+        </div>
+        <button type="submit" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-search"></i> ค้นหา
+        </button>
+        @if (!string.IsNullOrWhiteSpace(Model.Q) || Model.NeedsAttention)
+        {
+            <a asp-page="/Customers/Index" class="btn btn-sm btn-link">ล้างตัวกรอง</a>
+        }
+    </div>
+</form>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ลูกค้า</th>
+                        <th>ติดต่อ</th>
+                        <th>จังหวัด</th>
+                        <th class="text-center">ไซต์</th>
+                        <th class="text-end">กำลังติดตั้ง</th>
+                        <th class="text-center">แจ้งเตือน</th>
+                        <th class="text-center">ช่องทาง</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in Model.Rows)
+                    {
+                        <tr>
+                            <td>
+                                <a asp-page="/Customers/Detail" asp-route-id="@c.Id" class="text-decoration-none">
+                                    <strong>@c.FullName</strong>
+                                </a>
+                                @if (!c.IsActive)
+                                {
+                                    <span class="badge bg-secondary ms-1">ปิดใช้งาน</span>
+                                }
+                            </td>
+                            <td>
+                                <small class="d-block">@(string.IsNullOrWhiteSpace(c.Phone) ? "-" : c.Phone)</small>
+                                <small class="text-muted">@c.Email</small>
+                            </td>
+                            <td><small>@(c.Province ?? "-")</small></td>
+                            <td class="text-center">
+                                @c.SiteCount
+                                @if (c.OfflineCount > 0)
+                                {
+                                    <br /><span class="badge bg-danger">ออฟไลน์ @c.OfflineCount</span>
+                                }
+                            </td>
+                            <td class="text-end">@c.CapacityKw.ToString("N1") kWp</td>
+                            <td class="text-center">
+                                @if (c.OpenAlerts > 0)
+                                {
+                                    <span class="badge bg-warning text-dark">@c.OpenAlerts</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td class="text-center">
+                                @* Whether we can actually reach this customer is
+                                   operational information, not a profile detail —
+                                   no LINE and no login means alerts go nowhere. *@
+                                @if (c.HasLine)
+                                {
+                                    <i class="bi bi-chat-dots-fill text-success" title="ผูก LINE แล้ว"></i>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-chat-dots text-muted" title="ยังไม่ผูก LINE"></i>
+                                }
+                                @if (c.HasPortalLogin)
+                                {
+                                    <i class="bi bi-person-check-fill text-success ms-1" title="มีบัญชีเข้าระบบ"></i>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-person-x text-muted ms-1" title="ยังไม่มีบัญชีเข้าระบบ"></i>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <a asp-page="/Customers/Detail" asp-route-id="@c.Id"
+                                   class="btn btn-sm btn-outline-secondary">ดู</a>
+                            </td>
+                        </tr>
+                    }
+                    @if (!Model.Rows.Any())
+                    {
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">
+                                ไม่พบลูกค้าตามเงื่อนไขที่เลือก
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
