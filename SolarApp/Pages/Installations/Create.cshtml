@@ -136,27 +136,27 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label asp-for="Input.PlantId" class="form-label">Plant/Station ID</label>
-                            <input asp-for="Input.PlantId" class="form-control" />
+                            <input asp-for="Input.PlantId" class="form-control" autocomplete="off" />
                         </div>
                         <div class="col-md-6">
                             <label asp-for="Input.CloudApiKey" class="form-label">API Key</label>
-                            <input asp-for="Input.CloudApiKey" class="form-control" />
+                            <input asp-for="Input.CloudApiKey" class="form-control" autocomplete="new-password" />
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label asp-for="Input.CloudUsername" class="form-label">ชื่อผู้ใช้คลาวด์</label>
-                            <input asp-for="Input.CloudUsername" class="form-control" />
+                            <input asp-for="Input.CloudUsername" class="form-control" autocomplete="off" />
                         </div>
                         <div class="col-md-6">
                             <label asp-for="Input.CloudPassword" class="form-label">รหัสผ่านคลาวด์</label>
-                            <input asp-for="Input.CloudPassword" class="form-control" type="password" />
+                            <input asp-for="Input.CloudPassword" class="form-control" type="password" autocomplete="new-password" />
                         </div>
                     </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label asp-for="Input.CloudApiSecret" class="form-label">API Secret</label>
-                            <input asp-for="Input.CloudApiSecret" class="form-control" type="password" />
+                            <input asp-for="Input.CloudApiSecret" class="form-control" type="password" autocomplete="new-password" />
                         </div>
                         <div class="col-md-6 d-flex align-items-end">
                             <button type="button" id="testConnectionBtn" class="btn btn-outline-info">

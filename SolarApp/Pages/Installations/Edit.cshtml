@@ -229,7 +229,7 @@
                                 }
                             </label>
                             <div class="input-group">
-                                <input asp-for="Input.PlantId" class="form-control"
+                                <input asp-for="Input.PlantId" class="form-control" autocomplete="off"
                                        placeholder="@(string.IsNullOrEmpty(guide.PlantIdExample) ? "Enter Plant/Station ID" : $"เช่น {guide.PlantIdExample}")" />
                                 <button type="button" id="discoverPlantsBtn" class="btn btn-outline-primary"
                                         title="ดึงรายการไซต์/อุปกรณ์จาก Cloud มาให้เลือก">
@@ -252,6 +252,7 @@
                             </label>
                             <div class="input-group">
                                 <input asp-for="Input.CloudApiKey" class="form-control" type="password"
+                                       autocomplete="new-password" data-cred-guard data-server-value=""
                                        placeholder="@(Model.HasApiKey ? "•••••••••• (saved — leave blank to keep)" : "Enter API Key")" />
                                 <button type="button" class="btn btn-outline-secondary credential-reveal"
                                         data-field="apiKey" data-target="Input.CloudApiKey"
@@ -270,6 +271,7 @@
                             @* Username is NOT a secret — show the actual value for verification *@
                             <div class="input-group">
                                 <input asp-for="Input.CloudUsername" class="form-control"
+                                       autocomplete="off" data-cred-guard data-server-value="@Model.Input.CloudUsername"
                                        placeholder="Enter username (email/phone)" />
                                 <button type="button" class="btn btn-outline-secondary credential-reveal"
                                         data-field="username" data-target="Input.CloudUsername"
@@ -285,6 +287,7 @@
                             </label>
                             <div class="input-group">
                                 <input asp-for="Input.CloudPassword" class="form-control" type="password"
+                                       autocomplete="new-password" data-cred-guard data-server-value=""
                                        placeholder="@(Model.HasPassword ? "•••••••••• (saved — leave blank to keep)" : "Enter password")" />
                                 <button type="button" class="btn btn-outline-secondary credential-reveal"
                                         data-field="password" data-target="Input.CloudPassword"
@@ -322,6 +325,7 @@
                             </label>
                             <div class="input-group">
                                 <input asp-for="Input.CloudApiSecret" class="form-control" type="password"
+                                       autocomplete="new-password" data-cred-guard data-server-value=""
                                        placeholder="@(Model.HasApiSecret ? "•••••••••• (saved — leave blank to keep)" : "Enter secret")" />
                                 <button type="button" class="btn btn-outline-secondary credential-reveal"
                                         data-field="apiSecret" data-target="Input.CloudApiSecret"
@@ -732,6 +736,44 @@
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
     <script>
+        // ─── Browser-autofill guard on the credential fields ─────────────────
+        // Chrome's password manager fills EVERY type=password box on a page with
+        // the login it has saved for the site, so the API Key / API Secret boxes
+        // came back showing the operator's SolarApp password. Cosmetic until you
+        // press Save — then that password is written over a working API key,
+        // because the save path treats any non-blank value as "the new secret".
+        //
+        // autocomplete="new-password" on the inputs stops most of it. This is the
+        // net: the server renders the secrets blank and the username with its
+        // stored value, so any field that differs from data-server-value without
+        // the operator having typed, pasted, or pressed the reveal button is the
+        // browser's doing, and gets put back.
+        (function () {
+            const guarded = document.querySelectorAll('[data-cred-guard]');
+            if (!guarded.length) return;
+
+            // keydown/paste, not 'input' — Chrome's autofill fires 'input' too.
+            guarded.forEach(el => {
+                ['keydown', 'paste', 'cut'].forEach(evt =>
+                    el.addEventListener(evt, () => { el.dataset.credEdited = '1'; }));
+            });
+
+            function restore() {
+                guarded.forEach(el => {
+                    if (el.dataset.credEdited) return;
+                    const server = el.getAttribute('data-server-value') || '';
+                    if (el.value !== server) el.value = server;
+                });
+            }
+
+            restore();
+            // Chrome fills asynchronously after load, and again when the operator
+            // picks an entry from its dropdown — sweep for a moment, then once
+            // more at submit, which is the point where it would do damage.
+            [50, 250, 800].forEach(ms => setTimeout(restore, ms));
+            guarded[0].closest('form')?.addEventListener('submit', restore);
+        })();
+
         // ─── Reverse geocode: lat/lng → Address ───
         document.getElementById('btnReverseGeocode')?.addEventListener('click', async () => {
             const btn = document.getElementById('btnReverseGeocode');
@@ -924,6 +966,9 @@
                         return;
                     }
                     input.value = data.value;
+                    // Loading the saved value counts as a deliberate edit, so the
+                    // autofill guard below leaves it alone.
+                    input.dataset.credEdited = '1';
                     if (fieldKey !== 'username') {
                         input.type = 'text';
                         icon.className = 'bi bi-eye-slash';
