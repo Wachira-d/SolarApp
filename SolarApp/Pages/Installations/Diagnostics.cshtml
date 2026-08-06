@@ -1,25 +1,25 @@
 @page "{id:int}"
 @model SolarApp.Pages.Installations.DiagnosticsModel
 @{
-    ViewData["Title"] = $"Diagnostics - {Model.Installation.SiteName}";
+    ViewData["Title"] = $"ตรวจสอบการเชื่อมต่อ - {Model.Installation.SiteName}";
     var inst = Model.Installation;
     var r = Model.Report;
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0">Connection Diagnostics</h4>
+        <h4 class="mb-0">ตรวจสอบการเชื่อมต่อ</h4>
         <small class="text-muted">@inst.SiteName · @inst.InverterBrand</small>
     </div>
     <div class="d-flex gap-2">
         <a asp-page="Detail" asp-route-id="@inst.Id" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-arrow-left"></i> Back
+            <i class="bi bi-arrow-left"></i> กลับ
         </a>
         <a asp-page="Diagnostics" asp-route-id="@inst.Id" asp-route-run="true" class="btn btn-warning btn-sm">
-            <i class="bi bi-arrow-clockwise"></i> Quick Check
+            <i class="bi bi-arrow-clockwise"></i> ตรวจแบบเร็ว
         </a>
         <a asp-page="Diagnostics" asp-route-id="@inst.Id" asp-route-deep="true" class="btn btn-danger btn-sm">
-            <i class="bi bi-shield-check"></i> Deep Health Check
+            <i class="bi bi-shield-check"></i> ตรวจเชิงลึก
         </a>
     </div>
 </div>
@@ -29,7 +29,7 @@
     <div class="card-body">
         <div class="row g-2 small">
             <div class="col-6 col-md-3">
-                <div class="text-muted">Brand</div>
+                <div class="text-muted">ยี่ห้อ</div>
                 <strong>@inst.InverterBrand</strong>
             </div>
             <div class="col-6 col-md-3">
@@ -37,12 +37,12 @@
                 <strong class="text-break">@(inst.PlantId ?? "-")</strong>
             </div>
             <div class="col-6 col-md-3">
-                <div class="text-muted">Status</div>
+                <div class="text-muted">สถานะ</div>
                 <span class="badge @(inst.Status.ToString() == "Active" ? "bg-success" : "bg-secondary")">@inst.Status</span>
             </div>
             <div class="col-6 col-md-3">
-                <div class="text-muted">Last Online</div>
-                <strong>@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "Never")</strong>
+                <div class="text-muted">ออนไลน์ล่าสุด</div>
+                <strong>@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "ไม่เคย")</strong>
             </div>
         </div>
     </div>
@@ -53,20 +53,20 @@
     <div class="card border-0 shadow-sm mb-3">
         <div class="card-body text-center py-5">
             <i class="bi bi-clipboard-check text-muted" style="font-size:3rem"></i>
-            <h5 class="mt-3">Connection Diagnostics</h5>
-            <p class="text-muted">Run comprehensive connection tests including:</p>
+            <h5 class="mt-3">ตรวจสอบการเชื่อมต่อ</h5>
+            <p class="text-muted">ทดสอบการเชื่อมต่อครบทุกขั้นตอน:</p>
             <ul class="list-unstyled small text-start d-inline-block mb-4">
-                <li>✓ Credentials validation</li>
-                <li>✓ Authentication / Login</li>
-                <li>✓ Plant Info retrieval</li>
-                <li>✓ Real-time data</li>
-                <li>✓ Historical data (7 days)</li>
-                <li>✓ Device list</li>
-                <li>✓ Alarms check</li>
+                <li>✓ ตรวจข้อมูลรับรอง (credentials)</li>
+                <li>✓ การเข้าสู่ระบบผู้ผลิต</li>
+                <li>✓ ดึงข้อมูลโรงไฟฟ้า</li>
+                <li>✓ ข้อมูลเรียลไทม์</li>
+                <li>✓ ข้อมูลย้อนหลัง (7 วัน)</li>
+                <li>✓ รายการอุปกรณ์</li>
+                <li>✓ การแจ้งเตือนจากผู้ผลิต</li>
             </ul>
             <div>
                 <a asp-page="Diagnostics" asp-route-id="@inst.Id" asp-route-run="true" class="btn btn-warning">
-                    <i class="bi bi-play-fill"></i> Run Diagnostics Now
+                    <i class="bi bi-play-fill"></i> เริ่มตรวจสอบเดี๋ยวนี้
                 </a>
             </div>
         </div>
@@ -80,30 +80,30 @@ else
             <h6 class="mb-1">
                 @if (r.OverallSuccess)
                 {
-                    <span><i class="bi bi-check-circle-fill"></i> All Checks Passed</span>
+                    <span><i class="bi bi-check-circle-fill"></i> ผ่านทุกขั้นตอน</span>
                 }
                 else
                 {
-                    <span><i class="bi bi-exclamation-triangle-fill"></i> Some Checks Failed</span>
+                    <span><i class="bi bi-exclamation-triangle-fill"></i> มีบางขั้นตอนไม่ผ่าน</span>
                 }
             </h6>
-            <div class="small">@r.Summary · Ran at @r.RunAt.ToString("HH:mm:ss")</div>
+            <div class="small">@r.Summary · ตรวจเมื่อ @r.RunAt.ToString("HH:mm:ss")</div>
         </div>
         <div class="d-flex gap-3">
             <div class="text-center">
                 <div class="fs-4 fw-bold text-success">@r.PassedCount</div>
-                <small>Passed</small>
+                <small>ผ่าน</small>
             </div>
             <div class="text-center">
                 <div class="fs-4 fw-bold text-danger">@r.FailedCount</div>
-                <small>Failed</small>
+                <small>ไม่ผ่าน</small>
             </div>
         </div>
     </div>
 
     <!-- Step-by-step results -->
     <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-white"><h6 class="mb-0">Step-by-Step Results</h6></div>
+        <div class="card-header bg-white"><h6 class="mb-0">ผลตรวจแต่ละขั้นตอน</h6></div>
         <div class="list-group list-group-flush">
             @foreach (var step in r.Steps)
             {
@@ -117,7 +117,7 @@ else
                                 <div class="small text-muted">
                                     @if (step.ItemCount > 0)
                                     {
-                                        <span class="me-2"><i class="bi bi-list-ol"></i> @step.ItemCount items</span>
+                                        <span class="me-2"><i class="bi bi-list-ol"></i> @step.ItemCount รายการ</span>
                                     }
                                     <span><i class="bi bi-clock"></i> @step.DurationMs ms</span>
                                 </div>
@@ -146,22 +146,22 @@ else
         <div>
             <h6 class="mb-1">
                 @if (hr.OverallHealthy)
-                { <i class="bi bi-check-circle-fill text-success"></i> <span>All Layers Passed</span> }
+                { <i class="bi bi-check-circle-fill text-success"></i> <span>ผ่านครบทุกชั้น</span> }
                 else if (hr.ApiReachable && !hr.DeviceOnline)
-                { <i class="bi bi-exclamation-triangle-fill text-warning"></i> <span>API OK, Device Offline</span> }
+                { <i class="bi bi-exclamation-triangle-fill text-warning"></i> <span>API ปกติ แต่อุปกรณ์ออฟไลน์</span> }
                 else
-                { <i class="bi bi-x-circle-fill text-danger"></i> <span>Connection Issues Detected</span> }
+                { <i class="bi bi-x-circle-fill text-danger"></i> <span>พบปัญหาการเชื่อมต่อ</span> }
             </h6>
             <div class="small">@hr.Summary</div>
         </div>
         <div class="d-flex gap-3">
-            <div class="text-center"><div class="fs-5 fw-bold text-success">@hr.PassedCount</div><small>Passed</small></div>
-            <div class="text-center"><div class="fs-5 fw-bold text-danger">@hr.FailedCount</div><small>Failed</small></div>
+            <div class="text-center"><div class="fs-5 fw-bold text-success">@hr.PassedCount</div><small>ผ่าน</small></div>
+            <div class="text-center"><div class="fs-5 fw-bold text-danger">@hr.FailedCount</div><small>ไม่ผ่าน</small></div>
         </div>
     </div>
 
     <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-layers"></i> 6-Layer Connection Health</h6></div>
+        <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-layers"></i> ตรวจสุขภาพการเชื่อมต่อ 6 ชั้น</h6></div>
         <div class="list-group list-group-flush">
             @foreach (var step in hr.Steps)
             {
@@ -204,18 +204,18 @@ else
 <!-- Recent API Call Logs -->
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white">
-        <h6 class="mb-0">Recent API Calls (Last 20)</h6>
+        <h6 class="mb-0">การเรียก API ล่าสุด (20 รายการ)</h6>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-sm table-hover mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Time</th>
-                        <th>Endpoint</th>
-                        <th>Status</th>
+                        <th>เวลา</th>
+                        <th>ปลายทาง</th>
+                        <th>ผล</th>
                         <th>HTTP</th>
-                        <th>Error</th>
+                        <th>ข้อผิดพลาด</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -242,7 +242,7 @@ else
                     }
                     @if (!Model.RecentLogs.Any())
                     {
-                        <tr><td colspan="5" class="text-center text-muted py-3">No API call logs yet</td></tr>
+                        <tr><td colspan="5" class="text-center text-muted py-3">ยังไม่มีบันทึกการเรียก API</td></tr>
                     }
                 </tbody>
             </table>

@@ -3,22 +3,22 @@
 @using SolarApp.Models
 @using SolarApp.Models.Enums
 @{
-    ViewData["Title"] = "Alert Rules";
+    ViewData["Title"] = "กฎแจ้งเตือน";
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-shield-exclamation"></i> Alert Rules</h4>
-        <small class="text-muted">Configure automatic alert conditions</small>
+        <h4 class="mb-0"><i class="bi bi-shield-exclamation"></i> กฎแจ้งเตือน</h4>
+        <small class="text-muted">ตั้งเงื่อนไขให้ระบบแจ้งเตือนอัตโนมัติ</small>
     </div>
     <div class="d-flex gap-2">
         <form method="post" asp-page-handler="RunNow">
             <button type="submit" class="btn btn-sm btn-outline-primary">
-                <i class="bi bi-play-fill"></i> Evaluate Now
+                <i class="bi bi-play-fill"></i> ตรวจสอบเดี๋ยวนี้
             </button>
         </form>
         <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#createModal">
-            <i class="bi bi-plus-circle"></i> New Rule
+            <i class="bi bi-plus-circle"></i> เพิ่มกฎใหม่
         </button>
     </div>
 </div>
@@ -38,11 +38,11 @@
             <table class="table table-hover mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Name</th>
-                        <th>Condition</th>
-                        <th>Scope</th>
-                        <th>Severity</th>
-                        <th>Last Fired</th>
+                        <th>ชื่อกฎ</th>
+                        <th>เงื่อนไข</th>
+                        <th>ขอบเขต</th>
+                        <th>ระดับความรุนแรง</th>
+                        <th>แจ้งเตือนล่าสุด</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -50,7 +50,7 @@
                     @if (!Model.Rules.Any())
                     {
                         <tr><td colspan="6" class="text-center text-muted py-4">
-                            No rules yet. Click "New Rule" to create your first alert rule.
+                            ยังไม่มีกฎแจ้งเตือน — กด "เพิ่มกฎใหม่" เพื่อสร้างกฎแรก
                         </td></tr>
                     }
                     @foreach (var r in Model.Rules)
@@ -84,7 +84,7 @@
                                 else if (r.BrandScope != null)
                                 { <span class="badge bg-info">@r.BrandScope</span> }
                                 else
-                                { <span class="badge bg-secondary">All sites</span> }
+                                { <span class="badge bg-secondary">ทุกไซต์</span> }
                             </td>
                             <td>
                                 <span class="badge bg-@(r.Severity == AlertSeverity.Critical ? "danger" : r.Severity == AlertSeverity.High ? "warning text-dark" : "secondary")">
@@ -94,12 +94,12 @@
                             <td><small class="text-muted">@(r.LastFiredAt?.ToString("dd/MM HH:mm") ?? "-")</small></td>
                             <td class="text-end">
                                 <form method="post" asp-page-handler="Toggle" asp-route-ruleId="@r.Id" class="d-inline">
-                                    <button type="submit" class="btn btn-sm btn-outline-secondary" title="Toggle">
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary" title="เปิด/ปิดกฎ">
                                         <i class="bi bi-power"></i>
                                     </button>
                                 </form>
                                 <form method="post" asp-page-handler="Delete" asp-route-ruleId="@r.Id" class="d-inline"
-                                      onsubmit="return confirm('Delete rule?')">
+                                      onsubmit="return confirm('ลบกฎนี้?')">
                                     <button type="submit" class="btn btn-sm btn-outline-danger">
                                         <i class="bi bi-trash"></i>
                                     </button>
@@ -119,47 +119,47 @@
         <form method="post" asp-page-handler="Create">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">New Alert Rule</h5>
+                    <h5 class="modal-title">เพิ่มกฎแจ้งเตือนใหม่</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-2">
-                        <label class="form-label">Name *</label>
+                        <label class="form-label">ชื่อกฎ *</label>
                         <input asp-for="Input.Name" class="form-control" required maxlength="100" />
                     </div>
                     <div class="mb-2">
-                        <label class="form-label">Description</label>
+                        <label class="form-label">คำอธิบาย</label>
                         <input asp-for="Input.Description" class="form-control" maxlength="300" />
                     </div>
                     <div class="row g-2">
                         <div class="col-12">
-                            <label class="form-label">Metric</label>
+                            <label class="form-label">ค่าที่ตรวจสอบ</label>
                             <select asp-for="Input.Metric" class="form-select" asp-items="Html.GetEnumSelectList<AlertRuleMetric>()"></select>
                         </div>
                         <div class="col-5">
-                            <label class="form-label">Operator</label>
+                            <label class="form-label">เงื่อนไขเปรียบเทียบ</label>
                             <select asp-for="Input.Operator" class="form-select" asp-items="Html.GetEnumSelectList<AlertRuleOperator>()"></select>
                         </div>
                         <div class="col-7">
-                            <label class="form-label">Threshold</label>
+                            <label class="form-label">ค่าเกณฑ์</label>
                             <input asp-for="Input.Threshold" type="number" step="any" class="form-control" required />
                         </div>
                         <div class="col-6">
-                            <label class="form-label">Severity</label>
+                            <label class="form-label">ระดับความรุนแรง</label>
                             <select asp-for="Input.Severity" class="form-select" asp-items="Html.GetEnumSelectList<AlertSeverity>()"></select>
                         </div>
                         <div class="col-6">
-                            <label class="form-label">Alert Type</label>
+                            <label class="form-label">ประเภทแจ้งเตือน</label>
                             <select asp-for="Input.AlertType" class="form-select" asp-items="Html.GetEnumSelectList<AlertType>()"></select>
                         </div>
                         <div class="col-6">
-                            <label class="form-label">Cooldown (min)</label>
+                            <label class="form-label">เว้นระยะก่อนเตือนซ้ำ (นาที)</label>
                             <input asp-for="Input.CooldownMinutes" type="number" min="1" class="form-control" />
                         </div>
                         <div class="col-6">
-                            <label class="form-label">Scope</label>
+                            <label class="form-label">ขอบเขต</label>
                             <select asp-for="Input.InstallationId" class="form-select">
-                                <option value="">All sites</option>
+                                <option value="">ทุกไซต์</option>
                                 @foreach (var inst in Model.Installations)
                                 {
                                     <option value="@inst.Id">@inst.SiteName</option>
@@ -168,12 +168,12 @@
                         </div>
                     </div>
                     <small class="text-muted d-block mt-2">
-                        Tip: PerformanceRatioDaily is expressed 0-1 (0.7 = 70%); UptimePercent7d is 0-100; OfflineMinutes uses raw minutes.
+                        หมายเหตุหน่วย: PerformanceRatioDaily ใช้ค่า 0-1 (0.7 = 70%) · UptimePercent7d ใช้ค่า 0-100 · OfflineMinutes ใช้หน่วยนาที
                     </small>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-warning">Create Rule</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
+                    <button type="submit" class="btn btn-warning">สร้างกฎ</button>
                 </div>
             </div>
         </form>
