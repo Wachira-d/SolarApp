@@ -99,28 +99,30 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white"><h6 class="mb-0">ข้อมูลระบบ</h6></div>
             <div class="card-body">
-                <table class="table table-sm table-borderless mb-0">
-                    <tr><td class="text-muted">Inverter Brand</td><td class="text-end fw-bold">@inst.InverterBrand @(string.IsNullOrEmpty(inst.InverterModel) ? "" : $"({inst.InverterModel})")</td></tr>
-                    <tr>
-                        <td class="text-muted">Inverter Size</td>
-                        <td class="text-end">
-                            @if (inst.InverterSizeKw > 0)
-                            {
-                                <span>@inst.InverterSizeKw kW × @inst.InverterCount = <strong>@inst.TotalInverterCapacityKw kW</strong></span>
-                            }
-                            else
-                            {
-                                <span class="text-muted">Not set</span>
-                            }
-                        </td>
-                    </tr>
-                    <tr><td class="text-muted">System Capacity</td><td class="text-end">@inst.SystemCapacityKw kWp (DC)</td></tr>
-                    <tr><td class="text-muted">Panels</td><td class="text-end">@inst.NumberOfPanels × @inst.PanelWattage W</td></tr>
-                    <tr><td class="text-muted">ลูกค้า</td><td class="text-end">@inst.Customer.FullName</td></tr>
-                    <tr><td class="text-muted">Partner</td><td class="text-end">@(inst.Partner?.CompanyName ?? "Direct")</td></tr>
-                    <tr><td class="text-muted">Installed</td><td class="text-end">@inst.InstallationDate.ToString("dd/MM/yyyy")</td></tr>
-                    <tr><td class="text-muted">Last Online</td><td class="text-end">@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "N/A")</td></tr>
-                </table>
+                <div class="table-responsive">
+                    <table class="table table-sm table-borderless mb-0">
+                        <tr><td class="text-muted">Inverter Brand</td><td class="text-end fw-bold">@inst.InverterBrand @(string.IsNullOrEmpty(inst.InverterModel) ? "" : $"({inst.InverterModel})")</td></tr>
+                        <tr>
+                            <td class="text-muted">Inverter Size</td>
+                            <td class="text-end">
+                                @if (inst.InverterSizeKw > 0)
+                                {
+                                    <span>@inst.InverterSizeKw kW × @inst.InverterCount = <strong>@inst.TotalInverterCapacityKw kW</strong></span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">Not set</span>
+                                }
+                            </td>
+                        </tr>
+                        <tr><td class="text-muted">System Capacity</td><td class="text-end">@inst.SystemCapacityKw kWp (DC)</td></tr>
+                        <tr><td class="text-muted">Panels</td><td class="text-end">@inst.NumberOfPanels × @inst.PanelWattage W</td></tr>
+                        <tr><td class="text-muted">ลูกค้า</td><td class="text-end">@inst.Customer.FullName</td></tr>
+                        <tr><td class="text-muted">Partner</td><td class="text-end">@(inst.Partner?.CompanyName ?? "Direct")</td></tr>
+                        <tr><td class="text-muted">Installed</td><td class="text-end">@inst.InstallationDate.ToString("dd/MM/yyyy")</td></tr>
+                        <tr><td class="text-muted">Last Online</td><td class="text-end">@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "N/A")</td></tr>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -128,25 +130,27 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white"><h6 class="mb-0">ประกัน</h6></div>
             <div class="card-body">
-                <table class="table table-sm table-borderless mb-0">
-                    <tr><td class="text-muted">ระยะเวลา</td><td class="text-end">@inst.WarrantyYears ปี</td></tr>
-                    <tr>
-                        <td class="text-muted">Expires</td>
-                        <td class="text-end @(inst.IsWarrantyExpired ? "text-danger fw-bold" : "text-success")">
-                            @inst.WarrantyExpiryDate.ToString("dd/MM/yyyy")
-                            @(inst.IsWarrantyExpired ? " (หมดอายุ)" : "")
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Days Left</td>
-                        <td class="text-end">
-                            @{
-                                var daysLeft = (inst.WarrantyExpiryDate - DateTime.UtcNow).Days;
-                            }
-                            @(daysLeft > 0 ? $"{daysLeft} days" : "Expired")
-                        </td>
-                    </tr>
-                </table>
+                <div class="table-responsive">
+                    <table class="table table-sm table-borderless mb-0">
+                        <tr><td class="text-muted">ระยะเวลา</td><td class="text-end">@inst.WarrantyYears ปี</td></tr>
+                        <tr>
+                            <td class="text-muted">Expires</td>
+                            <td class="text-end @(inst.IsWarrantyExpired ? "text-danger fw-bold" : "text-success")">
+                                @inst.WarrantyExpiryDate.ToString("dd/MM/yyyy")
+                                @(inst.IsWarrantyExpired ? " (หมดอายุ)" : "")
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Days Left</td>
+                            <td class="text-end">
+                                @{
+                                    var daysLeft = (inst.WarrantyExpiryDate - DateTime.UtcNow).Days;
+                                }
+                                @(daysLeft > 0 ? $"{daysLeft} days" : "Expired")
+                            </td>
+                        </tr>
+                    </table>
+                </div>
 
                 @if (inst.WarrantyExpiryDate > DateTime.UtcNow)
                 {
@@ -162,19 +166,21 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white"><h6 class="mb-0">การล้างแผง</h6></div>
             <div class="card-body">
-                <table class="table table-sm table-borderless mb-0">
-                    <tr><td class="text-muted">รวม</td><td class="text-end">@inst.TotalCleaningCount ครั้ง</td></tr>
-                    <tr><td class="text-muted">ทำแล้ว</td><td class="text-end">@inst.CompletedCleaningCount ครั้ง</td></tr>
-                    <tr><td class="text-muted">คงเหลือ</td><td class="text-end fw-bold">@inst.RemainingCleanings ครั้ง</td></tr>
-                    <tr><td class="text-muted">ล้างล่าสุด</td><td class="text-end">@(inst.LastCleaningDate?.ToString("dd/MM/yyyy") ?? "ยังไม่เคย")</td></tr>
-                    <tr>
-                        <td class="text-muted">Next Due</td>
-                        <td class="text-end @(inst.IsCleaningDue ? "text-warning fw-bold" : "")">
-                            @(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "N/A")
-                            @(inst.IsCleaningDue ? " (DUE!)" : "")
-                        </td>
-                    </tr>
-                </table>
+                <div class="table-responsive">
+                    <table class="table table-sm table-borderless mb-0">
+                        <tr><td class="text-muted">รวม</td><td class="text-end">@inst.TotalCleaningCount ครั้ง</td></tr>
+                        <tr><td class="text-muted">ทำแล้ว</td><td class="text-end">@inst.CompletedCleaningCount ครั้ง</td></tr>
+                        <tr><td class="text-muted">คงเหลือ</td><td class="text-end fw-bold">@inst.RemainingCleanings ครั้ง</td></tr>
+                        <tr><td class="text-muted">ล้างล่าสุด</td><td class="text-end">@(inst.LastCleaningDate?.ToString("dd/MM/yyyy") ?? "ยังไม่เคย")</td></tr>
+                        <tr>
+                            <td class="text-muted">Next Due</td>
+                            <td class="text-end @(inst.IsCleaningDue ? "text-warning fw-bold" : "")">
+                                @(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "N/A")
+                                @(inst.IsCleaningDue ? " (DUE!)" : "")
+                            </td>
+                        </tr>
+                    </table>
+                </div>
 
                 @if (inst.TotalCleaningCount > 0)
                 {
@@ -271,29 +277,31 @@
             <h6 class="mb-0">แจ้งเตือนที่ยังเปิดอยู่</h6>
         </div>
         <div class="card-body p-0">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr><th>ระดับ</th><th>ประเภท</th><th>หัวข้อ</th><th>เวลา</th><th>วิเคราะห์</th></tr>
-                </thead>
-                <tbody>
-                    @foreach (var alert in inst.Alerts)
-                    {
-                        var alertClass = alert.Severity switch
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr><th>ระดับ</th><th>ประเภท</th><th>หัวข้อ</th><th>เวลา</th><th>วิเคราะห์</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var alert in inst.Alerts)
                         {
-                            SolarApp.Models.Enums.AlertSeverity.Critical => "text-danger fw-bold",
-                            SolarApp.Models.Enums.AlertSeverity.High => "text-warning fw-bold",
-                            _ => ""
-                        };
-                        <tr>
-                            <td class="@alertClass">@alert.Severity</td>
-                            <td>@alert.AlertType</td>
-                            <td>@alert.Title</td>
-                            <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
-                            <td><small>@(alert.RootCauseAnalysis ?? "-")</small></td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+                            var alertClass = alert.Severity switch
+                            {
+                                SolarApp.Models.Enums.AlertSeverity.Critical => "text-danger fw-bold",
+                                SolarApp.Models.Enums.AlertSeverity.High => "text-warning fw-bold",
+                                _ => ""
+                            };
+                            <tr>
+                                <td class="@alertClass">@alert.Severity</td>
+                                <td>@alert.AlertType</td>
+                                <td>@alert.Title</td>
+                                <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
+                                <td><small>@(alert.RootCauseAnalysis ?? "-")</small></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 }
@@ -304,32 +312,34 @@
         <h6 class="mb-0">ประวัติการบำรุงรักษา</h6>
     </div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr><th>ประเภท</th><th>นัด</th><th>ทำแล้ว</th><th>สถานะ</th><th>ผู้ทำ</th><th>ค่าใช้จ่าย</th></tr>
-            </thead>
-            <tbody>
-                @foreach (var m in Model.MaintenanceRecords)
-                {
-                    <tr>
-                        <td>@m.MaintenanceType</td>
-                        <td>@m.ScheduledDate.ToString("dd/MM/yyyy")</td>
-                        <td>@(m.CompletedDate?.ToString("dd/MM/yyyy") ?? "-")</td>
-                        <td>
-                            <span class="badge @(m.Status == SolarApp.Models.Enums.MaintenanceStatus.Completed ? "bg-success" : "bg-warning")">
-                                @m.Status
-                            </span>
-                        </td>
-                        <td>@(m.PerformedByUser?.FullName ?? "-")</td>
-                        <td>@(m.Cost?.ToString("N0") ?? "-") THB</td>
-                    </tr>
-                }
-                @if (!Model.MaintenanceRecords.Any())
-                {
-                    <tr><td colspan="6" class="text-center text-muted">No maintenance records</td></tr>
-                }
-            </tbody>
-        </table>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr><th>ประเภท</th><th>นัด</th><th>ทำแล้ว</th><th>สถานะ</th><th>ผู้ทำ</th><th>ค่าใช้จ่าย</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in Model.MaintenanceRecords)
+                    {
+                        <tr>
+                            <td>@m.MaintenanceType</td>
+                            <td>@m.ScheduledDate.ToString("dd/MM/yyyy")</td>
+                            <td>@(m.CompletedDate?.ToString("dd/MM/yyyy") ?? "-")</td>
+                            <td>
+                                <span class="badge @(m.Status == SolarApp.Models.Enums.MaintenanceStatus.Completed ? "bg-success" : "bg-warning")">
+                                    @m.Status
+                                </span>
+                            </td>
+                            <td>@(m.PerformedByUser?.FullName ?? "-")</td>
+                            <td>@(m.Cost?.ToString("N0") ?? "-") THB</td>
+                        </tr>
+                    }
+                    @if (!Model.MaintenanceRecords.Any())
+                    {
+                        <tr><td colspan="6" class="text-center text-muted">No maintenance records</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 

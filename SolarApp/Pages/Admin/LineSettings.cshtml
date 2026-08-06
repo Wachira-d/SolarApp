@@ -176,38 +176,40 @@
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white"><h6 class="mb-0">Notification History (Last 20)</h6></div>
     <div class="card-body p-0">
-        <table class="table table-hover table-sm mb-0">
-            <thead class="table-light">
-                <tr><th>Time</th><th>Recipient</th><th>Title</th><th>Status</th><th>Error</th></tr>
-            </thead>
-            <tbody>
-                @foreach (var n in Model.RecentNotifications)
-                {
-                    var statusClass = n.Status switch
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr><th>Time</th><th>Recipient</th><th>Title</th><th>Status</th><th>Error</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var n in Model.RecentNotifications)
                     {
-                        SolarApp.Models.Enums.NotificationStatus.Sent => "bg-success",
-                        SolarApp.Models.Enums.NotificationStatus.Delivered => "bg-success",
-                        SolarApp.Models.Enums.NotificationStatus.Failed => "bg-danger",
-                        _ => "bg-secondary"
-                    };
-                    var recipientType = n.RecipientLineId?.StartsWith("C") == true ? "Group" :
-                                       n.RecipientLineId?.StartsWith("U") == true ? "User" : "?";
-                    <tr>
-                        <td><small>@n.CreatedAt.ToString("dd/MM HH:mm")</small></td>
-                        <td>
-                            <span class="badge bg-secondary me-1">@recipientType</span>
-                            <code class="small">@(n.RecipientLineId?.Length > 16 ? n.RecipientLineId[..16] + "..." : n.RecipientLineId)</code>
-                        </td>
-                        <td>@n.Title</td>
-                        <td><span class="badge @statusClass">@n.Status</span></td>
-                        <td><small class="text-danger">@(n.ErrorMessage != null && n.ErrorMessage.Length > 80 ? n.ErrorMessage[..80] + "..." : n.ErrorMessage)</small></td>
-                    </tr>
-                }
-                @if (!Model.RecentNotifications.Any())
-                {
-                    <tr><td colspan="5" class="text-center text-muted py-4">No notifications yet</td></tr>
-                }
-            </tbody>
-        </table>
+                        var statusClass = n.Status switch
+                        {
+                            SolarApp.Models.Enums.NotificationStatus.Sent => "bg-success",
+                            SolarApp.Models.Enums.NotificationStatus.Delivered => "bg-success",
+                            SolarApp.Models.Enums.NotificationStatus.Failed => "bg-danger",
+                            _ => "bg-secondary"
+                        };
+                        var recipientType = n.RecipientLineId?.StartsWith("C") == true ? "Group" :
+                                           n.RecipientLineId?.StartsWith("U") == true ? "User" : "?";
+                        <tr>
+                            <td><small>@n.CreatedAt.ToString("dd/MM HH:mm")</small></td>
+                            <td>
+                                <span class="badge bg-secondary me-1">@recipientType</span>
+                                <code class="small">@(n.RecipientLineId?.Length > 16 ? n.RecipientLineId[..16] + "..." : n.RecipientLineId)</code>
+                            </td>
+                            <td>@n.Title</td>
+                            <td><span class="badge @statusClass">@n.Status</span></td>
+                            <td><small class="text-danger">@(n.ErrorMessage != null && n.ErrorMessage.Length > 80 ? n.ErrorMessage[..80] + "..." : n.ErrorMessage)</small></td>
+                        </tr>
+                    }
+                    @if (!Model.RecentNotifications.Any())
+                    {
+                        <tr><td colspan="5" class="text-center text-muted py-4">No notifications yet</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>

@@ -137,55 +137,58 @@
             <span class="badge bg-white text-danger">@hasAction รายการ</span>
         </div>
         <div class="card-body p-0">
+            @* Every tile links to the page where that work is actually done —
+               a count you can't act on just makes the operator hunt for the
+               right screen. *@
             <div class="row g-0">
                 @if (d.OfflineCount > 0)
                 {
-                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
+                    <a href="#offline-sites" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-danger">@d.OfflineCount</div>
-                        <small>ออฟไลน์</small>
-                    </div>
+                        <small class="text-body">ออฟไลน์</small>
+                    </a>
                 }
                 @if (d.CriticalAlertCount > 0)
                 {
-                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
+                    <a asp-page="/Admin/Alerts" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-danger">@d.CriticalAlertCount</div>
-                        <small>วิกฤต</small>
-                    </div>
+                        <small class="text-body">วิกฤต</small>
+                    </a>
                 }
                 @if (d.HighAlertCount > 0)
                 {
-                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
+                    <a asp-page="/Admin/Alerts" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-warning">@d.HighAlertCount</div>
-                        <small>เร่งด่วน</small>
-                    </div>
+                        <small class="text-body">เร่งด่วน</small>
+                    </a>
                 }
                 @if (d.CleaningDueCount > 0)
                 {
-                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
+                    <a href="#cleaning-due" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-info">@d.CleaningDueCount</div>
-                        <small>ครบล้างแผง</small>
-                    </div>
+                        <small class="text-body">ครบล้างแผง</small>
+                    </a>
                 }
                 @if (d.PendingMaintenanceCount > 0)
                 {
-                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
+                    <a asp-page="/Maintenance/Index" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-primary">@d.PendingMaintenanceCount</div>
-                        <small>รอบำรุงรักษา</small>
-                    </div>
+                        <small class="text-body">รอบำรุงรักษา</small>
+                    </a>
                 }
                 @if (d.OpenTicketCount > 0)
                 {
-                    <div class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center">
+                    <a asp-page="/ServiceTickets/Index" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-secondary">@d.OpenTicketCount</div>
-                        <small>แจ้งซ่อมค้าง</small>
-                    </div>
+                        <small class="text-body">แจ้งซ่อมค้าง</small>
+                    </a>
                 }
                 @if (d.WarrantyExpiringCount > 0)
                 {
-                    <div class="col-6 col-sm-4 col-md-auto border-bottom p-2 p-md-3 text-center">
+                    <a href="#warranty-expiring" class="col-6 col-sm-4 col-md-auto border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-info">@d.WarrantyExpiringCount</div>
-                        <small>ประกันใกล้หมด</small>
-                    </div>
+                        <small class="text-body">ประกันใกล้หมด</small>
+                    </a>
                 }
             </div>
         </div>
@@ -202,7 +205,7 @@ else
     <!-- ═══ OFFLINE INSTALLATIONS ═══ -->
     @if (d.OfflineInstallations.Any())
     {
-        <div class="col-md-6 mb-3">
+        <div class="col-md-6 mb-3" id="offline-sites">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-header bg-white"><h6 class="mb-0 text-danger"><i class="bi bi-wifi-off"></i> ไซต์ที่ออฟไลน์</h6></div>
                 <div class="card-body p-0">
@@ -258,6 +261,76 @@ else
         </div>
     </div>
 </div>
+
+@* The view model has always computed these two lists, but the page only ever
+   showed their counts — so the operator saw "4 ครบล้างแผง" with no way to find
+   out which four.  Rendering them here also gives the tiles above something to
+   jump to. *@
+@if (d.CleaningDueInstallations.Any() || d.WarrantyExpiringInstallations.Any())
+{
+    <div class="row mb-4">
+        <!-- ═══ CLEANING DUE ═══ -->
+        @if (d.CleaningDueInstallations.Any())
+        {
+            <div class="@(d.WarrantyExpiringInstallations.Any() ? "col-md-6" : "col-12") mb-3" id="cleaning-due">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-header bg-white">
+                        <h6 class="mb-0 text-info"><i class="bi bi-droplet-fill"></i> ครบกำหนดล้างแผง (@d.CleaningDueInstallations.Count)</h6>
+                    </div>
+                    <div class="card-body p-0" style="max-height:320px;overflow-y:auto">
+                        @foreach (var inst in d.CleaningDueInstallations)
+                        {
+                            <div class="d-flex justify-content-between align-items-center border-bottom p-3">
+                                <div>
+                                    <strong>@inst.SiteName</strong>
+                                    <br /><small class="text-muted">@inst.CustomerName @(inst.PartnerName != null ? $"• {inst.PartnerName}" : "")</small>
+                                    <br />
+                                    @{
+                                        var overdueDays = inst.NextCleaningDate.HasValue
+                                            ? (DateTime.UtcNow.Date - inst.NextCleaningDate.Value.Date).Days
+                                            : 0;
+                                        var cleaningWhen = overdueDays > 0
+                                            ? $"เลยกำหนด {overdueDays} วัน"
+                                            : "ถึงกำหนดล้าง";
+                                    }
+                                    <small class="text-info">@cleaningWhen · เหลือ @inst.RemainingCleanings ครั้ง</small>
+                                </div>
+                                <a asp-page="/Installations/Cleaning" asp-route-id="@inst.Id" class="btn btn-sm btn-outline-info">ล้างแผง</a>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- ═══ WARRANTY EXPIRING ═══ -->
+        @if (d.WarrantyExpiringInstallations.Any())
+        {
+            <div class="@(d.CleaningDueInstallations.Any() ? "col-md-6" : "col-12") mb-3" id="warranty-expiring">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-header bg-white">
+                        <h6 class="mb-0 text-warning"><i class="bi bi-shield-exclamation"></i> ประกันใกล้หมดอายุ (@d.WarrantyExpiringInstallations.Count)</h6>
+                    </div>
+                    <div class="card-body p-0" style="max-height:320px;overflow-y:auto">
+                        @foreach (var inst in d.WarrantyExpiringInstallations)
+                        {
+                            <div class="d-flex justify-content-between align-items-center border-bottom p-3">
+                                <div>
+                                    <strong>@inst.SiteName</strong>
+                                    <br /><small class="text-muted">@inst.CustomerName @(inst.PartnerName != null ? $"• {inst.PartnerName}" : "")</small>
+                                    <br /><small class="text-warning">
+                                        หมดอายุ @inst.WarrantyExpiry.ToString("dd/MM/yyyy") · เหลือ @inst.WarrantyDaysLeft วัน
+                                    </small>
+                                </div>
+                                <a asp-page="/Installations/Warranty" asp-route-id="@inst.Id" class="btn btn-sm btn-outline-warning">ดูประกัน</a>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
 
 <!-- ═══ ALL INSTALLATIONS TABLE ═══ -->
 <div class="card border-0 shadow-sm">

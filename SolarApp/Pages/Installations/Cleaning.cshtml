@@ -70,115 +70,117 @@
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white"><h6 class="mb-0">Cleaning History</h6></div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr><th>#</th><th>Scheduled</th><th>Actual</th><th>Status</th><th>Performed By</th><th>Photos</th><th>Notes</th><th></th></tr>
-            </thead>
-            <tbody>
-                @{ var idx = Model.Records.Count; }
-                @foreach (var r in Model.Records)
-                {
-                    var statusClass = r.Status switch
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr><th>#</th><th>Scheduled</th><th>Actual</th><th>Status</th><th>Performed By</th><th>Photos</th><th>Notes</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @{ var idx = Model.Records.Count; }
+                    @foreach (var r in Model.Records)
                     {
-                        SolarApp.Models.Enums.CleaningStatus.Completed => "bg-success",
-                        SolarApp.Models.Enums.CleaningStatus.Scheduled => "bg-primary",
-                        SolarApp.Models.Enums.CleaningStatus.Missed => "bg-danger",
-                        _ => "bg-secondary"
-                    };
-                    <tr>
-                        <td>@(idx--)</td>
-                        <td>@r.ScheduledDate.ToString("dd/MM/yyyy")</td>
-                        <td>@(r.ActualDate?.ToString("dd/MM/yyyy") ?? "-")</td>
-                        <td><span class="badge @statusClass">@r.Status</span></td>
-                        <td>@(r.PerformedByExternal ?? r.PerformedByUser?.FullName ?? "-")</td>
-                        <td>
-                            <div class="d-flex flex-wrap gap-1">
-                                @foreach (var url in r.BeforePhotoList.Take(3))
-                                {
-                                    <a href="@url" target="_blank"><img src="@url" style="width:40px;height:40px;object-fit:cover" class="img-thumbnail" title="Before" /></a>
-                                }
-                                @foreach (var url in r.AfterPhotoList.Take(3))
-                                {
-                                    <a href="@url" target="_blank"><img src="@url" style="width:40px;height:40px;object-fit:cover" class="img-thumbnail border-success" title="After" /></a>
-                                }
-                                @if (!r.BeforePhotoList.Any() && !r.AfterPhotoList.Any())
-                                {
-                                    <span class="text-muted small">-</span>
-                                }
-                            </div>
-                        </td>
-                        <td><small>@(r.Notes ?? "-")</small></td>
-                        <td class="text-nowrap">
-                            @if (r.Status == SolarApp.Models.Enums.CleaningStatus.Scheduled)
-                            {
-                                <form method="post" asp-page-handler="Complete" class="d-inline">
-                                    <input type="hidden" name="recordId" value="@r.Id" />
-                                    <button type="submit" class="btn btn-sm btn-outline-success">Complete</button>
-                                </form>
-                            }
-                            <button class="btn btn-sm btn-outline-info" type="button" data-bs-toggle="collapse" data-bs-target="#photos-@r.Id" title="Add/Remove photos">
-                                <i class="bi bi-camera"></i>
-                            </button>
-                        </td>
-                    </tr>
-                    <tr class="collapse" id="photos-@r.Id">
-                        <td colspan="8" class="bg-light">
-                            <div class="row g-3 py-2">
-                                <div class="col-md-6">
-                                    <strong>Before Photos</strong>
-                                    <div class="d-flex flex-wrap gap-2 my-2">
-                                        @foreach (var url in r.BeforePhotoList)
-                                        {
-                                            <div class="position-relative" style="width:100px">
-                                                <a href="@url" target="_blank"><img src="@url" style="width:100px;height:100px;object-fit:cover" class="img-thumbnail" /></a>
-                                                <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
-                                                    <input type="hidden" name="recordId" value="@r.Id" />
-                                                    <input type="hidden" name="url" value="@url" />
-                                                    <input type="hidden" name="kind" value="before" />
-                                                    <button type="submit" class="btn btn-sm btn-danger rounded-circle" style="width:22px;height:22px;padding:0;font-size:11px" onclick="return confirm('Delete photo?');">×</button>
-                                                </form>
-                                            </div>
-                                        }
-                                    </div>
-                                    <form method="post" asp-page-handler="AddPhoto" enctype="multipart/form-data" class="d-flex gap-2">
-                                        <input type="hidden" name="recordId" value="@r.Id" />
-                                        <input type="hidden" name="kind" value="before" />
-                                        <input type="file" name="BeforePhotoFiles" class="form-control form-control-sm" multiple accept="image/*" />
-                                        <button type="submit" class="btn btn-sm btn-primary">Upload</button>
-                                    </form>
+                        var statusClass = r.Status switch
+                        {
+                            SolarApp.Models.Enums.CleaningStatus.Completed => "bg-success",
+                            SolarApp.Models.Enums.CleaningStatus.Scheduled => "bg-primary",
+                            SolarApp.Models.Enums.CleaningStatus.Missed => "bg-danger",
+                            _ => "bg-secondary"
+                        };
+                        <tr>
+                            <td>@(idx--)</td>
+                            <td>@r.ScheduledDate.ToString("dd/MM/yyyy")</td>
+                            <td>@(r.ActualDate?.ToString("dd/MM/yyyy") ?? "-")</td>
+                            <td><span class="badge @statusClass">@r.Status</span></td>
+                            <td>@(r.PerformedByExternal ?? r.PerformedByUser?.FullName ?? "-")</td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    @foreach (var url in r.BeforePhotoList.Take(3))
+                                    {
+                                        <a href="@url" target="_blank"><img src="@url" style="width:40px;height:40px;object-fit:cover" class="img-thumbnail" title="Before" /></a>
+                                    }
+                                    @foreach (var url in r.AfterPhotoList.Take(3))
+                                    {
+                                        <a href="@url" target="_blank"><img src="@url" style="width:40px;height:40px;object-fit:cover" class="img-thumbnail border-success" title="After" /></a>
+                                    }
+                                    @if (!r.BeforePhotoList.Any() && !r.AfterPhotoList.Any())
+                                    {
+                                        <span class="text-muted small">-</span>
+                                    }
                                 </div>
-                                <div class="col-md-6">
-                                    <strong>After Photos</strong>
-                                    <div class="d-flex flex-wrap gap-2 my-2">
-                                        @foreach (var url in r.AfterPhotoList)
-                                        {
-                                            <div class="position-relative" style="width:100px">
-                                                <a href="@url" target="_blank"><img src="@url" style="width:100px;height:100px;object-fit:cover" class="img-thumbnail border-success" /></a>
-                                                <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
-                                                    <input type="hidden" name="recordId" value="@r.Id" />
-                                                    <input type="hidden" name="url" value="@url" />
-                                                    <input type="hidden" name="kind" value="after" />
-                                                    <button type="submit" class="btn btn-sm btn-danger rounded-circle" style="width:22px;height:22px;padding:0;font-size:11px" onclick="return confirm('Delete photo?');">×</button>
-                                                </form>
-                                            </div>
-                                        }
-                                    </div>
-                                    <form method="post" asp-page-handler="AddPhoto" enctype="multipart/form-data" class="d-flex gap-2">
+                            </td>
+                            <td><small>@(r.Notes ?? "-")</small></td>
+                            <td class="text-nowrap">
+                                @if (r.Status == SolarApp.Models.Enums.CleaningStatus.Scheduled)
+                                {
+                                    <form method="post" asp-page-handler="Complete" class="d-inline">
                                         <input type="hidden" name="recordId" value="@r.Id" />
-                                        <input type="hidden" name="kind" value="after" />
-                                        <input type="file" name="AfterPhotoFiles" class="form-control form-control-sm" multiple accept="image/*" />
-                                        <button type="submit" class="btn btn-sm btn-success">Upload</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-success">Complete</button>
                                     </form>
+                                }
+                                <button class="btn btn-sm btn-outline-info" type="button" data-bs-toggle="collapse" data-bs-target="#photos-@r.Id" title="Add/Remove photos">
+                                    <i class="bi bi-camera"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr class="collapse" id="photos-@r.Id">
+                            <td colspan="8" class="bg-light">
+                                <div class="row g-3 py-2">
+                                    <div class="col-md-6">
+                                        <strong>Before Photos</strong>
+                                        <div class="d-flex flex-wrap gap-2 my-2">
+                                            @foreach (var url in r.BeforePhotoList)
+                                            {
+                                                <div class="position-relative" style="width:100px">
+                                                    <a href="@url" target="_blank"><img src="@url" style="width:100px;height:100px;object-fit:cover" class="img-thumbnail" /></a>
+                                                    <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
+                                                        <input type="hidden" name="recordId" value="@r.Id" />
+                                                        <input type="hidden" name="url" value="@url" />
+                                                        <input type="hidden" name="kind" value="before" />
+                                                        <button type="submit" class="btn btn-sm btn-danger rounded-circle" style="width:22px;height:22px;padding:0;font-size:11px" onclick="return confirm('Delete photo?');">×</button>
+                                                    </form>
+                                                </div>
+                                            }
+                                        </div>
+                                        <form method="post" asp-page-handler="AddPhoto" enctype="multipart/form-data" class="d-flex gap-2">
+                                            <input type="hidden" name="recordId" value="@r.Id" />
+                                            <input type="hidden" name="kind" value="before" />
+                                            <input type="file" name="BeforePhotoFiles" class="form-control form-control-sm" multiple accept="image/*" />
+                                            <button type="submit" class="btn btn-sm btn-primary">Upload</button>
+                                        </form>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <strong>After Photos</strong>
+                                        <div class="d-flex flex-wrap gap-2 my-2">
+                                            @foreach (var url in r.AfterPhotoList)
+                                            {
+                                                <div class="position-relative" style="width:100px">
+                                                    <a href="@url" target="_blank"><img src="@url" style="width:100px;height:100px;object-fit:cover" class="img-thumbnail border-success" /></a>
+                                                    <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
+                                                        <input type="hidden" name="recordId" value="@r.Id" />
+                                                        <input type="hidden" name="url" value="@url" />
+                                                        <input type="hidden" name="kind" value="after" />
+                                                        <button type="submit" class="btn btn-sm btn-danger rounded-circle" style="width:22px;height:22px;padding:0;font-size:11px" onclick="return confirm('Delete photo?');">×</button>
+                                                    </form>
+                                                </div>
+                                            }
+                                        </div>
+                                        <form method="post" asp-page-handler="AddPhoto" enctype="multipart/form-data" class="d-flex gap-2">
+                                            <input type="hidden" name="recordId" value="@r.Id" />
+                                            <input type="hidden" name="kind" value="after" />
+                                            <input type="file" name="AfterPhotoFiles" class="form-control form-control-sm" multiple accept="image/*" />
+                                            <button type="submit" class="btn btn-sm btn-success">Upload</button>
+                                        </form>
+                                    </div>
                                 </div>
-                            </div>
-                        </td>
-                    </tr>
-                }
-                @if (!Model.Records.Any())
-                {
-                    <tr><td colspan="8" class="text-center text-muted py-3">No cleaning records</td></tr>
-                }
-            </tbody>
-        </table>
+                            </td>
+                        </tr>
+                    }
+                    @if (!Model.Records.Any())
+                    {
+                        <tr><td colspan="8" class="text-center text-muted py-3">No cleaning records</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>

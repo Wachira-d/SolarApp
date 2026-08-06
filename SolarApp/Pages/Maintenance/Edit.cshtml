@@ -208,11 +208,13 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white"><h6 class="mb-0">Site Info</h6></div>
             <div class="card-body">
-                <table class="table table-sm table-borderless mb-0">
-                    <tr><td class="text-muted">Site</td><td>@Model.Record.Installation.SiteName</td></tr>
-                    <tr><td class="text-muted">Customer</td><td>@Model.Record.Installation.Customer.FullName</td></tr>
-                    <tr><td class="text-muted">Created</td><td>@Model.Record.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
-                </table>
+                <div class="table-responsive">
+                    <table class="table table-sm table-borderless mb-0">
+                        <tr><td class="text-muted">Site</td><td>@Model.Record.Installation.SiteName</td></tr>
+                        <tr><td class="text-muted">Customer</td><td>@Model.Record.Installation.Customer.FullName</td></tr>
+                        <tr><td class="text-muted">Created</td><td>@Model.Record.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                    </table>
+                </div>
             </div>
         </div>
     </div>

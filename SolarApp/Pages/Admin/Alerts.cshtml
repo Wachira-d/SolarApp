@@ -31,56 +31,58 @@
         <small class="ms-1">— offline / error / low performance / predictive</small>
     </div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th>Severity</th><th>Type</th><th>Site</th><th>Title</th>
-                    <th>Root Cause Analysis</th><th>Time</th><th>Notified</th><th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var alert in systemProblems)
-                {
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
                     <tr>
-                        <td><span class="badge @SeverityClass(alert.Severity)">@alert.Severity</span></td>
-                        <td>@alert.AlertType</td>
-                        <td>@alert.Installation.SiteName</td>
-                        <td>@alert.Title</td>
-                        <td><small>@(alert.RootCauseAnalysis ?? "-")</small></td>
-                        <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
-                        <td>
-                            @if (alert.IsNotified)
-                            {
-                                <i class="bi bi-check-circle text-success"></i>
-                            }
-                            else
-                            {
-                                <i class="bi bi-clock text-muted"></i>
-                            }
-                        </td>
-                        <td>
-                            @if (alert.AcknowledgedAt == null)
-                            {
-                                <form method="post" asp-page-handler="Acknowledge" class="d-inline">
-                                    <input type="hidden" name="alertId" value="@alert.Id" />
-                                    <button type="submit" class="btn btn-sm btn-outline-primary">ACK</button>
-                                </form>
-                            }
-                            <form method="post" asp-page-handler="Resolve" class="d-inline">
-                                <input type="hidden" name="alertId" value="@alert.Id" />
-                                <button type="submit" class="btn btn-sm btn-outline-success">Resolve</button>
-                            </form>
-                        </td>
+                        <th>Severity</th><th>Type</th><th>Site</th><th>Title</th>
+                        <th>Root Cause Analysis</th><th>Time</th><th>Notified</th><th>Actions</th>
                     </tr>
-                }
-                @if (!systemProblems.Any())
-                {
-                    <tr><td colspan="8" class="text-center text-success py-4">
-                        <i class="bi bi-check-circle-fill"></i> ไม่มีปัญหาระบบค้าง
-                    </td></tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var alert in systemProblems)
+                    {
+                        <tr>
+                            <td><span class="badge @SeverityClass(alert.Severity)">@alert.Severity</span></td>
+                            <td>@alert.AlertType</td>
+                            <td>@alert.Installation.SiteName</td>
+                            <td>@alert.Title</td>
+                            <td><small>@(alert.RootCauseAnalysis ?? "-")</small></td>
+                            <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
+                            <td>
+                                @if (alert.IsNotified)
+                                {
+                                    <i class="bi bi-check-circle text-success"></i>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-clock text-muted"></i>
+                                }
+                            </td>
+                            <td>
+                                @if (alert.AcknowledgedAt == null)
+                                {
+                                    <form method="post" asp-page-handler="Acknowledge" class="d-inline">
+                                        <input type="hidden" name="alertId" value="@alert.Id" />
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">ACK</button>
+                                    </form>
+                                }
+                                <form method="post" asp-page-handler="Resolve" class="d-inline">
+                                    <input type="hidden" name="alertId" value="@alert.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Resolve</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    @if (!systemProblems.Any())
+                    {
+                        <tr><td colspan="8" class="text-center text-success py-4">
+                            <i class="bi bi-check-circle-fill"></i> ไม่มีปัญหาระบบค้าง
+                        </td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
@@ -91,59 +93,61 @@
         <small class="ms-1">— ล้างแผง / ประกันใกล้หมด</small>
     </div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th>Type</th><th>Site</th><th>Title</th><th>Time</th><th>Notified</th><th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var alert in reminders)
-                {
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
                     <tr>
-                        <td>
-                            @if (alert.AlertType == AlertType.MaintenanceDue)
-                            {
-                                <span class="badge bg-info">🧽 ล้างแผง</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary">🛡️ ประกัน</span>
-                            }
-                        </td>
-                        <td>@alert.Installation.SiteName</td>
-                        <td>@alert.Title</td>
-                        <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
-                        <td>
-                            @if (alert.IsNotified)
-                            {
-                                <i class="bi bi-check-circle text-success"></i>
-                            }
-                            else
-                            {
-                                <i class="bi bi-clock text-muted"></i>
-                            }
-                        </td>
-                        <td>
-                            @if (alert.AcknowledgedAt == null)
-                            {
-                                <form method="post" asp-page-handler="Acknowledge" class="d-inline">
-                                    <input type="hidden" name="alertId" value="@alert.Id" />
-                                    <button type="submit" class="btn btn-sm btn-outline-primary">ACK</button>
-                                </form>
-                            }
-                            <form method="post" asp-page-handler="Resolve" class="d-inline">
-                                <input type="hidden" name="alertId" value="@alert.Id" />
-                                <button type="submit" class="btn btn-sm btn-outline-success">Resolve</button>
-                            </form>
-                        </td>
+                        <th>Type</th><th>Site</th><th>Title</th><th>Time</th><th>Notified</th><th>Actions</th>
                     </tr>
-                }
-                @if (!reminders.Any())
-                {
-                    <tr><td colspan="6" class="text-center text-muted py-4">ไม่มีงานตามกำหนดค้าง</td></tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var alert in reminders)
+                    {
+                        <tr>
+                            <td>
+                                @if (alert.AlertType == AlertType.MaintenanceDue)
+                                {
+                                    <span class="badge bg-info">🧽 ล้างแผง</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">🛡️ ประกัน</span>
+                                }
+                            </td>
+                            <td>@alert.Installation.SiteName</td>
+                            <td>@alert.Title</td>
+                            <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
+                            <td>
+                                @if (alert.IsNotified)
+                                {
+                                    <i class="bi bi-check-circle text-success"></i>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-clock text-muted"></i>
+                                }
+                            </td>
+                            <td>
+                                @if (alert.AcknowledgedAt == null)
+                                {
+                                    <form method="post" asp-page-handler="Acknowledge" class="d-inline">
+                                        <input type="hidden" name="alertId" value="@alert.Id" />
+                                        <button type="submit" class="btn btn-sm btn-outline-primary">ACK</button>
+                                    </form>
+                                }
+                                <form method="post" asp-page-handler="Resolve" class="d-inline">
+                                    <input type="hidden" name="alertId" value="@alert.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-success">Resolve</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    @if (!reminders.Any())
+                    {
+                        <tr><td colspan="6" class="text-center text-muted py-4">ไม่มีงานตามกำหนดค้าง</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>

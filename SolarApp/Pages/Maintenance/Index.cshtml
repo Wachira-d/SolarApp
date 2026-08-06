@@ -37,71 +37,73 @@
         <h6 class="mb-0">รายการบำรุงรักษา</h6>
     </div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th>ไซต์งาน</th>
-                    <th>ประเภท</th>
-                    <th>วันที่นัด</th>
-                    <th>วันที่ทำ</th>
-                    <th>สถานะ</th>
-                    <th>ผู้ดำเนินการ</th>
-                    <th>ค่าใช้จ่าย</th>
-                    <th>หมายเหตุ</th>
-                    @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
-                    {
-                        <th class="text-end">การจัดการ</th>
-                    }
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var r in Model.Records)
-                {
-                    var statusLabel = r.Status switch
-                    {
-                        SolarApp.Models.Enums.MaintenanceStatus.Scheduled => "นัดหมายแล้ว",
-                        SolarApp.Models.Enums.MaintenanceStatus.InProgress => "กำลังดำเนินการ",
-                        SolarApp.Models.Enums.MaintenanceStatus.Completed => "เสร็จสิ้น",
-                        SolarApp.Models.Enums.MaintenanceStatus.Cancelled => "ยกเลิก",
-                        _ => r.Status.ToString()
-                    };
-                    var typeLabel = r.MaintenanceType switch
-                    {
-                        SolarApp.Models.Enums.MaintenanceType.PanelCleaning => "ล้างแผง",
-                        SolarApp.Models.Enums.MaintenanceType.Inspection => "ตรวจสอบ",
-                        SolarApp.Models.Enums.MaintenanceType.Repair => "ซ่อม",
-                        SolarApp.Models.Enums.MaintenanceType.Replacement => "เปลี่ยน",
-                        SolarApp.Models.Enums.MaintenanceType.GeneralMaintenance => "บำรุงทั่วไป",
-                        _ => r.MaintenanceType.ToString()
-                    };
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
                     <tr>
-                        <td>@r.Installation.SiteName</td>
-                        <td>@typeLabel</td>
-                        <td>@r.ScheduledDate.ToString("dd/MM/yyyy")</td>
-                        <td>@(r.CompletedDate?.ToString("dd/MM/yyyy") ?? "-")</td>
-                        <td>
-                            <span class="badge @(r.Status == SolarApp.Models.Enums.MaintenanceStatus.Completed ? "bg-success" : r.Status == SolarApp.Models.Enums.MaintenanceStatus.Scheduled ? "bg-primary" : "bg-warning")">
-                                @statusLabel
-                            </span>
-                        </td>
-                        <td>@(r.PerformedByUser?.FullName ?? "-")</td>
-                        <td>@(r.Cost?.ToString("N0") ?? "-")</td>
-                        <td><small>@(r.Notes ?? "-")</small></td>
+                        <th>ไซต์งาน</th>
+                        <th>ประเภท</th>
+                        <th>วันที่นัด</th>
+                        <th>วันที่ทำ</th>
+                        <th>สถานะ</th>
+                        <th>ผู้ดำเนินการ</th>
+                        <th>ค่าใช้จ่าย</th>
+                        <th>หมายเหตุ</th>
                         @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
                         {
-                            <td class="text-end">
-                                <a asp-page="Edit" asp-route-id="@r.Id" class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-pencil"></i>
-                                </a>
-                            </td>
+                            <th class="text-end">การจัดการ</th>
                         }
                     </tr>
-                }
-                @if (!Model.Records.Any())
-                {
-                    <tr><td colspan="9" class="text-center text-muted py-4">ยังไม่มีรายการบำรุงรักษา</td></tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Records)
+                    {
+                        var statusLabel = r.Status switch
+                        {
+                            SolarApp.Models.Enums.MaintenanceStatus.Scheduled => "นัดหมายแล้ว",
+                            SolarApp.Models.Enums.MaintenanceStatus.InProgress => "กำลังดำเนินการ",
+                            SolarApp.Models.Enums.MaintenanceStatus.Completed => "เสร็จสิ้น",
+                            SolarApp.Models.Enums.MaintenanceStatus.Cancelled => "ยกเลิก",
+                            _ => r.Status.ToString()
+                        };
+                        var typeLabel = r.MaintenanceType switch
+                        {
+                            SolarApp.Models.Enums.MaintenanceType.PanelCleaning => "ล้างแผง",
+                            SolarApp.Models.Enums.MaintenanceType.Inspection => "ตรวจสอบ",
+                            SolarApp.Models.Enums.MaintenanceType.Repair => "ซ่อม",
+                            SolarApp.Models.Enums.MaintenanceType.Replacement => "เปลี่ยน",
+                            SolarApp.Models.Enums.MaintenanceType.GeneralMaintenance => "บำรุงทั่วไป",
+                            _ => r.MaintenanceType.ToString()
+                        };
+                        <tr>
+                            <td>@r.Installation.SiteName</td>
+                            <td>@typeLabel</td>
+                            <td>@r.ScheduledDate.ToString("dd/MM/yyyy")</td>
+                            <td>@(r.CompletedDate?.ToString("dd/MM/yyyy") ?? "-")</td>
+                            <td>
+                                <span class="badge @(r.Status == SolarApp.Models.Enums.MaintenanceStatus.Completed ? "bg-success" : r.Status == SolarApp.Models.Enums.MaintenanceStatus.Scheduled ? "bg-primary" : "bg-warning")">
+                                    @statusLabel
+                                </span>
+                            </td>
+                            <td>@(r.PerformedByUser?.FullName ?? "-")</td>
+                            <td>@(r.Cost?.ToString("N0") ?? "-")</td>
+                            <td><small>@(r.Notes ?? "-")</small></td>
+                            @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+                            {
+                                <td class="text-end">
+                                    <a asp-page="Edit" asp-route-id="@r.Id" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                </td>
+                            }
+                        </tr>
+                    }
+                    @if (!Model.Records.Any())
+                    {
+                        <tr><td colspan="9" class="text-center text-muted py-4">ยังไม่มีรายการบำรุงรักษา</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>

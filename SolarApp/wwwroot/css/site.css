@@ -375,3 +375,31 @@ html[data-theme="dark"] .theme-toggle .bi-sun-fill { display: inline-block; }
 html[data-theme="dark"] .theme-toggle .bi-moon-fill { display: none; }
 html:not([data-theme="dark"]) .theme-toggle .bi-sun-fill { display: none; }
 html:not([data-theme="dark"]) .theme-toggle .bi-moon-fill { display: inline-block; }
+
+/* ── Dashboard "ต้องดำเนินการ" tiles ──────────────────────────────
+   The tiles are anchors now, so they have to read as clickable: the
+   count alone gave no hint that it led anywhere.  Lift + tint on hover,
+   and keep a visible focus ring for keyboard users. */
+.action-tile {
+    color: inherit;
+    transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.action-tile:hover,
+.action-tile:focus-visible {
+    background-color: rgba(255, 193, 7, 0.12);
+    transform: translateY(-2px);
+}
+
+.action-tile:focus-visible {
+    outline: 2px solid var(--bs-warning, #ffc107);
+    outline-offset: -2px;
+}
+
+/* Tiles link to sections further down the page; without this the sticky
+   header covers the heading you just jumped to. */
+#offline-sites,
+#cleaning-due,
+#warranty-expiring {
+    scroll-margin-top: 80px;
+}

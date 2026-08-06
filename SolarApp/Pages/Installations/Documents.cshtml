@@ -50,36 +50,38 @@
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white"><h6 class="mb-0">Uploaded Documents</h6></div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr><th>Type</th><th>Title</th><th>Size</th><th>Uploaded By</th><th>Date</th><th>Notes</th><th></th></tr>
-            </thead>
-            <tbody>
-                @foreach (var doc in Model.DocumentList)
-                {
-                    <tr>
-                        <td><span class="badge bg-info">@doc.DocumentType</span></td>
-                        <td><strong>@doc.Title</strong></td>
-                        <td>@((doc.FileSizeBytes / 1024.0).ToString("N0")) KB</td>
-                        <td>@doc.UploadedByUser.FullName</td>
-                        <td>@doc.CreatedAt.ToString("dd/MM/yyyy")</td>
-                        <td><small>@(doc.Notes ?? "-")</small></td>
-                        <td>
-                            <form method="post" asp-page-handler="Delete" class="d-inline">
-                                <input type="hidden" name="documentId" value="@doc.Id" />
-                                <button type="submit" class="btn btn-sm btn-outline-danger"
-                                        onclick="return confirm('Delete this document?')">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
-                        </td>
-                    </tr>
-                }
-                @if (!Model.DocumentList.Any())
-                {
-                    <tr><td colspan="7" class="text-center text-muted py-3">No documents</td></tr>
-                }
-            </tbody>
-        </table>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr><th>Type</th><th>Title</th><th>Size</th><th>Uploaded By</th><th>Date</th><th>Notes</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var doc in Model.DocumentList)
+                    {
+                        <tr>
+                            <td><span class="badge bg-info">@doc.DocumentType</span></td>
+                            <td><strong>@doc.Title</strong></td>
+                            <td>@((doc.FileSizeBytes / 1024.0).ToString("N0")) KB</td>
+                            <td>@doc.UploadedByUser.FullName</td>
+                            <td>@doc.CreatedAt.ToString("dd/MM/yyyy")</td>
+                            <td><small>@(doc.Notes ?? "-")</small></td>
+                            <td>
+                                <form method="post" asp-page-handler="Delete" class="d-inline">
+                                    <input type="hidden" name="documentId" value="@doc.Id" />
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                                            onclick="return confirm('Delete this document?')">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    @if (!Model.DocumentList.Any())
+                    {
+                        <tr><td colspan="7" class="text-center text-muted py-3">No documents</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>

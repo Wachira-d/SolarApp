@@ -87,17 +87,19 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white"><h6 class="mb-0">Ticket Info</h6></div>
             <div class="card-body">
-                <table class="table table-sm table-borderless mb-0">
-                    <tr><td class="text-muted">Site</td><td>@Model.Ticket.Installation.SiteName</td></tr>
-                    <tr><td class="text-muted">Customer</td><td>@Model.Ticket.Installation.Customer.FullName</td></tr>
-                    <tr><td class="text-muted">Reported By</td><td>@Model.Ticket.ReportedByUser.FullName</td></tr>
-                    <tr><td class="text-muted">Created</td><td>@Model.Ticket.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
-                    <tr><td class="text-muted">Updated</td><td>@Model.Ticket.UpdatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
-                    @if (Model.Ticket.ResolvedAt.HasValue)
-                    {
-                        <tr><td class="text-muted">Resolved</td><td>@Model.Ticket.ResolvedAt?.ToString("dd/MM/yyyy HH:mm")</td></tr>
-                    }
-                </table>
+                <div class="table-responsive">
+                    <table class="table table-sm table-borderless mb-0">
+                        <tr><td class="text-muted">Site</td><td>@Model.Ticket.Installation.SiteName</td></tr>
+                        <tr><td class="text-muted">Customer</td><td>@Model.Ticket.Installation.Customer.FullName</td></tr>
+                        <tr><td class="text-muted">Reported By</td><td>@Model.Ticket.ReportedByUser.FullName</td></tr>
+                        <tr><td class="text-muted">Created</td><td>@Model.Ticket.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                        <tr><td class="text-muted">Updated</td><td>@Model.Ticket.UpdatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                        @if (Model.Ticket.ResolvedAt.HasValue)
+                        {
+                            <tr><td class="text-muted">Resolved</td><td>@Model.Ticket.ResolvedAt?.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                        }
+                    </table>
+                </div>
             </div>
         </div>
     </div>
