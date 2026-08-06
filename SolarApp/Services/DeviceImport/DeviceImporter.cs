@@ -54,8 +54,15 @@ public class DeviceImporter : IDeviceImporter
         if (installation == null)
             return new DeviceImportResult(false, "Installation not found", 0, 0, 0, null);
 
-        if (string.IsNullOrEmpty(installation.PlantId))
-            return new DeviceImportResult(false, "Plant/Station ID is not configured", 0, 0, 0, null);
+        // Deliberately NOT requiring PlantId here.  For several brands the
+        // device list is account-scoped and needs no plant id at all — and on
+        // FoxESS the Plant/Station ID *is* an inverter serial number, which
+        // you can only learn FROM the device list.  Blocking the import until
+        // it was set made discovering it impossible: the one tool that could
+        // tell you the value refused to run without it.
+        // Brands that genuinely need a plant id simply return no devices with
+        // their own explanatory message, which is reported as before.
+        var plantIdMissing = string.IsNullOrWhiteSpace(installation.PlantId);
 
         var adapter = _factory.GetAdapter(installation.InverterBrand);
         var credentials = new ApiCredentials
@@ -298,9 +305,30 @@ public class DeviceImporter : IDeviceImporter
         installation.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
-        return new DeviceImportResult(true,
-            $"Imported {created} new + updated {updated} existing + skipped {skipped} (no serial). " +
-            $"Total from API: {devices.Count} device(s).",
+
+        var summary = $"Imported {created} new + updated {updated} existing + skipped {skipped} (no serial). " +
+                      $"Total from API: {devices.Count} device(s).";
+
+        // If the site still has no Plant/Station ID, hand the operator the
+        // exact values to choose from instead of making them hunt for one.
+        if (plantIdMissing)
+        {
+            var serials = devices
+                .Select(d => string.IsNullOrWhiteSpace(d.SerialNumber) ? d.DeviceId : d.SerialNumber)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct()
+                .Take(10)
+                .ToList();
+            if (serials.Count > 0)
+            {
+                summary += installation.InverterBrand == InverterBrand.FoxESS
+                    ? " ⚠ ยังไม่ได้ตั้ง Plant/Station ID — FoxESS ใช้ Serial Number ของ inverter. " +
+                      $"เลือกจาก: {string.Join(", ", serials)}"
+                    : $" ⚠ Plant/Station ID is not set. Devices found: {string.Join(", ", serials)}";
+            }
+        }
+
+        return new DeviceImportResult(true, summary,
             devices.Count, created, updated, installationNote);
     }
 
