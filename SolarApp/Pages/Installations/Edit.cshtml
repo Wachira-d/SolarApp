@@ -212,6 +212,17 @@
                             </label>
                             <input asp-for="Input.PlantId" class="form-control"
                                    placeholder="Enter Plant/Station ID" />
+                            <div class="form-text">
+                                แสดงค่าจริง — <strong>ลบให้ว่างแล้ว Save = ล้างค่า</strong>
+                                @if (Model.Input.InverterBrand == SolarApp.Models.Enums.InverterBrand.FoxESS)
+                                {
+                                    <span class="d-block text-warning">
+                                        <strong>FoxESS:</strong> ต้องใส่ <strong>Serial Number (SN) ของ inverter</strong>
+                                        เช่น <code>60P1103061FM046</code> — ไม่ใช่ GUID จาก URL เว็บ portal.
+                                        ดู SN ได้จากตาราง "อุปกรณ์" หลังกดรีเฟรชอุปกรณ์
+                                    </span>
+                                }
+                            </div>
                         </div>
                         <div class="col-md-6 cred-api-row">
                             <label asp-for="Input.CloudApiKey" class="form-label">

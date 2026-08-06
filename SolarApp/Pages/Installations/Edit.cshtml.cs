@@ -405,10 +405,20 @@ public class EditModel : PageModel
         if (!string.IsNullOrWhiteSpace(Input.CloudApiSecret))
             installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret.Trim());
 
-        var usernameChanged = !string.IsNullOrWhiteSpace(Input.CloudUsername);
+        // Username is DISPLAYED in the form (MapToInput fills it), so
+        // "what you see is what you save" — clearing the box must actually
+        // clear the stored value.  The keep-if-blank rule below applies only
+        // to the secrets, which are never rendered back and therefore have
+        // no other way to be preserved.
+        var usernameChanged = Input.CloudUsername != null
+            && (_credProtector.Unprotect(installation.CloudUsername) ?? "") != Input.CloudUsername.Trim();
+        if (Input.CloudUsername != null)
+        {
+            var u = Input.CloudUsername.Trim();
+            installation.CloudUsername = string.IsNullOrEmpty(u) ? null : _credProtector.Protect(u);
+        }
+
         var passwordChanged = !string.IsNullOrWhiteSpace(Input.CloudPassword);
-        if (usernameChanged)
-            installation.CloudUsername = _credProtector.Protect(Input.CloudUsername!.Trim());
         if (passwordChanged)
             installation.CloudPassword = _credProtector.Protect(Input.CloudPassword!.Trim());
 
@@ -422,10 +432,16 @@ public class EditModel : PageModel
             SolarApp.Services.InverterApi.Adapters.HuaweiAdapter
                 .InvalidateTokenForCredentials(newUsername, newPassword);
         }
-        // PlantId is NOT a secret but same keep-existing logic to prevent accidental wipe
-        if (!string.IsNullOrWhiteSpace(Input.PlantId))
-            installation.PlantId = Input.PlantId.Trim();
-        // else keep the existing installation.PlantId
+        // PlantId is DISPLAYED, so blank means blank.  The old keep-if-blank
+        // rule made a wrong value impossible to remove: a FoxESS site had the
+        // portal's station GUID saved here (it needs the inverter Serial
+        // Number), and every attempt to clear it silently restored the GUID,
+        // so every sync kept failing with "PlantId mismatch".
+        if (Input.PlantId != null)
+        {
+            var pid = Input.PlantId.Trim();
+            installation.PlantId = string.IsNullOrEmpty(pid) ? null : pid;
+        }
 
         // CloudApiBaseUrl: explicit empty = clear; null = keep; non-empty = set
         if (Input.CloudApiBaseUrl != null)
