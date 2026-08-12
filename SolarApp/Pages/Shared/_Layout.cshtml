@@ -40,7 +40,13 @@
                     <i class="bi bi-sun-fill text-warning"></i> SolarApp
                 </span>
                 <span class="ms-auto text-white-50 small d-none d-sm-inline me-2">@ViewData["Title"]</span>
-                <button type="button" class="btn btn-sm btn-outline-light ms-auto ms-sm-0" onclick="toggleTheme()" title="สลับธีมสว่าง/มืด">
+                <a href="/Admin/Alerts" class="btn btn-sm btn-outline-light ms-auto ms-sm-0 position-relative me-1"
+                   title="แจ้งเตือนที่ยังไม่จัดการ">
+                    <i class="bi bi-bell"></i>
+                    <span id="alertBellCountMobile"
+                          class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>
+                </a>
+                <button type="button" class="btn btn-sm btn-outline-light" onclick="toggleTheme()" title="สลับธีมสว่าง/มืด">
                     <i class="bi bi-moon-fill"></i><i class="bi bi-sun-fill"></i>
                 </button>
             </div>
@@ -77,6 +83,37 @@
                     <div class="container-fluid">
                         <span class="navbar-text fw-bold">@ViewData["Title"]</span>
                         <div class="ms-auto d-flex align-items-center">
+                            @* Search used to be per-table and per-page, so finding
+                               everything about one customer meant three screens. *@
+                            <div class="position-relative me-2 d-none d-xl-block" style="width:260px">
+                                <input type="search" id="globalSearch" class="form-control form-control-sm"
+                                       placeholder="ค้นหาไซต์ / ลูกค้า / ใบสั่งงาน…"
+                                       autocomplete="off" aria-label="ค้นหาทั้งระบบ" />
+                                <kbd class="position-absolute top-50 end-0 translate-middle-y me-2 small text-muted d-none d-xxl-inline"
+                                     style="pointer-events:none">Ctrl K</kbd>
+                                <div id="globalSearchResults" class="dropdown-menu w-100 shadow"
+                                     style="max-height:60vh;overflow-y:auto"></div>
+                            </div>
+
+                            @* Alerts lived on their own page and in LINE only —
+                               someone working inside the app all day never saw a
+                               site go down unless they went looking. *@
+                            <div class="dropdown me-2">
+                                <button class="btn btn-sm btn-outline-secondary position-relative" type="button"
+                                        id="alertBell" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                                        title="แจ้งเตือนที่ยังไม่จัดการ">
+                                    <i class="bi bi-bell"></i>
+                                    <span id="alertBellCount"
+                                          class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>
+                                </button>
+                                <div class="dropdown-menu dropdown-menu-end shadow" style="width:340px;max-height:70vh;overflow-y:auto">
+                                    <h6 class="dropdown-header">แจ้งเตือนที่ยังไม่จัดการ</h6>
+                                    <div id="alertBellList" class="small px-2 text-muted">กำลังโหลด…</div>
+                                    <div class="dropdown-divider"></div>
+                                    <a class="dropdown-item text-center small" asp-page="/Admin/Alerts">ดูทั้งหมด</a>
+                                </div>
+                            </div>
+
                             <div class="dropdown me-2">
                                 <button class="btn btn-link btn-sm text-muted text-decoration-none dropdown-toggle"
                                         type="button" data-bs-toggle="dropdown">
@@ -141,6 +178,123 @@
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
     <script>
+        // ──────────────────────────────────────────────────────────────
+        // Global search + alert bell.  Both only exist for a signed-in
+        // operator, so bail out quietly on the login page.
+        // ──────────────────────────────────────────────────────────────
+        (function () {
+            const box = document.getElementById('globalSearch');
+            const panel = document.getElementById('globalSearchResults');
+
+            function escapeHtml(v) {
+                return String(v ?? '').replace(/[&<>"']/g, c => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[c]));
+            }
+
+            if (box && panel) {
+                let timer = null;
+                let lastQuery = '';
+
+                async function run() {
+                    const q = box.value.trim();
+                    if (q === lastQuery) return;
+                    lastQuery = q;
+
+                    if (q.length < 2) { panel.classList.remove('show'); return; }
+
+                    try {
+                        const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+                        if (!r.ok) return;
+                        const data = await r.json();
+
+                        // The query may have moved on while this was in flight.
+                        if (box.value.trim() !== q) return;
+
+                        if (!data.results.length) {
+                            panel.innerHTML = '<div class="dropdown-item-text text-muted small">ไม่พบผลลัพธ์</div>';
+                        } else {
+                            panel.innerHTML = data.results.map(x =>
+                                '<a class="dropdown-item d-flex align-items-start gap-2 py-2" href="' + escapeHtml(x.url) + '">' +
+                                '<i class="bi bi-' + escapeHtml(x.icon) + ' mt-1 text-muted"></i>' +
+                                '<span class="flex-grow-1 min-width-0">' +
+                                '<span class="d-block text-truncate">' + escapeHtml(x.title) + '</span>' +
+                                '<small class="text-muted d-block text-truncate">' + escapeHtml(x.subtitle || '') + '</small>' +
+                                '</span>' +
+                                '<span class="badge bg-secondary align-self-center">' + escapeHtml(x.kind) + '</span>' +
+                                '</a>').join('');
+                        }
+                        panel.classList.add('show');
+                    } catch (e) { /* search is a convenience; never break the page */ }
+                }
+
+                box.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 250); });
+                box.addEventListener('focus', () => { if (panel.innerHTML) panel.classList.add('show'); });
+                document.addEventListener('click', e => {
+                    if (!panel.contains(e.target) && e.target !== box) panel.classList.remove('show');
+                });
+                box.addEventListener('keydown', e => {
+                    if (e.key === 'Escape') { panel.classList.remove('show'); box.blur(); }
+                });
+
+                document.addEventListener('keydown', e => {
+                    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                        e.preventDefault();
+                        box.focus();
+                        box.select();
+                    }
+                });
+            }
+
+            const badge = document.getElementById('alertBellCount');
+            const badgeMobile = document.getElementById('alertBellCountMobile');
+            const list = document.getElementById('alertBellList');
+            if (!badge && !badgeMobile) return;
+
+            const severityClass = s => ({
+                Critical: 'bg-danger', High: 'bg-warning text-dark', Medium: 'bg-info'
+            }[s] || 'bg-secondary');
+
+            function setBadge(el, n) {
+                if (!el) return;
+                el.textContent = n > 99 ? '99+' : n;
+                el.classList.toggle('d-none', n === 0);
+            }
+
+            async function loadAlerts() {
+                try {
+                    const r = await fetch('/api/my-alerts');
+                    if (!r.ok) return;
+                    const data = await r.json();
+
+                    setBadge(badge, data.count);
+                    setBadge(badgeMobile, data.count);
+
+                    if (!list) return;
+                    if (!data.items.length) {
+                        list.innerHTML = '<div class="text-success py-2 px-1">' +
+                            '<i class="bi bi-check-circle-fill"></i> ไม่มีแจ้งเตือนค้าง</div>';
+                        return;
+                    }
+                    list.innerHTML = data.items.map(a =>
+                        '<a class="d-flex align-items-start gap-2 py-2 px-1 border-bottom text-decoration-none text-body" ' +
+                        'href="/Installations/Detail/' + encodeURIComponent(a.installationId) + '">' +
+                        '<span class="badge ' + severityClass(a.severity) + '" style="min-width:62px">' +
+                        escapeHtml(a.severity) + '</span>' +
+                        '<span class="flex-grow-1 min-width-0">' +
+                        '<span class="d-block">' + escapeHtml(a.title) + '</span>' +
+                        '<small class="text-muted d-block text-truncate">' + escapeHtml(a.site) + ' · ' +
+                        new Date(a.occurredAt).toLocaleString('th-TH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) +
+                        '</small></span></a>').join('');
+                } catch (e) { /* the bell is ambient; a failed poll is not worth surfacing */ }
+            }
+
+            loadAlerts();
+            // Slow poll on purpose: SignalR already pushes live production data,
+            // and an alert that arrives a minute late costs nothing.
+            setInterval(loadAlerts, 60000);
+        })();
+
         // Auto-close offcanvas sidebar on link click (mobile UX)
         document.querySelectorAll('#mobileSidebar .nav-link').forEach(link => {
             link.addEventListener('click', () => {

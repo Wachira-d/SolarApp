@@ -79,6 +79,9 @@
         </li>
         @if (User.IsInRole("Admin"))
         {
+            @* Sixteen flat links pushed everything below the fold on a phone,
+               and the four an admin opens weekly sat among twelve they open
+               once a year. Daily work stays visible; setup collapses. *@
             <li class="nav-item mt-3">
                 <small class="text-muted px-3 text-uppercase" style="letter-spacing: 0.1em;">ผู้ดูแลระบบ</small>
             </li>
@@ -102,50 +105,84 @@
                     <i class="bi bi-shield-exclamation me-2"></i>กฎแจ้งเตือน
                 </a>
             </li>
+            @{
+                // Open the group when the operator is already inside it, so a
+                // page reload doesn't hide the section they're working in.
+                var inSetup = currentPage.StartsWith("/admin/workordertemplates")
+                    || currentPage.StartsWith("/admin/schedule")
+                    || currentPage.StartsWith("/admin/linesettings")
+                    || currentPage.StartsWith("/admin/notificationroutes")
+                    || currentPage.StartsWith("/admin/externalauth");
+                var inDiag = currentPage.StartsWith("/admin/connectionhealth")
+                    || currentPage.StartsWith("/admin/startuplogs")
+                    || currentPage.StartsWith("/admin/auditlogs");
+            }
+
             <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/workordertemplates")" asp-page="/Admin/WorkOrderTemplates">
-                    <i class="bi bi-list-check me-2"></i>ค่ามาตรฐานใบสั่งงาน
+                <a class="nav-link text-white d-flex align-items-center @(inSetup ? "" : "collapsed")"
+                   data-bs-toggle="collapse" href="#navSetup" role="button"
+                   aria-expanded="@(inSetup ? "true" : "false")" aria-controls="navSetup">
+                    <i class="bi bi-sliders me-2"></i>ตั้งค่าระบบ
+                    <i class="bi bi-chevron-down ms-auto small"></i>
                 </a>
+                <ul class="nav flex-column collapse @(inSetup ? "show" : "") ps-3" id="navSetup">
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/workordertemplates")" asp-page="/Admin/WorkOrderTemplates">
+                            <i class="bi bi-list-check me-2"></i>ค่ามาตรฐานใบสั่งงาน
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/schedule")" asp-page="/Admin/Schedule">
+                            <i class="bi bi-clock-history me-2"></i>ตารางงานเบื้องหลัง
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/linesettings")" asp-page="/Admin/LineSettings">
+                            <i class="bi bi-chat-dots me-2"></i>ตั้งค่า LINE
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/notificationroutes")" asp-page="/Admin/NotificationRoutes">
+                            <i class="bi bi-bell me-2"></i>เส้นทางแจ้งเตือน LINE
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/externalauth")" asp-page="/Admin/ExternalAuth">
+                            <i class="bi bi-shield-lock me-2"></i>การเข้าสู่ระบบภายนอก
+                        </a>
+                    </li>
+                </ul>
             </li>
+
             <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/schedule")" asp-page="/Admin/Schedule">
-                    <i class="bi bi-clock-history me-2"></i>ตารางงานเบื้องหลัง
+                <a class="nav-link text-white d-flex align-items-center @(inDiag ? "" : "collapsed")"
+                   data-bs-toggle="collapse" href="#navDiag" role="button"
+                   aria-expanded="@(inDiag ? "true" : "false")" aria-controls="navDiag">
+                    <i class="bi bi-activity me-2"></i>ตรวจสอบระบบ
+                    <i class="bi bi-chevron-down ms-auto small"></i>
                 </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/linesettings")" asp-page="/Admin/LineSettings">
-                    <i class="bi bi-chat-dots me-2"></i>ตั้งค่า LINE
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/notificationroutes")" asp-page="/Admin/NotificationRoutes">
-                    <i class="bi bi-bell me-2"></i>เส้นทางแจ้งเตือน LINE
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/externalauth")" asp-page="/Admin/ExternalAuth">
-                    <i class="bi bi-shield-lock me-2"></i>การเข้าสู่ระบบภายนอก
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/connectionhealth")" asp-page="/Admin/ConnectionHealth">
-                    <i class="bi bi-activity me-2"></i>สุขภาพการเชื่อมต่อ API
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/startuplogs")" asp-page="/Admin/StartupLogs">
-                    <i class="bi bi-bug me-2"></i>บันทึกการเริ่มระบบ
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link text-white @ActiveClass("/admin/auditlogs")" asp-page="/Admin/AuditLogs">
-                    <i class="bi bi-journal-text me-2"></i>บันทึกการใช้งาน
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link text-white" href="/hangfire" target="_blank">
-                    <i class="bi bi-gear me-2"></i>Hangfire (งานเบื้องหลัง)
-                </a>
+                <ul class="nav flex-column collapse @(inDiag ? "show" : "") ps-3" id="navDiag">
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/connectionhealth")" asp-page="/Admin/ConnectionHealth">
+                            <i class="bi bi-hdd-network me-2"></i>สุขภาพการเชื่อมต่อ API
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/startuplogs")" asp-page="/Admin/StartupLogs">
+                            <i class="bi bi-bug me-2"></i>บันทึกการเริ่มระบบ
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/auditlogs")" asp-page="/Admin/AuditLogs">
+                            <i class="bi bi-journal-text me-2"></i>บันทึกการใช้งาน
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white" href="/hangfire" target="_blank">
+                            <i class="bi bi-gear me-2"></i>Hangfire (งานเบื้องหลัง)
+                        </a>
+                    </li>
+                </ul>
             </li>
         }
     </ul>

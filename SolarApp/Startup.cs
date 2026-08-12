@@ -1318,6 +1318,198 @@ BEGIN {sql}; END");
         // Minimal liveness probe — no DB, no auth. For load balancers.
         app.MapGet("/ping", () => Results.Text("pong")).AllowAnonymous();
 
+        // ─── Global search (Ctrl+K) ───
+        // Search was per-table and per-page: finding everything about one
+        // customer meant visiting three screens and typing their name into
+        // each. This answers "where does this name appear" in one query set,
+        // scoped to what the caller is allowed to see.
+        app.MapGet("/api/search", async (
+            string? q,
+            ApplicationDbContext db,
+            UserManager<Models.ApplicationUser> userManager,
+            System.Security.Claims.ClaimsPrincipal principal) =>
+        {
+            q = q?.Trim();
+            if (string.IsNullOrEmpty(q) || q.Length < 2)
+                return Results.Json(new { results = Array.Empty<object>() });
+
+            var user = await userManager.GetUserAsync(principal);
+            if (user == null) return Results.Unauthorized();
+
+            var isAdmin = await userManager.IsInRoleAsync(user, "Admin");
+            var isPartner = await userManager.IsInRoleAsync(user, "Partner");
+
+            // Scope once, here. Every branch below reads from these, so a new
+            // result type can't accidentally skip the permission check.
+            var sites = db.Installations.AsNoTracking();
+            if (!isAdmin)
+            {
+                if (isPartner && user.PartnerId.HasValue)
+                    sites = sites.Where(i => i.PartnerId == user.PartnerId);
+                else
+                    sites = sites.Where(i => i.Customer.UserId == user.Id);
+            }
+
+            var results = new List<object>();
+
+            results.AddRange(await sites
+                .Where(i => i.SiteName.Contains(q) || i.SiteCode.Contains(q)
+                            || i.Address.Contains(q) || i.Customer.FirstName.Contains(q)
+                            || i.Customer.LastName.Contains(q))
+                .OrderBy(i => i.SiteName)
+                .Take(6)
+                .Select(i => new
+                {
+                    kind = "ไซต์งาน",
+                    icon = "house-gear",
+                    title = i.SiteName,
+                    subtitle = i.SiteCode + " · " + i.Customer.FirstName + " " + i.Customer.LastName,
+                    url = "/Installations/Detail/" + i.Id
+                })
+                .ToListAsync());
+
+            if (isAdmin || isPartner)
+            {
+                var customerIds = await sites.Select(i => i.CustomerId).Distinct().ToListAsync();
+                var customers = db.Customers.AsNoTracking();
+                if (!isAdmin) customers = customers.Where(c => customerIds.Contains(c.Id));
+
+                results.AddRange(await customers
+                    .Where(c => c.FirstName.Contains(q) || c.LastName.Contains(q)
+                                || c.Phone.Contains(q) || (c.Email != null && c.Email.Contains(q)))
+                    .OrderBy(c => c.FirstName)
+                    .Take(5)
+                    .Select(c => new
+                    {
+                        kind = "ลูกค้า",
+                        icon = "person",
+                        title = c.FirstName + " " + c.LastName,
+                        subtitle = c.Phone,
+                        url = "/Customers/Detail/" + c.Id
+                    })
+                    .ToListAsync());
+            }
+
+            if (isAdmin)
+            {
+                results.AddRange(await db.Partners.AsNoTracking()
+                    .Where(p => p.CompanyName.Contains(q) || p.ContactPhone.Contains(q)
+                                || p.ContactEmail.Contains(q))
+                    .OrderBy(p => p.CompanyName)
+                    .Take(4)
+                    .Select(p => new
+                    {
+                        kind = "พาร์ทเนอร์",
+                        icon = "building",
+                        title = p.CompanyName,
+                        subtitle = p.ContactPhone,
+                        url = "/Partners/Detail/" + p.Id
+                    })
+                    .ToListAsync());
+            }
+
+            var siteIds = await sites.Select(i => i.Id).ToListAsync();
+
+            var workOrders = db.WorkOrders.AsNoTracking();
+            workOrders = isAdmin
+                // Standalone jobs have no installation to scope by, so only an
+                // admin sees them; scoping them to a partner would need an
+                // owner field the model doesn't carry.
+                ? workOrders.Where(w => w.InstallationId == null
+                                        || siteIds.Contains(w.InstallationId.Value))
+                : workOrders.Where(w => w.InstallationId != null
+                                        && siteIds.Contains(w.InstallationId.Value));
+
+            results.AddRange(await workOrders
+                .Where(w => w.WorkOrderNumber.Contains(q) || w.Title.Contains(q))
+                .OrderByDescending(w => w.ScheduledDate)
+                .Take(5)
+                .Select(w => new
+                {
+                    kind = "ใบสั่งงาน",
+                    icon = "clipboard2-check",
+                    title = w.Title,
+                    subtitle = w.WorkOrderNumber,
+                    url = "/WorkOrders/Detail/" + w.Id
+                })
+                .ToListAsync());
+
+            results.AddRange(await db.ServiceTickets.AsNoTracking()
+                .Where(t => siteIds.Contains(t.InstallationId))
+                .Where(t => t.TicketNumber.Contains(q) || t.Subject.Contains(q))
+                .OrderByDescending(t => t.CreatedAt)
+                .Take(5)
+                .Select(t => new
+                {
+                    kind = "แจ้งซ่อม",
+                    icon = "ticket-detailed",
+                    title = t.Subject,
+                    subtitle = t.TicketNumber,
+                    url = "/ServiceTickets/Edit/" + t.Id
+                })
+                .ToListAsync());
+
+            return Results.Json(new { results });
+        }).RequireAuthorization();
+
+        // ─── Unread alerts for the header bell ───
+        // Alerts lived on their own page and in LINE. Someone working inside
+        // the app all day had no idea a site had gone down unless they went
+        // looking, or happened to have LINE open.
+        app.MapGet("/api/my-alerts", async (
+            ApplicationDbContext db,
+            UserManager<Models.ApplicationUser> userManager,
+            System.Security.Claims.ClaimsPrincipal principal) =>
+        {
+            var user = await userManager.GetUserAsync(principal);
+            if (user == null) return Results.Unauthorized();
+
+            var isAdmin = await userManager.IsInRoleAsync(user, "Admin");
+            var isPartner = await userManager.IsInRoleAsync(user, "Partner");
+
+            var alerts = db.SystemAlerts.AsNoTracking().Where(a => a.ResolvedAt == null);
+            if (!isAdmin)
+            {
+                if (isPartner && user.PartnerId.HasValue)
+                    alerts = alerts.Where(a => a.Installation.PartnerId == user.PartnerId);
+                else
+                    alerts = alerts.Where(a => a.Installation.Customer.UserId == user.Id);
+            }
+
+            var count = await alerts.CountAsync();
+            var recent = await alerts
+                .OrderBy(a => a.Severity)          // Critical = 1, so worst first
+                .ThenByDescending(a => a.OccurredAt)
+                .Take(8)
+                .Select(a => new
+                {
+                    a.Id,
+                    a.Title,
+                    a.Message,
+                    severity = a.Severity.ToString(),
+                    site = a.Installation.SiteName,
+                    installationId = a.InstallationId,
+                    a.OccurredAt,
+                    acknowledged = a.AcknowledgedAt != null
+                })
+                .ToListAsync();
+
+            // TitleFor runs here rather than in SQL — it can't be translated,
+            // and it's what keeps vendor alarms with no name readable.
+            var items = recent.Select(a => new
+            {
+                a.Id,
+                title = Models.SystemAlert.TitleFor(a.Title, a.Message),
+                a.severity,
+                a.site,
+                a.installationId,
+                a.OccurredAt,
+                a.acknowledged
+            });
+
+            return Results.Json(new { count, items });
+        }).RequireAuthorization();
+
         // Customer lookup by ID (used by Installation Edit page to populate inline edit fields).
         // Access control: Admin sees any; Partner sees only customers they have an installation
         // with; everyone else (incl. Customer role on someone else's data) is denied.
