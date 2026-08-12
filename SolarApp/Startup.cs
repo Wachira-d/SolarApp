@@ -274,6 +274,7 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
         builder.Services.AddScoped<BackgroundJobs.DataRetentionJob>();
         builder.Services.AddScoped<BackgroundJobs.MonthlyReportJob>();
+        builder.Services.AddScoped<BackgroundJobs.ContractExpiryJob>();
         builder.Services.AddScoped<Services.PredictiveDiagnostics.PredictiveDiagnosticsEngine>();
         builder.Services.AddScoped<Services.PredictiveDiagnostics.AlertDiagnosticsEnricher>();
 
@@ -382,6 +383,12 @@ public class Startup
         var monthlyReportCron = GetSetting(ctx, "Schedule.MonthlyReport", "0 2 1 * *");
         RecurringJob.AddOrUpdate<BackgroundJobs.MonthlyReportJob>(
             "monthly-customer-report", job => job.ExecuteAsync(), monthlyReportCron);
+
+        // Contract expiry sweep — daily at 01:00 UTC = 08:00 Thailand, so a
+        // lapse is on the operator's screen at the start of the working day.
+        var contractCron = GetSetting(ctx, "Schedule.ContractExpiry", "0 1 * * *");
+        RecurringJob.AddOrUpdate<BackgroundJobs.ContractExpiryJob>(
+            "contract-expiry", job => job.ExecuteAsync(), contractCron);
     }
 
     /// <summary>
@@ -945,6 +952,53 @@ BEGIN
         [UpdatedByUserId] nvarchar(450) NULL
     );
     CREATE UNIQUE INDEX IX_WorkOrderTypeTemplates_Type ON [WorkOrderTypeTemplates]([Type]);
+END"));
+
+        stages.Add(("CreateTable:ServiceContracts", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'ServiceContracts')
+BEGIN
+    CREATE TABLE [ServiceContracts] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [ContractNumber] nvarchar(50) NULL,
+        [StartDate] datetime2 NOT NULL,
+        [EndDate] datetime2 NULL,
+        [BillingCycle] int NOT NULL DEFAULT 3,
+        [FeePerCycle] decimal(18,2) NOT NULL DEFAULT 0,
+        [Status] int NOT NULL DEFAULT 1,
+        [AutoRenew] bit NOT NULL DEFAULT 0,
+        [Notes] nvarchar(max) NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_ServiceContracts_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id])
+    );
+    CREATE INDEX IX_ServiceContracts_InstallationId ON [ServiceContracts]([InstallationId]);
+    CREATE INDEX IX_ServiceContracts_Status_EndDate ON [ServiceContracts]([Status], [EndDate]);
+END"));
+
+        stages.Add(("CreateTable:ContractInvoices", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'ContractInvoices')
+BEGIN
+    CREATE TABLE [ContractInvoices] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [ServiceContractId] int NOT NULL,
+        [InvoiceNumber] nvarchar(50) NULL,
+        [PeriodStart] datetime2 NOT NULL,
+        [PeriodEnd] datetime2 NOT NULL,
+        [IssuedDate] datetime2 NOT NULL,
+        [DueDate] datetime2 NOT NULL,
+        [Amount] decimal(18,2) NOT NULL DEFAULT 0,
+        [PaidDate] datetime2 NULL,
+        [PaidAmount] decimal(18,2) NULL,
+        [Notes] nvarchar(max) NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_ContractInvoices_ServiceContracts FOREIGN KEY ([ServiceContractId])
+            REFERENCES [ServiceContracts]([Id]) ON DELETE CASCADE
+    );
+    CREATE INDEX IX_ContractInvoices_ServiceContractId ON [ContractInvoices]([ServiceContractId]);
+    -- ""who owes us money"" is always PaidDate IS NULL ordered by DueDate
+    CREATE INDEX IX_ContractInvoices_Paid_Due ON [ContractInvoices]([PaidDate], [DueDate]);
 END"));
 
         stages.Add(("CreateTable:NotificationRoutes", @"

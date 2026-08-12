@@ -30,6 +30,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<WorkOrderPhoto> WorkOrderPhotos => Set<WorkOrderPhoto>();
     public DbSet<WorkOrderTypeTemplate> WorkOrderTypeTemplates => Set<WorkOrderTypeTemplate>();
     public DbSet<NotificationRoute> NotificationRoutes => Set<NotificationRoute>();
+    public DbSet<ServiceContract> ServiceContracts => Set<ServiceContract>();
+    public DbSet<ContractInvoice> ContractInvoices => Set<ContractInvoice>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -50,6 +52,37 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         builder.Entity<Customer>().HasQueryFilter(c => c.DeletedAt == null);
         builder.Entity<Partner>().HasQueryFilter(p => p.DeletedAt == null);
         builder.Entity<Installation>().HasQueryFilter(i => i.DeletedAt == null);
+
+        // ── Service contracts & invoices ──
+        builder.Entity<ServiceContract>(entity =>
+        {
+            entity.HasOne(c => c.Installation)
+                .WithMany()
+                .HasForeignKey(c => c.InstallationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.Property(c => c.FeePerCycle).HasPrecision(18, 2);
+
+            entity.HasIndex(c => c.InstallationId);
+            // The two questions asked of this table are "what expires soon"
+            // and "what is still live", and both scan on these.
+            entity.HasIndex(c => new { c.Status, c.EndDate });
+        });
+
+        builder.Entity<ContractInvoice>(entity =>
+        {
+            entity.HasOne(i => i.ServiceContract)
+                .WithMany(c => c.Invoices)
+                .HasForeignKey(i => i.ServiceContractId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(i => i.Amount).HasPrecision(18, 2);
+            entity.Property(i => i.PaidAmount).HasPrecision(18, 2);
+
+            // "Who owes us money" is DueDate + PaidDate IS NULL, every time.
+            entity.HasIndex(i => new { i.PaidDate, i.DueDate });
+            entity.HasIndex(i => i.ServiceContractId);
+        });
 
         // ══════════════════════════════════════════════════════════
         // SQL Server does NOT allow multiple cascade paths.
