@@ -173,6 +173,34 @@ public class DashboardService : IDashboardService
         var avgRate = installations.Any() ? installations.Average(i => i.ElectricityRatePerKwh) : 4.0m;
         var todayGenTotal = todayData.Sum(e => e.EnergyGenerationKwh);
 
+        // ── 14-day production trend ──
+        // "1,240 kWh today" answers nothing on its own — the operator has to
+        // know whether that's a normal Tuesday or half of one. One query,
+        // grouped in SQL, so the chart costs a single round-trip.
+        var trendFrom = today.AddDays(-13);
+        var trendRows = await _context.EnergyData
+            .Where(e => installationIds.Contains(e.InstallationId)
+                && e.Granularity == DataGranularity.Daily
+                && e.Timestamp >= trendFrom && e.Timestamp <= today)
+            .GroupBy(e => e.Timestamp.Date)
+            .Select(g => new { Day = g.Key, Kwh = g.Sum(x => (decimal?)x.EnergyGenerationKwh) ?? 0 })
+            .ToListAsync();
+
+        var trendByDay = trendRows.ToDictionary(r => r.Day, r => r.Kwh);
+
+        // Fill the gaps: a day with no rows is a real zero (nothing synced,
+        // or nothing produced) and skipping it would silently compress the
+        // x-axis and make an outage look like it never happened.
+        var trend = new List<ChartDataPoint>();
+        for (var day = trendFrom; day <= today; day = day.AddDays(1))
+        {
+            trend.Add(new ChartDataPoint
+            {
+                Label = day.ToString("dd/MM"),
+                Value = Math.Round(trendByDay.TryGetValue(day, out var v) ? v : 0, 1)
+            });
+        }
+
         return new DashboardViewModel
         {
             TotalInstallations = installations.Count,
@@ -213,7 +241,8 @@ public class DashboardService : IDashboardService
             SelectedBrand = filterBrand,
             TotalCapacityKw = installations.Sum(i => i.SystemCapacityKw),
             TodayGenerationKwh = todayGenTotal,
-            MonthlySavingsThb = todayGenTotal * avgRate * 30
+            MonthlySavingsThb = todayGenTotal * avgRate * 30,
+            ProductionTrend = trend
         };
     }
 

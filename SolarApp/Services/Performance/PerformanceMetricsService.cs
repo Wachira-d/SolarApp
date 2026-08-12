@@ -48,6 +48,14 @@ public class FleetPerformance
     public int UnderperformingCount { get; set; }       // PR < 0.75
     public List<InstallationPerformance> TopPerformers { get; set; } = new();
     public List<InstallationPerformance> BottomPerformers { get; set; } = new();
+
+    /// <summary>
+    /// Every site, worst first. Top-5/bottom-5 answered "who are the extremes"
+    /// but not "how does this site compare to the rest", which is the question
+    /// asked when deciding where to send a truck — and a site sitting sixth
+    /// from bottom was invisible.
+    /// </summary>
+    public List<InstallationPerformance> AllSites { get; set; } = new();
 }
 
 public class PerformanceMetricsService : IPerformanceMetricsService
@@ -282,7 +290,15 @@ public class PerformanceMetricsService : IPerformanceMetricsService
                 .OrderByDescending(p => p.PerformanceRatio).Take(5).ToList(),
             BottomPerformers = perInstallation
                 .Where(p => p.TotalActualKwh > 0)
-                .OrderBy(p => p.PerformanceRatio).Take(5).ToList()
+                .OrderBy(p => p.PerformanceRatio).Take(5).ToList(),
+
+            // Sites producing nothing at all sort last rather than first: a
+            // zero is usually a site we don't poll, and letting those head the
+            // "worst" list would bury the ones actually underperforming.
+            AllSites = perInstallation
+                .OrderByDescending(p => p.TotalActualKwh > 0)
+                .ThenBy(p => p.PerformanceRatio)
+                .ToList()
         };
 
         fleet.FleetPerformanceRatio = fleet.TotalExpectedKwh > 0

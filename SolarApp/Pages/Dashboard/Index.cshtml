@@ -124,6 +124,36 @@
     </div>
 </div>
 
+<!-- ═══ PRODUCTION TREND ═══ -->
+@* A monitoring dashboard with no chart made the operator read a fortnight of
+   production as a single number. The shape is the point: a site that quietly
+   halved three days ago shows up here long before it trips an alert rule. *@
+@if (d.ProductionTrend.Any(p => p.Value > 0))
+{
+    @{
+        var trendValues = d.ProductionTrend.Select(p => p.Value).ToList();
+        var trendAvg = trendValues.Count > 0 ? trendValues.Average() : 0m;
+        var trendToday = trendValues.LastOrDefault();
+        var vsAvg = trendAvg > 0 ? (trendToday - trendAvg) / trendAvg * 100m : 0m;
+    }
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <h6 class="mb-0"><i class="bi bi-graph-up text-warning"></i> ผลผลิตรวม 14 วันล่าสุด</h6>
+            <small class="text-muted">
+                เฉลี่ย @trendAvg.ToString("N1") kWh/วัน ·
+                วันนี้
+                <span class="@(vsAvg >= 0 ? "text-success" : "text-danger") fw-bold">
+                    @(vsAvg >= 0 ? "+" : "")@vsAvg.ToString("N0")%
+                </span>
+                เทียบค่าเฉลี่ย
+            </small>
+        </div>
+        <div class="card-body">
+            <div style="height:220px"><canvas id="productionTrendChart"></canvas></div>
+        </div>
+    </div>
+}
+
 <!-- ═══ ACTION REQUIRED ═══ -->
 @{
     var hasAction = d.CriticalAlertCount + d.HighAlertCount + d.OfflineCount + d.CleaningDueCount
@@ -446,6 +476,74 @@ else
 @section Scripts {
     <script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
     <script>
+        // ─── 14-day production trend ───
+        (function () {
+            const el = document.getElementById('productionTrendChart');
+            if (!el || typeof Chart === 'undefined') return;
+
+            const labels = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(d.ProductionTrend.Select(p => p.Label)));
+            const values = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(d.ProductionTrend.Select(p => p.Value)));
+            const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+
+            // Read the theme's text colour rather than hard-coding one, so the
+            // axes don't vanish into the background in dark mode.
+            const ink = getComputedStyle(document.body).color;
+
+            new Chart(el, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'ผลผลิต (kWh)',
+                            data: values,
+                            backgroundColor: 'rgba(255, 193, 7, 0.65)',
+                            borderColor: 'rgba(255, 193, 7, 1)',
+                            borderWidth: 1,
+                            borderRadius: 4,
+                            order: 2
+                        },
+                        {
+                            // The average line is what turns the bars into a
+                            // judgement — "low" only means something against it.
+                            label: 'ค่าเฉลี่ย 14 วัน',
+                            data: labels.map(() => avg),
+                            type: 'line',
+                            borderColor: 'rgba(13, 110, 253, 0.9)',
+                            borderDash: [6, 4],
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: false,
+                            order: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, labels: { color: ink, boxWidth: 12 } },
+                        tooltip: {
+                            callbacks: {
+                                label: c => c.dataset.label + ': ' + c.parsed.y.toLocaleString('th-TH', {
+                                    minimumFractionDigits: 1, maximumFractionDigits: 1
+                                }) + ' kWh'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { color: ink }, grid: { display: false } },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: ink },
+                            grid: { color: 'rgba(128,128,128,0.15)' }
+                        }
+                    }
+                }
+            });
+        })();
+
         // Search filter
         document.getElementById('searchInput')?.addEventListener('input', function () {
             const q = this.value.toLowerCase();

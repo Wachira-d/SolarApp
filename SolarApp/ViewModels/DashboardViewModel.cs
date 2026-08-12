@@ -50,6 +50,13 @@ public class DashboardViewModel
     public decimal TotalCapacityKw { get; set; }
     public decimal TodayGenerationKwh { get; set; }
     public decimal MonthlySavingsThb { get; set; }
+
+    /// <summary>
+    /// Total kWh per day for the last 14 days, oldest first, with empty days
+    /// filled as zero. "1,240 kWh today" means nothing without the shape of the
+    /// fortnight behind it.
+    /// </summary>
+    public List<ChartDataPoint> ProductionTrend { get; set; } = new();
 }
 
 public class InstallationStatusItem

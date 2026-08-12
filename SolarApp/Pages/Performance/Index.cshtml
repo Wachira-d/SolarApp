@@ -148,7 +148,152 @@
         <i class="bi bi-exclamation-circle fs-4"></i>
         <div>
             มี <strong>@f.UnderperformingCount ไซต์</strong> ที่ผลิตได้ต่ำกว่าเกณฑ์ (PR &lt; 75%).
-            ตรวจสอบในรายการ "ต้องตรวจสอบ" ด้านบน
+            ตรวจสอบในตารางเปรียบเทียบด้านล่าง
         </div>
     </div>
+}
+
+@* Top-5 and bottom-5 answer "who are the extremes". The question actually
+   asked when deciding where to send a truck is "how does this site compare to
+   the rest" — and a site sitting sixth from bottom was invisible. Specific
+   yield is the column that makes sites of different sizes comparable at all. *@
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <h6 class="mb-0"><i class="bi bi-bar-chart-steps"></i> เปรียบเทียบทุกไซต์ (@f.AllSites.Count)</h6>
+        <div class="d-flex gap-2 align-items-center">
+            <input type="text" id="perfSearch" class="form-control form-control-sm"
+                   style="width:180px" placeholder="ค้นหาไซต์ / ลูกค้า…" />
+            <a class="btn btn-sm btn-outline-secondary"
+               asp-page="Index" asp-route-From="@Model.From.ToString("yyyy-MM-dd")"
+               asp-route-To="@Model.To.ToString("yyyy-MM-dd")" asp-route-export="csv">
+                <i class="bi bi-download"></i> CSV
+            </a>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle" id="perfTable">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:3rem">#</th>
+                        <th data-sort="text">ไซต์งาน</th>
+                        <th class="text-end" data-sort="num">กำลังติดตั้ง</th>
+                        <th class="text-end" data-sort="num">ผลิตจริง</th>
+                        <th class="text-end" data-sort="num" title="kWh ต่อ kW ที่ติดตั้ง — เทียบไซต์ต่างขนาดกันได้">
+                            ผลผลิตจำเพาะ
+                        </th>
+                        <th class="text-end" data-sort="num" title="ผลิตจริง ÷ ที่ควรผลิตได้">PR</th>
+                        <th class="text-end" data-sort="num">Uptime</th>
+                        <th class="text-center" data-sort="num">แจ้งเตือน</th>
+                        <th class="text-center">เกรด</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{ var rank = 0; }
+                    @foreach (var p in f.AllSites)
+                    {
+                        rank++;
+                        var prPct = p.PerformanceRatio * 100;
+                        var prClass = p.TotalActualKwh <= 0 ? "text-muted"
+                            : prPct >= 85 ? "text-success"
+                            : prPct >= 75 ? "text-body"
+                            : prPct >= 60 ? "text-warning" : "text-danger fw-bold";
+                        <tr class="perf-row"
+                            data-search="@p.Installation.SiteName @p.Installation.SiteCode @p.Installation.Customer?.FullName">
+                            <td class="text-muted small">@rank</td>
+                            <td>
+                                <a asp-page="Detail" asp-route-id="@p.Installation.Id"
+                                   asp-route-From="@Model.From.ToString("yyyy-MM-dd")"
+                                   asp-route-To="@Model.To.ToString("yyyy-MM-dd")"
+                                   class="text-decoration-none">
+                                    <strong>@p.Installation.SiteName</strong>
+                                </a>
+                                <br /><small class="text-muted">@p.Installation.Customer?.FullName</small>
+                            </td>
+                            <td class="text-end" data-v="@p.Installation.SystemCapacityKw">
+                                @p.Installation.SystemCapacityKw.ToString("N1") kWp
+                            </td>
+                            <td class="text-end" data-v="@p.TotalActualKwh">@p.TotalActualKwh.ToString("N0") kWh</td>
+                            <td class="text-end" data-v="@p.SpecificYieldKwhPerKw">
+                                @p.SpecificYieldKwhPerKw.ToString("N1")
+                            </td>
+                            <td class="text-end @prClass" data-v="@prPct">
+                                @if (p.TotalActualKwh > 0)
+                                {
+                                    @($"{prPct:0.0}%")
+                                }
+                                else
+                                {
+                                    @:ไม่มีข้อมูล
+                                }
+                            </td>
+                            <td class="text-end" data-v="@p.UptimePercent">@p.UptimePercent.ToString("N0")%</td>
+                            <td class="text-center" data-v="@p.UnresolvedAlerts">
+                                @if (p.UnresolvedAlerts > 0)
+                                {
+                                    <span class="badge bg-warning text-dark">@p.UnresolvedAlerts</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td class="text-center"><span class="badge bg-@p.HealthColor">@p.HealthGrade</span></td>
+                            <td class="text-end">
+                                <a asp-page="/Installations/Detail" asp-route-id="@p.Installation.Id"
+                                   class="btn btn-sm btn-outline-secondary">ดู</a>
+                            </td>
+                        </tr>
+                    }
+                    @if (!f.AllSites.Any())
+                    {
+                        <tr><td colspan="10" class="text-center text-muted py-4">ไม่มีข้อมูลในช่วงเวลาที่เลือก</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.getElementById('perfSearch')?.addEventListener('input', function () {
+            const q = this.value.toLowerCase();
+            document.querySelectorAll('#perfTable .perf-row').forEach(row => {
+                row.style.display = row.dataset.search.toLowerCase().includes(q) ? '' : 'none';
+            });
+        });
+
+        // Click a header to sort. The default order (worst PR first) is the one
+        // the page is for, so this is for answering follow-ups — "which of the
+        // bad ones is biggest" — without leaving for a spreadsheet.
+        (function () {
+            const table = document.getElementById('perfTable');
+            if (!table) return;
+
+            table.querySelectorAll('th[data-sort]').forEach((th, colIndex) => {
+                th.style.cursor = 'pointer';
+                let asc = true;
+                th.addEventListener('click', () => {
+                    const body = table.tBodies[0];
+                    const rows = Array.from(body.querySelectorAll('tr.perf-row'));
+                    const numeric = th.dataset.sort === 'num';
+
+                    rows.sort((a, b) => {
+                        const ca = a.cells[colIndex], cb = b.cells[colIndex];
+                        if (numeric) {
+                            return (parseFloat(ca.dataset.v || '0') - parseFloat(cb.dataset.v || '0')) * (asc ? 1 : -1);
+                        }
+                        return ca.textContent.trim().localeCompare(cb.textContent.trim(), 'th') * (asc ? 1 : -1);
+                    });
+
+                    rows.forEach(r => body.appendChild(r));
+                    // Renumber so the rank column keeps meaning the current order.
+                    rows.forEach((r, i) => { r.cells[0].textContent = i + 1; });
+                    asc = !asc;
+                });
+            });
+        })();
+    </script>
 }
