@@ -71,7 +71,9 @@ public class SolarDataSyncJob
 
         // Per-installation batch info: classified outcome + data (data may be null
         // even on Success if Huawei didn't return that station).
-        var huaweiBatch = new Dictionary<int, (HuaweiAdapter.BatchOutcome Outcome, RealtimeData? Data, string? Error)>();
+        // Concurrent because the account groups below are fetched in parallel.
+        var huaweiBatch = new System.Collections.Concurrent.ConcurrentDictionary<
+            int, (HuaweiAdapter.BatchOutcome Outcome, RealtimeData? Data, string? Error)>();
 
         if (huaweiInstallations.Count > 0)
         {
@@ -97,7 +99,15 @@ public class SolarDataSyncJob
                 .GroupBy(x => $"{x.username}|{x.password?.Length ?? 0}")
                 .ToList();
 
-            foreach (var group in groups)
+            // Accounts in parallel. HuaweiRateGate is keyed per account, so two
+            // different Huawei accounts never shared a rate budget — but this
+            // loop made the second wait for the first anyway, and Huawei's
+            // 1-req/min gate means that wait was measured in minutes. Nothing
+            // here touches the DbContext (credentials decrypt in memory, the
+            // adapter does HTTP, results land in a dictionary), which is the
+            // only reason it's safe to run concurrently: EF's context is not
+            // thread-safe and the per-site loop below still runs in order.
+            var realtimeTasks = groups.Select(async group =>
             {
                 try
                 {
@@ -127,7 +137,9 @@ public class SolarDataSyncJob
                     foreach (var x in group)
                         huaweiBatch[x.inst.Id] = (HuaweiAdapter.BatchOutcome.ServerError, null, ex.Message);
                 }
-            }
+            });
+
+            await Task.WhenAll(realtimeTasks);
         }
 
         // ──────────────────────────────────────────────────────────────────
@@ -136,8 +148,10 @@ public class SolarDataSyncJob
         // hourly cooldown allows. Skipped entries fall through to per-installation
         // GetAlarmsAsync (which is gated and likely deferred).
         // ──────────────────────────────────────────────────────────────────
-        var huaweiBatchAlarms = new Dictionary<int, List<AlarmRecord>>();
-        var huaweiAlarmsHandled = new HashSet<int>();
+        // Concurrent for the same reason as huaweiBatch — the account groups
+        // below are fetched in parallel. Presence of a key IS "handled": the
+        // dictionary is only written for stations the batch call covered.
+        var huaweiBatchAlarms = new System.Collections.Concurrent.ConcurrentDictionary<int, List<AlarmRecord>>();
         if (huaweiInstallations.Count > 0)
         {
             // Find which Huawei installations are eligible for alarm fetch this cycle
@@ -163,7 +177,7 @@ public class SolarDataSyncJob
                 })
                 .ToList();
 
-            foreach (var group in eligibleByGroup)
+            var alarmTasks = eligibleByGroup.Select(async group =>
             {
                 try
                 {
@@ -185,7 +199,6 @@ public class SolarDataSyncJob
 
                     foreach (var inst in group)
                     {
-                        huaweiAlarmsHandled.Add(inst.Id);
                         huaweiBatchAlarms[inst.Id] = batchAlarms.TryGetValue(inst.PlantId!, out var list)
                             ? list : new List<AlarmRecord>();
                     }
@@ -194,7 +207,9 @@ public class SolarDataSyncJob
                 {
                     _logger.LogWarning(ex, "Huawei batch alarms failed for account group ({Count} stations)", group.Count());
                 }
-            }
+            });
+
+            await Task.WhenAll(alarmTasks);
         }
 
         int processedSinceLastSave = 0;
@@ -711,11 +726,10 @@ public class SolarDataSyncJob
                 List<AlarmRecord>? alarmsForThisInstallation = null;
 
                 if (installation.InverterBrand == InverterBrand.Huawei
-                    && huaweiAlarmsHandled.Contains(installation.Id))
+                    && huaweiBatchAlarms.TryGetValue(installation.Id, out var batchedAlarms))
                 {
                     // Already fetched as part of the batch
-                    alarmsForThisInstallation = huaweiBatchAlarms.TryGetValue(installation.Id, out var list)
-                        ? list : new List<AlarmRecord>();
+                    alarmsForThisInstallation = batchedAlarms;
                     LogApiCall(installation, "GetAlarms", 200, true,
                         $"[ALARMS-BATCH] {alarmsForThisInstallation.Count} alarm(s) from batch fetch.");
                 }
