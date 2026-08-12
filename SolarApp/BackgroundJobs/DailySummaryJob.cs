@@ -81,19 +81,32 @@ public class DailySummaryJob
         // Cleaning-due / warranty reminders span ALL owned sites we service,
         // not just monitored ones — a cleaning-only (unmonitored) site still
         // needs its cleaning reminder counted.  Gate on the broader owned set.
-        var cleaningDueCount = await _context.SystemAlerts
-            .CountAsync(a => a.ResolvedAt == null
-                             && a.AlertType == AlertType.MaintenanceDue);
+        //
+        // Counted from the installations, not from the alerts. Alerts are the
+        // notification artefact: one gets raised per due site, but an operator
+        // who resolves one by hand, or a health-monitor cycle that hasn't run
+        // yet, makes the alert count drift from the number of sites actually
+        // waiting — and the daily summary then disagrees with the maintenance
+        // page for reasons nobody can see. The due date and the cleaning
+        // contract flag are the facts; everything else is derived from them.
+        //
+        // Same rule as GetInstallationsNeedingCleaningAsync, the dashboard
+        // tile, the map pins and CheckMaintenanceDueAsync.
+        var cleaningDue = await _context.Installations
+            .Where(i => i.IncludesCleaning
+                        && i.NextCleaningDueDate != null
+                        && i.NextCleaningDueDate <= DateTime.UtcNow)
+            .OrderBy(i => i.NextCleaningDueDate)
+            .Select(i => i.SiteName)
+            .ToListAsync();
+
+        var cleaningDueCount = cleaningDue.Count;
+        // Most overdue first, so the ten that fit are the ten that matter.
+        var cleaningDueSites = cleaningDue.Take(10).ToList();
+
         var warrantyExpiringCount = await _context.SystemAlerts
             .CountAsync(a => a.ResolvedAt == null
                              && a.AlertType == AlertType.WarrantyExpiring);
-        var cleaningDueSites = await _context.SystemAlerts
-            .Include(a => a.Installation)
-            .Where(a => a.ResolvedAt == null && a.AlertType == AlertType.MaintenanceDue)
-            .Select(a => a.Installation.SiteName)
-            .Distinct()
-            .Take(10)
-            .ToListAsync();
 
         // "New alerts today" = new SYSTEM PROBLEMS today (not reminders).
         var newAlertsToday = await _context.SystemAlerts

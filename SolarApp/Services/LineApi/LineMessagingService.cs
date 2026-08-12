@@ -924,8 +924,24 @@ public class LineMessagingService : ILineMessagingService
         if (s.CleaningDueSites.Count > 0)
         {
             bodyContents.Add(new { type = "text", text = "ไซต์ที่ต้องล้าง:", size = "xs", color = "#F57C00", weight = "bold", margin = "sm" });
-            foreach (var site in s.CleaningDueSites.Take(5))
+
+            // Five names, most overdue first. A flex bubble that runs long gets
+            // truncated by LINE, so the cut is explicit rather than silent —
+            // a list that stops at five with no "+2 more" reads as a complete
+            // list, and the crew plans a day around the wrong number.
+            const int shown = 5;
+            foreach (var site in s.CleaningDueSites.Take(shown))
                 bodyContents.Add(new { type = "text", text = $"  • {site}", size = "xs", color = "#F57C00", wrap = true });
+
+            if (s.CleaningDueCount > shown)
+            {
+                bodyContents.Add(new
+                {
+                    type = "text",
+                    text = $"  … และอีก {s.CleaningDueCount - shown} ไซต์",
+                    size = "xs", color = "#F57C00", wrap = true
+                });
+            }
         }
 
         if (s.CriticalSites.Count > 0)

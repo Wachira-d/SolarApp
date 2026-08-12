@@ -21,7 +21,24 @@ public class IndexModel : PageModel
     }
 
     public List<MaintenanceRecord> Records { get; set; } = new();
+
+    /// <summary>Past their cleaning date AND on our cleaning contract — the actionable list.</summary>
     public List<Installation> CleaningDue { get; set; } = new();
+
+    /// <summary>
+    /// Past their cleaning date but flagged IncludesCleaning = false.
+    ///
+    /// This page used to lump these in with the rest, so it reported seven
+    /// sites needing cleaning while LINE reported one. Neither number was
+    /// wrong for its own definition and nothing on screen explained the gap.
+    /// The alert job, the dashboard tile and the map all skip these sites,
+    /// because raising a reminder for work we are not contracted to do sends a
+    /// crew out unpaid. Listing them separately means the operator can tell
+    /// which situation they are in: either the flag is right and these are the
+    /// partner's problem, or it is wrong and they have just found six sites
+    /// that have silently stopped being reminded.
+    /// </summary>
+    public List<Installation> CleaningOverdueNotContracted { get; set; } = new();
 
     public async Task OnGetAsync()
     {
@@ -56,8 +73,25 @@ public class IndexModel : PageModel
             .Take(50)
             .ToListAsync();
 
-        CleaningDue = await installationQuery
+        // Same rule as InstallationService.GetInstallationsNeedingCleaningAsync,
+        // SystemHealthMonitorJob.CheckMaintenanceDueAsync and the dashboard
+        // tile: due date passed AND we are the ones who clean it.
+        var overdue = await installationQuery
+            .Include(i => i.Customer)
             .Where(i => i.NextCleaningDueDate != null && i.NextCleaningDueDate <= DateTime.UtcNow)
             .ToListAsync();
+
+        // Most overdue first. The old list came back in whatever order the
+        // database felt like, so a site eleven months late sat between two
+        // that were a fortnight late.
+        CleaningDue = overdue
+            .Where(i => i.IncludesCleaning)
+            .OrderBy(i => i.NextCleaningDueDate)
+            .ToList();
+
+        CleaningOverdueNotContracted = overdue
+            .Where(i => !i.IncludesCleaning)
+            .OrderBy(i => i.NextCleaningDueDate)
+            .ToList();
     }
 }
