@@ -52,6 +52,14 @@
                 </a>
             </li>
         }
+        @* Field work lives in three tables with three pages. This is the one
+           list that answers "what is on this week" without merging them by
+           eye; the individual pages stay for editing. *@
+        <li class="nav-item">
+            <a class="nav-link text-white @ActiveClass("/jobs")" asp-page="/Jobs/Index">
+                <i class="bi bi-calendar2-check me-2"></i>งานภาคสนาม
+            </a>
+        </li>
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/workorders")" asp-page="/WorkOrders/Index">
                 <i class="bi bi-clipboard2-check me-2"></i>ใบสั่งงาน
