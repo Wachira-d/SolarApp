@@ -47,6 +47,9 @@ public class DetailModel : PageModel
     {
         var wo = await _context.WorkOrders
             .Include(w => w.Installation)
+                // Customer comes along so the page can offer the site contact
+                // number — a locked gate is a phone call, not a support ticket.
+                .ThenInclude(i => i!.Customer)
             .Include(w => w.Customer)
             .Include(w => w.AssignedToUser)
             .Include(w => w.CreatedByUser)

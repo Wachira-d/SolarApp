@@ -88,14 +88,14 @@
             <div class="card-header bg-white"><h6 class="mb-0">รายละเอียดงาน</h6></div>
             <div class="card-body">
                 <div class="row g-2 small">
-                    <div class="col-6"><strong>Title:</strong> @wo.Title</div>
-                    <div class="col-6"><strong>Type:</strong> @wo.Type</div>
+                    <div class="col-6"><strong>หัวข้อ:</strong> @wo.Title</div>
+                    <div class="col-6"><strong>ประเภท:</strong> @wo.Type</div>
                     @if (!string.IsNullOrWhiteSpace(wo.Description))
-                    { <div class="col-12"><strong>Description:</strong> @wo.Description</div> }
+                    { <div class="col-12"><strong>รายละเอียด:</strong> @wo.Description</div> }
                     @if (!string.IsNullOrWhiteSpace(wo.Scope))
-                    { <div class="col-12"><strong>Scope:</strong> @wo.Scope</div> }
+                    { <div class="col-12"><strong>ขอบเขตงาน:</strong> @wo.Scope</div> }
                     @if (!string.IsNullOrWhiteSpace(wo.SpecialInstructions))
-                    { <div class="col-12 text-warning"><strong>⚠ Instructions:</strong> @wo.SpecialInstructions</div> }
+                    { <div class="col-12 text-warning"><strong>⚠ คำแนะนำพิเศษ:</strong> @wo.SpecialInstructions</div> }
                 </div>
             </div>
         </div>
@@ -103,36 +103,39 @@
         <!-- Checklist -->
         <div class="card border-0 shadow-sm mb-3">
             <div class="card-header bg-white d-flex justify-content-between">
-                <h6 class="mb-0"><i class="bi bi-list-check"></i> Checklist</h6>
+                <h6 class="mb-0"><i class="bi bi-list-check"></i> รายการตรวจสอบ</h6>
                 <small class="text-muted">@wo.ChecklistItems.Count(i => i.IsCompleted) / @wo.ChecklistItems.Count</small>
             </div>
             <div class="list-group list-group-flush">
                 @if (!wo.ChecklistItems.Any())
                 {
-                    <div class="list-group-item text-muted">No checklist items.</div>
+                    <div class="list-group-item text-muted">ไม่มีรายการตรวจสอบ</div>
                 }
                 @foreach (var item in wo.ChecklistItems)
                 {
                     <div class="list-group-item">
-                        <form method="post" asp-page-handler="CheckItem" asp-route-id="@wo.Id" asp-route-itemId="@item.Id"
-                              class="d-flex align-items-start gap-2">
-                            <button type="submit" class="btn btn-sm p-0 border-0" style="min-width:24px">
+                        @* The tick was a 24px icon. On a roof, in gloves, in
+                           sunlight, that is not a target — the whole row is
+                           the button now. *@
+                        <form method="post" asp-page-handler="CheckItem" asp-route-id="@wo.Id" asp-route-itemId="@item.Id">
+                            <button type="submit"
+                                    class="btn btn-link w-100 text-start text-decoration-none text-body d-flex align-items-start gap-3 p-2 border-0">
                                 @if (item.IsCompleted)
-                                { <i class="bi bi-check-circle-fill text-success fs-5"></i> }
+                                { <i class="bi bi-check-circle-fill text-success fs-4"></i> }
                                 else
-                                { <i class="bi bi-circle text-muted fs-5"></i> }
-                            </button>
-                            <div class="flex-grow-1">
-                                <span class="@(item.IsCompleted ? "text-decoration-line-through text-muted" : "")">
-                                    @item.Description
+                                { <i class="bi bi-circle text-muted fs-4"></i> }
+                                <span class="flex-grow-1">
+                                    <span class="@(item.IsCompleted ? "text-decoration-line-through text-muted" : "")">
+                                        @item.Description
+                                    </span>
+                                    @if (item.CompletedAt.HasValue)
+                                    {
+                                        <small class="d-block text-muted">
+                                            ✓ @item.CompletedAt.Value.ToString("dd/MM HH:mm")
+                                        </small>
+                                    }
                                 </span>
-                                @if (item.CompletedAt.HasValue)
-                                {
-                                    <small class="d-block text-muted">
-                                        ✓ @item.CompletedAt.Value.ToString("dd/MM HH:mm")
-                                    </small>
-                                }
-                            </div>
+                            </button>
                         </form>
                     </div>
                 }
@@ -151,7 +154,8 @@
                         </div>
                         <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="before" enctype="multipart/form-data">
                             <div class="input-group input-group-sm">
-                                <input type="file" name="BeforePhotoFiles" multiple accept="image/*" class="form-control" />
+                                <input type="file" name="BeforePhotoFiles" multiple accept="image/*"
+                                       capture="environment" class="form-control" />
                                 <button type="submit" class="btn btn-outline-primary"><i class="bi bi-upload"></i></button>
                             </div>
                         </form>
@@ -168,7 +172,8 @@
                         </div>
                         <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="after" enctype="multipart/form-data">
                             <div class="input-group input-group-sm">
-                                <input type="file" name="AfterPhotoFiles" multiple accept="image/*" class="form-control" />
+                                <input type="file" name="AfterPhotoFiles" multiple accept="image/*"
+                                       capture="environment" class="form-control" />
                                 <button type="submit" class="btn btn-outline-primary"><i class="bi bi-upload"></i></button>
                             </div>
                         </form>
@@ -187,9 +192,9 @@
                 @if (!string.IsNullOrWhiteSpace(wo.SiteAddress)) { <div class="text-muted">@wo.SiteAddress</div> }
                 @* This card is what the technician has open on the way to the
                    job, so the address needs to be one tap from navigation. *@
-                @if (wo.MapCoords is { } woCoords)
-                {
-                    <div class="d-flex gap-1 flex-wrap my-2">
+                <div class="d-flex gap-1 flex-wrap my-2">
+                    @if (wo.MapCoords is { } woCoords)
+                    {
                         <a href="https://www.google.com/maps/dir/?api=1&amp;destination=@woCoords"
                            target="_blank" rel="noopener" class="btn btn-sm btn-success">
                             <i class="bi bi-sign-turn-right-fill"></i> นำทางไปไซต์
@@ -198,8 +203,16 @@
                            target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">
                             <i class="bi bi-geo-alt"></i> Google Maps
                         </a>
-                    </div>
-                }
+                    }
+                    @* Arriving to a locked gate is a phone call, not a support
+                       ticket — but the number was two pages away. *@
+                    @if (wo.SiteContactPhone is { Length: > 0 } phone)
+                    {
+                        <a href="tel:@phone" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-telephone-fill"></i> โทรหาผู้ติดต่อ
+                        </a>
+                    }
+                </div>
                 @if (wo.Installation != null) { <a asp-page="/Installations/Detail" asp-route-id="@wo.InstallationId" class="small">เปิดหน้าไซต์งาน →</a> }
                 @if (!string.IsNullOrWhiteSpace(wo.ExternalCustomerName))
                 { <div class="mt-1"><i class="bi bi-person"></i> @wo.ExternalCustomerName @wo.ExternalCustomerPhone</div> }
@@ -258,24 +271,49 @@
                     </div>
                     <div class="row g-2">
                         <div class="col-4">
-                            <label class="form-label">Labor ฿</label>
+                            <label class="form-label">ค่าแรง ฿</label>
                             <input asp-for="LaborCost" type="number" min="0" step="any" class="form-control" />
                         </div>
                         <div class="col-4">
-                            <label class="form-label">Material ฿</label>
+                            <label class="form-label">ค่าวัสดุ ฿</label>
                             <input asp-for="MaterialCost" type="number" min="0" step="any" class="form-control" />
                         </div>
                         <div class="col-4">
-                            <label class="form-label">Travel ฿</label>
+                            <label class="form-label">ค่าเดินทาง ฿</label>
                             <input asp-for="TravelCost" type="number" min="0" step="any" class="form-control" />
                         </div>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ยกเลิก</button>
-                    <button type="submit" class="btn btn-success"><i class="bi bi-check-circle"></i> Complete</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check-circle"></i> ปิดงาน</button>
                 </div>
             </div>
         </form>
     </div>
 </div>
+
+
+@* On a phone the action that ends the job sat above three cards of detail, so
+   the technician scrolled back up every time. Pinned to the bottom on small
+   screens only; on a desktop the header button is already in view. *@
+@if (wo.Status == WorkOrderStatus.Scheduled || wo.Status == WorkOrderStatus.Assigned
+     || wo.Status == WorkOrderStatus.InProgress)
+{
+    <div class="d-lg-none position-sticky bottom-0 py-2 mt-3"
+         style="background:var(--app-bg, #f5f6fa); box-shadow:0 -4px 12px rgba(0,0,0,.08)">
+        @if (wo.Status == WorkOrderStatus.InProgress)
+        {
+            <button type="button" class="btn btn-success btn-lg w-100"
+                    data-bs-toggle="modal" data-bs-target="#completeModal">
+                <i class="bi bi-check-circle"></i> เสร็จสิ้นงาน
+            </button>
+        }
+        else
+        {
+            <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress">
+                <button class="btn btn-warning btn-lg w-100"><i class="bi bi-play-fill"></i> เริ่มงาน</button>
+            </form>
+        }
+    </div>
+}

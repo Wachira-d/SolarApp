@@ -116,6 +116,17 @@ public class WorkOrder
     public bool IsStandalone => InstallationId == null;
 
     /// <summary>
+    /// Who the technician rings when they arrive and the gate is locked.
+    /// Prefers the number recorded on the job (a caretaker, a site manager)
+    /// over the account holder's, because that's the one that was written
+    /// down for this visit specifically.
+    /// </summary>
+    public string? SiteContactPhone =>
+        !string.IsNullOrWhiteSpace(ExternalCustomerPhone) ? ExternalCustomerPhone
+        : !string.IsNullOrWhiteSpace(Customer?.Phone) ? Customer!.Phone
+        : Installation?.Customer?.Phone;
+
+    /// <summary>
     /// "lat,lng" for a maps link, or null when neither the installation nor the
     /// standalone job carries usable coordinates. 0,0 counts as missing — it's
     /// the Gulf of Guinea, not a site, and it's what an empty form submits.
