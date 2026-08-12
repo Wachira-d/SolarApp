@@ -31,7 +31,34 @@
 <div class="d-flex justify-content-between mb-4">
     <div>
         <h4>@inst.SiteName <span class="badge @statusClass">@inst.Status</span></h4>
-        <p class="text-muted"><i class="bi bi-geo-alt"></i> @inst.Address</p>
+        <p class="text-muted mb-1"><i class="bi bi-geo-alt"></i> @inst.Address</p>
+        @* The technician who opened this site from the map still has to get
+           there. Coordinates beat the address string — Thai addresses often
+           don't geocode to the roof the panels are on. *@
+        @if (inst.Latitude.HasValue && inst.Longitude.HasValue
+             && Math.Abs(inst.Latitude.Value) > 0.0001 && Math.Abs(inst.Longitude.Value) > 0.0001)
+        {
+            var coords = $"{inst.Latitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)},{inst.Longitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            <div class="d-flex gap-2 flex-wrap">
+                <a href="https://www.google.com/maps/dir/?api=1&amp;destination=@coords"
+                   target="_blank" rel="noopener" class="btn btn-sm btn-success">
+                    <i class="bi bi-sign-turn-right-fill"></i> นำทางไปไซต์
+                </a>
+                <a href="https://www.google.com/maps/search/?api=1&amp;query=@coords"
+                   target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-geo-alt"></i> เปิดใน Google Maps
+                </a>
+                <span class="align-self-center small text-muted font-monospace">@coords</span>
+            </div>
+        }
+        else
+        {
+            <small class="text-muted">
+                <i class="bi bi-exclamation-triangle"></i>
+                ยังไม่ได้ใส่พิกัด GPS — ไซต์นี้จะไม่ขึ้นบนแผนที่และนำทางไม่ได้
+                <a asp-page="Edit" asp-route-id="@inst.Id">เพิ่มพิกัด</a>
+            </small>
+        }
     </div>
     <div class="d-flex gap-2">
         @if (!string.IsNullOrEmpty(inst.PlantId))

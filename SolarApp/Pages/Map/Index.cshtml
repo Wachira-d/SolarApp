@@ -134,6 +134,14 @@ else
         const schedHtml = schedRows.length
             ? `<div class="mt-2 small">${schedRows.join('<br>')}</div>` : '';
 
+        // Handing the technician the coordinates and letting them retype those
+        // into a maps app is the slow way to do the only thing this pin is for.
+        // api=1 links open the installed Google Maps app on a phone and the web
+        // map on a desktop, so one URL covers both.
+        const coords = `${m.Lat},${m.Lng}`;
+        const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${coords}`;
+        const viewUrl = `https://www.google.com/maps/search/?api=1&query=${coords}`;
+
         marker.bindPopup(`
             <div style="min-width:230px">
                 <strong>${m.Name}</strong>${alertBadge}${maBadge}<br>
@@ -148,6 +156,16 @@ else
                 <a href="/Installations/Detail/${m.Id}" class="btn btn-sm btn-primary mt-2 w-100">
                     เปิดดูไซต์
                 </a>
+                <div class="d-flex gap-1 mt-1">
+                    <a href="${navUrl}" target="_blank" rel="noopener"
+                       class="btn btn-sm btn-success flex-fill">
+                        <i class="bi bi-sign-turn-right-fill"></i> นำทาง
+                    </a>
+                    <a href="${viewUrl}" target="_blank" rel="noopener"
+                       class="btn btn-sm btn-outline-secondary flex-fill">
+                        <i class="bi bi-geo-alt"></i> Google Maps
+                    </a>
+                </div>
             </div>
         `);
 

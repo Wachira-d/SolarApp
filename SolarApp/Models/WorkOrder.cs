@@ -114,6 +114,25 @@ public class WorkOrder
     public string SiteName => Installation?.SiteName ?? ExternalSiteName ?? "Unspecified Site";
     public string SiteAddress => Installation?.Address ?? ExternalSiteAddress ?? "";
     public bool IsStandalone => InstallationId == null;
+
+    /// <summary>
+    /// "lat,lng" for a maps link, or null when neither the installation nor the
+    /// standalone job carries usable coordinates. 0,0 counts as missing — it's
+    /// the Gulf of Guinea, not a site, and it's what an empty form submits.
+    /// </summary>
+    public string? MapCoords
+    {
+        get
+        {
+            var lat = Installation?.Latitude ?? ExternalLatitude;
+            var lng = Installation?.Longitude ?? ExternalLongitude;
+            if (!lat.HasValue || !lng.HasValue) return null;
+            if (Math.Abs(lat.Value) < 0.0001 && Math.Abs(lng.Value) < 0.0001) return null;
+
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            return $"{lat.Value.ToString(ci)},{lng.Value.ToString(ci)}";
+        }
+    }
     public bool IsOverdue => Status < WorkOrderStatus.Completed
                              && ScheduledDate.Date < DateTime.UtcNow.Date;
 

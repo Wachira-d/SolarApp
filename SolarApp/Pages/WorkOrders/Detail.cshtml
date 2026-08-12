@@ -185,7 +185,22 @@
             <div class="card-body small">
                 <strong>@wo.SiteName</strong> @if (wo.IsStandalone) { <span class="badge bg-info">งานเดี่ยว</span> }
                 @if (!string.IsNullOrWhiteSpace(wo.SiteAddress)) { <div class="text-muted">@wo.SiteAddress</div> }
-                @if (wo.Installation != null) { <a asp-page="/Installations/Detail" asp-route-id="@wo.InstallationId" class="small">Open Installation →</a> }
+                @* This card is what the technician has open on the way to the
+                   job, so the address needs to be one tap from navigation. *@
+                @if (wo.MapCoords is { } woCoords)
+                {
+                    <div class="d-flex gap-1 flex-wrap my-2">
+                        <a href="https://www.google.com/maps/dir/?api=1&amp;destination=@woCoords"
+                           target="_blank" rel="noopener" class="btn btn-sm btn-success">
+                            <i class="bi bi-sign-turn-right-fill"></i> นำทางไปไซต์
+                        </a>
+                        <a href="https://www.google.com/maps/search/?api=1&amp;query=@woCoords"
+                           target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-geo-alt"></i> Google Maps
+                        </a>
+                    </div>
+                }
+                @if (wo.Installation != null) { <a asp-page="/Installations/Detail" asp-route-id="@wo.InstallationId" class="small">เปิดหน้าไซต์งาน →</a> }
                 @if (!string.IsNullOrWhiteSpace(wo.ExternalCustomerName))
                 { <div class="mt-1"><i class="bi bi-person"></i> @wo.ExternalCustomerName @wo.ExternalCustomerPhone</div> }
             </div>
