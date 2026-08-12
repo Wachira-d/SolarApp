@@ -24,6 +24,36 @@ public interface ILineMessagingService
         string? rootCause, string? predictedCause,
         string[] checkSteps, string[] fixSteps, string? knownCaseRef,
         string? safetyWarning, string[]? contextNotes);
+
+    /// <summary>Monthly production summary for a customer — see MonthlyReportData.</summary>
+    Task SendMonthlyReportAsync(string lineUserId, MonthlyReportData report);
+}
+
+/// <summary>
+/// What a customer gets once a month. Deliberately none of the operator's
+/// diagnostics: a customer who is told "PR 0.78, 3 API failures" learns
+/// nothing and worries anyway. Production, money, and whether we kept the
+/// system running — that's the service they're paying for.
+/// </summary>
+public class MonthlyReportData
+{
+    public string CustomerName { get; set; } = string.Empty;
+    /// <summary>Month being reported, e.g. "สิงหาคม 2568".</summary>
+    public string PeriodLabel { get; set; } = string.Empty;
+    public int SiteCount { get; set; }
+    public decimal TotalKwh { get; set; }
+    public decimal SavingsThb { get; set; }
+    public decimal Co2SavedKg { get; set; }
+    public int TreesEquivalent { get; set; }
+    /// <summary>Percentage change vs the previous month, or null on the first report.</summary>
+    public decimal? ChangeVsPreviousPercent { get; set; }
+    public decimal BestDayKwh { get; set; }
+    public string? BestDayDate { get; set; }
+    /// <summary>Days in the month with no offline alert against any of their sites.</summary>
+    public int HealthyDays { get; set; }
+    public int DaysInMonth { get; set; }
+    public int CleaningsDone { get; set; }
+    public int WorkOrdersCompleted { get; set; }
 }
 
 public class DailySummaryData

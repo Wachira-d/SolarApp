@@ -48,7 +48,12 @@ public class IndexModel : PageModel
         // rules so operators can also see "PM due in 12 days" while
         // driving past, even if the cleaning is months away.
         string? NextPmDueDate,
-        int? DaysToNextPm);
+        int? DaysToNextPm,
+        // Province drives the route planner's grouping: a cleaning run is
+        // planned one province at a time, and two sites 400 km apart being
+        // due the same week is not a route.
+        string? Province,
+        string? Address);
 
     public List<MapMarker> Markers { get; set; } = new();
     public int TotalSites { get; set; }
@@ -107,6 +112,8 @@ public class IndexModel : PageModel
                 i.SiteCode,
                 i.Latitude,
                 i.Longitude,
+                i.Province,
+                i.Address,
                 i.Status,
                 i.InverterBrand,
                 i.SystemCapacityKw,
@@ -176,7 +183,9 @@ public class IndexModel : PageModel
                     i.NextCleaningDueDate?.ToString("yyyy-MM-dd"),
                     cleaningDays,
                     i.NextPmDate?.ToString("yyyy-MM-dd"),
-                    pmDays);
+                    pmDays,
+                    i.Province,
+                    i.Address);
             })
             .ToList();
 

@@ -273,6 +273,7 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.DailySummaryJob>();
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
         builder.Services.AddScoped<BackgroundJobs.DataRetentionJob>();
+        builder.Services.AddScoped<BackgroundJobs.MonthlyReportJob>();
         builder.Services.AddScoped<Services.PredictiveDiagnostics.PredictiveDiagnosticsEngine>();
         builder.Services.AddScoped<Services.PredictiveDiagnostics.AlertDiagnosticsEnricher>();
 
@@ -374,6 +375,13 @@ public class Startup
         var retentionCron = GetSetting(ctx, "Schedule.DataRetention", "0 18 * * *");
         RecurringJob.AddOrUpdate<BackgroundJobs.DataRetentionJob>(
             "data-retention", job => job.ExecuteAsync(), retentionCron);
+
+        // Monthly customer report — 1st at 02:00 UTC = 09:00 Thailand, which
+        // is when a LINE message actually gets read rather than buried
+        // overnight. The job reports the month that just ended.
+        var monthlyReportCron = GetSetting(ctx, "Schedule.MonthlyReport", "0 2 1 * *");
+        RecurringJob.AddOrUpdate<BackgroundJobs.MonthlyReportJob>(
+            "monthly-customer-report", job => job.ExecuteAsync(), monthlyReportCron);
     }
 
     /// <summary>

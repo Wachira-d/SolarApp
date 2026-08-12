@@ -40,6 +40,37 @@
 }
 else
 {
+    @* Cleaning is planned a province at a time — two sites due the same week
+       but 400 km apart is not a route. The map already knows what's due and
+       where; without this the operator read the pins, wrote the addresses on
+       paper, and typed them into Maps one by one. *@
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <h6 class="mb-0"><i class="bi bi-signpost-split"></i> วางแผนเส้นทางเข้าไซต์</h6>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <select id="routeDue" class="form-select form-select-sm" style="width:auto">
+                    <option value="0">เลยกำหนดแล้ว</option>
+                    <option value="7">ครบกำหนดใน 7 วัน</option>
+                    <option value="30" selected>ครบกำหนดใน 30 วัน</option>
+                    <option value="90">ครบกำหนดใน 90 วัน</option>
+                </select>
+                <select id="routeProvince" class="form-select form-select-sm" style="width:auto">
+                    <option value="">ทุกจังหวัด</option>
+                </select>
+                <button type="button" id="routeBuild" class="btn btn-sm btn-success">
+                    <i class="bi bi-sign-turn-right-fill"></i> เปิดเส้นทางใน Google Maps
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="routeList" class="small"></div>
+            <div class="form-text mt-2">
+                Google Maps รับได้สูงสุด 10 จุดต่อเส้นทาง — ถ้าเลือกเกินนั้น
+                ระบบจะพาไป 10 จุดแรกตามลำดับเส้นทางที่จัดให้ แล้วค่อยวางแผนรอบถัดไป
+            </div>
+        </div>
+    </div>
+
     <div id="siteMap"></div>
 }
 
@@ -176,6 +207,120 @@ else
     if (markers.length > 1) {
         map.fitBounds(group.getBounds().pad(0.1));
     }
+
+    // ─── Route planner ───────────────────────────────────────────────
+    // Nearest-neighbour from the northernmost site. Not the optimal tour —
+    // that's NP-hard and the operator knows the roads better than we do —
+    // but it beats the arrival order, which is alphabetical by accident.
+    (function () {
+        const dueSel = document.getElementById('routeDue');
+        const provSel = document.getElementById('routeProvince');
+        const listEl = document.getElementById('routeList');
+        const buildBtn = document.getElementById('routeBuild');
+        if (!dueSel || !provSel || !listEl || !buildBtn) return;
+
+        const MAX_STOPS = 10;   // Google Maps: origin + 8 waypoints + destination
+
+        // Only sites with a cleaning date can be planned around; a site with
+        // no schedule has nothing to be "due".
+        const plannable = markers.filter(m => m.DaysToNextCleaning !== null
+                                              && m.DaysToNextCleaning !== undefined);
+
+        [...new Set(plannable.map(m => m.Province).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'th'))
+            .forEach(p => {
+                const o = document.createElement('option');
+                o.value = p; o.textContent = p;
+                provSel.appendChild(o);
+            });
+
+        function selected() {
+            const within = parseInt(dueSel.value, 10);
+            const prov = provSel.value;
+            return plannable
+                .filter(m => m.DaysToNextCleaning <= within)
+                .filter(m => !prov || m.Province === prov);
+        }
+
+        // Equirectangular approximation. Over one Thai province the error is
+        // metres, and we only need the ordering to be sane.
+        function dist(a, b) {
+            const dLat = a.Lat - b.Lat;
+            const dLng = (a.Lng - b.Lng) * Math.cos((a.Lat + b.Lat) / 2 * Math.PI / 180);
+            return Math.sqrt(dLat * dLat + dLng * dLng);
+        }
+
+        function order(sites) {
+            if (sites.length < 3) return sites.slice();
+            const remaining = sites.slice();
+            // Start from the northernmost so the run reads top-to-bottom,
+            // which is how a day out of Bangkok is usually planned.
+            remaining.sort((a, b) => b.Lat - a.Lat);
+            const route = [remaining.shift()];
+            while (remaining.length) {
+                const last = route[route.length - 1];
+                let best = 0;
+                for (let i = 1; i < remaining.length; i++) {
+                    if (dist(last, remaining[i]) < dist(last, remaining[best])) best = i;
+                }
+                route.push(remaining.splice(best, 1)[0]);
+            }
+            return route;
+        }
+
+        function escapeHtml(v) {
+            return String(v ?? '').replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        let current = [];
+
+        function refresh() {
+            current = order(selected());
+            if (!current.length) {
+                listEl.innerHTML = '<span class="text-muted">ไม่มีไซต์ที่ตรงเงื่อนไข</span>';
+                buildBtn.disabled = true;
+                return;
+            }
+            buildBtn.disabled = false;
+            listEl.innerHTML =
+                '<div class="mb-2"><strong>' + current.length + ' ไซต์</strong> ตามลำดับเส้นทางที่แนะนำ</div>' +
+                '<ol class="mb-0 ps-3">' + current.map((m, i) => {
+                    const d = m.DaysToNextCleaning;
+                    const label = d < 0 ? 'เลยกำหนด ' + Math.abs(d) + ' วัน'
+                        : d === 0 ? 'ครบกำหนดวันนี้' : 'อีก ' + d + ' วัน';
+                    const cls = d < 0 ? 'text-danger' : d <= 7 ? 'text-warning' : 'text-muted';
+                    const over = i >= MAX_STOPS ? ' class="text-muted"' : '';
+                    return '<li' + over + '>' + escapeHtml(m.Name) +
+                        ' <small class="' + cls + '">(' + label + ')</small>' +
+                        (m.Province ? ' <small class="text-muted">· ' + escapeHtml(m.Province) + '</small>' : '') +
+                        (i >= MAX_STOPS ? ' <small class="text-muted">— รอบถัดไป</small>' : '') +
+                        '</li>';
+                }).join('') + '</ol>';
+        }
+
+        dueSel.addEventListener('change', refresh);
+        provSel.addEventListener('change', refresh);
+
+        buildBtn.addEventListener('click', () => {
+            const stops = current.slice(0, MAX_STOPS);
+            if (!stops.length) return;
+
+            const coords = stops.map(m => m.Lat + ',' + m.Lng);
+            const destination = coords[coords.length - 1];
+            const waypoints = coords.slice(0, -1);
+
+            // Single stop: no waypoints, just navigate there.
+            const url = 'https://www.google.com/maps/dir/?api=1&destination=' +
+                encodeURIComponent(destination) +
+                (waypoints.length ? '&waypoints=' + encodeURIComponent(waypoints.join('|')) : '') +
+                '&travelmode=driving';
+            window.open(url, '_blank', 'noopener');
+        });
+
+        refresh();
+    })();
 })();
 </script>
 }

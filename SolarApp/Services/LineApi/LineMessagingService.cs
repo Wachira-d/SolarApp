@@ -1053,6 +1053,147 @@ public class LineMessagingService : ILineMessagingService
         catch (Exception ex) { _logger.LogError(ex, "Failed to send daily summary to {UserId}", lineUserId); }
     }
 
+    public async Task SendMonthlyReportAsync(string lineUserId, MonthlyReportData r)
+    {
+        if (string.IsNullOrEmpty(lineUserId)) return;
+        var token = await GetChannelAccessTokenAsync();
+        if (string.IsNullOrEmpty(token)) return;
+
+        var changeText = r.ChangeVsPreviousPercent.HasValue
+            ? (r.ChangeVsPreviousPercent.Value >= 0 ? "▲ " : "▼ ")
+              + Math.Abs(r.ChangeVsPreviousPercent.Value).ToString("N0") + "% จากเดือนก่อน"
+            : "เดือนแรกของรายงาน";
+        var changeColor = !r.ChangeVsPreviousPercent.HasValue ? "#AAAAAA"
+            : r.ChangeVsPreviousPercent.Value >= 0 ? "#00C853" : "#FF8C00";
+
+        var bodyContents = new List<object>
+        {
+            // The kWh number leads because it's the one the customer repeats
+            // to other people. Everything below it is supporting evidence.
+            new
+            {
+                type = "box", layout = "vertical", spacing = "xs",
+                contents = new object[]
+                {
+                    new { type = "text", text = r.TotalKwh.ToString("N0") + " kWh",
+                          weight = "bold", size = "xxl", color = "#F57C00" },
+                    new { type = "text", text = changeText, size = "sm", color = changeColor }
+                }
+            },
+            new { type = "separator", margin = "md" },
+            new
+            {
+                type = "box", layout = "vertical", spacing = "sm", margin = "md",
+                contents = new object[]
+                {
+                    MakeSummaryRow("ประหยัดค่าไฟ", "฿" + r.SavingsThb.ToString("N0"), "#00C853"),
+                    MakeSummaryRow("ลด CO₂", r.Co2SavedKg.ToString("N0") + " kg  (≈ ปลูกต้นไม้ " + r.TreesEquivalent + " ต้น)"),
+                    MakeSummaryRow("ผลิตสูงสุด", r.BestDayKwh.ToString("N1") + " kWh"
+                        + (string.IsNullOrEmpty(r.BestDayDate) ? "" : " (" + r.BestDayDate + ")")),
+                    MakeSummaryRow("ระบบทำงานปกติ", r.HealthyDays + "/" + r.DaysInMonth + " วัน",
+                        r.HealthyDays == r.DaysInMonth ? "#00C853" : "#FF8C00"),
+                }
+            }
+        };
+
+        // Only mention service visits when there were any — "ล้างแผง 0 ครั้ง"
+        // reads as a complaint about us rather than a summary.
+        if (r.CleaningsDone > 0 || r.WorkOrdersCompleted > 0)
+        {
+            var service = new List<object>();
+            if (r.CleaningsDone > 0)
+                service.Add(MakeSummaryRow("ล้างแผง", r.CleaningsDone + " ครั้ง"));
+            if (r.WorkOrdersCompleted > 0)
+                service.Add(MakeSummaryRow("งานบริการ", r.WorkOrdersCompleted + " รายการ"));
+
+            bodyContents.Add(new { type = "separator", margin = "md" });
+            bodyContents.Add(new
+            {
+                type = "box", layout = "vertical", spacing = "sm", margin = "md",
+                contents = service.ToArray()
+            });
+        }
+
+        var footerContents = new List<object>();
+        var baseUrl = await GetAppBaseUrlAsync();
+        if (baseUrl != null)
+        {
+            footerContents.Add(new
+            {
+                type = "button", style = "primary", color = "#F57C00", height = "sm",
+                action = new { type = "uri", label = "ดูรายละเอียดย้อนหลัง", uri = $"{baseUrl}/My/History" }
+            });
+        }
+
+        // A dictionary rather than an anonymous type: LINE rejects a bubble
+        // with "footer": null, and the footer only exists when App.BaseUrl is
+        // configured — so the key has to be absent, not empty.
+        var flexContent = new Dictionary<string, object>
+        {
+            ["type"] = "bubble",
+            ["header"] = new
+            {
+                type = "box", layout = "vertical",
+                backgroundColor = "#F57C00", paddingAll = "16px",
+                contents = new object[]
+                {
+                    new { type = "text", text = "☀ สรุปผลผลิตประจำเดือน", color = "#FFFFFF", weight = "bold", size = "md" },
+                    new { type = "text", text = r.PeriodLabel + " · " + r.SiteCount + " ไซต์",
+                          color = "#FFFFFF", size = "sm" }
+                }
+            },
+            ["body"] = new { type = "box", layout = "vertical", spacing = "md", contents = bodyContents.ToArray() }
+        };
+
+        if (footerContents.Count > 0)
+        {
+            flexContent["footer"] = new
+            {
+                type = "box", layout = "vertical", spacing = "sm", contents = footerContents.ToArray()
+            };
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+            var payload = new
+            {
+                to = lineUserId,
+                messages = new object[]
+                {
+                    new
+                    {
+                        type = "flex",
+                        altText = $"สรุปผลผลิต {r.PeriodLabel}: {r.TotalKwh:N0} kWh · ประหยัด ฿{r.SavingsThb:N0}",
+                        contents = flexContent
+                    }
+                }
+            };
+
+            using var slot = await AcquireSendSlotAsync();
+            var response = await client.PostAsJsonAsync(PushUrl, payload);
+
+            _context.NotificationLogs.Add(new NotificationLog
+            {
+                RecipientLineId = lineUserId,
+                Channel = NotificationChannel.Line,
+                Title = $"Monthly Report {r.PeriodLabel}",
+                Message = $"{r.TotalKwh:N0} kWh across {r.SiteCount} site(s)",
+                RelatedEntityType = "MonthlyReport",
+                Status = response.IsSuccessStatusCode ? NotificationStatus.Sent : NotificationStatus.Failed,
+                ErrorMessage = !response.IsSuccessStatusCode ? await response.Content.ReadAsStringAsync() : null,
+                SentAt = response.IsSuccessStatusCode ? DateTime.UtcNow : null
+            });
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send monthly report to {UserId}", lineUserId);
+        }
+    }
+
     private static object MakeSummaryRow(string label, string value, string? valueColor = null) => new
     {
         type = "box", layout = "horizontal",
