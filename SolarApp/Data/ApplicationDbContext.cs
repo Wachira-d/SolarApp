@@ -36,6 +36,22 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         base.OnModelCreating(builder);
 
         // ══════════════════════════════════════════════════════════
+        // Soft delete — see ISoftDeletable for why.
+        // The filter lives here rather than in each query so a page that
+        // never heard of soft delete still can't surface a deleted record.
+        // Reports that legitimately need history call IgnoreQueryFilters().
+        //
+        // Each filter reads only its own flag. Referencing Customer.DeletedAt
+        // from Installation's filter would work but EF warns about filtering
+        // across a required navigation, and the behaviour is subtle; deleting
+        // a customer instead stamps their installations explicitly, which is
+        // what the delete path already had to do for the FK anyway.
+        // ══════════════════════════════════════════════════════════
+        builder.Entity<Customer>().HasQueryFilter(c => c.DeletedAt == null);
+        builder.Entity<Partner>().HasQueryFilter(p => p.DeletedAt == null);
+        builder.Entity<Installation>().HasQueryFilter(i => i.DeletedAt == null);
+
+        // ══════════════════════════════════════════════════════════
         // SQL Server does NOT allow multiple cascade paths.
         // All FK relationships use Restrict (no cascade) to avoid
         // "may cause cycles or multiple cascade paths" errors.

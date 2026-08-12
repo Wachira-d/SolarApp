@@ -212,7 +212,7 @@ public class EditModel : PageModel
 
         try
         {
-            await _installationService.DeleteAsync(id);
+            await _installationService.DeleteAsync(id, user?.Id);
         }
         catch (Exception ex)
         {

@@ -105,22 +105,44 @@ public class InstallationService : IInstallationService
         await _context.SaveChangesAsync();
     }
 
-    public async Task DeleteAsync(int id)
+    public async Task DeleteAsync(int id, string? deletedByUserId = null)
     {
-        // Hard delete + cascade.  Every Installation FK in the DbContext is
-        // configured with DeleteBehavior.Restrict (intentional — we never
-        // want EF to silently nuke historical energy data on a routine
-        // .Remove call).  So this method removes the dependent rows by
-        // hand, in FK order, inside a transaction so a mid-delete failure
-        // doesn't leave half-deleted state.
-        //
-        // The only FK that's already Cascade is AlertRule.InstallationId,
-        // so we don't have to touch that table — EF deletes those rules
-        // automatically when the Installation row is removed.
-        //
-        // Callers are expected to do permission + 2-step confirmation
-        // upstream; this method just executes.
         var installation = await _context.Installations
+            .FirstOrDefaultAsync(i => i.Id == id);
+        if (installation == null) return;
+
+        // Soft delete. This used to cascade-delete the site's entire history —
+        // years of production data, every cleaning record, the photos proving
+        // the work happened — which is what an O&M contract is settled on, with
+        // no undo and no backup granular enough to restore one site. The flag
+        // takes the site out of every query (global filter in the DbContext)
+        // and leaves the evidence in place; PurgeAsync still does the real
+        // thing for a site created by mistake.
+        installation.DeletedAt = DateTime.UtcNow;
+        installation.DeletedByUserId = deletedByUserId;
+        installation.Status = InstallationStatus.Inactive;
+        await _context.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Irreversibly removes a site and every record attached to it. For a site
+    /// created in error — a typo'd duplicate, a test row — where keeping the
+    /// history would be noise rather than evidence. Everything else should go
+    /// through <see cref="DeleteAsync"/>.
+    /// </summary>
+    public async Task PurgeAsync(int id)
+    {
+        // Every Installation FK in the DbContext is configured with
+        // DeleteBehavior.Restrict (intentional — we never want EF to silently
+        // nuke historical energy data on a routine .Remove call), so the
+        // dependent rows come out by hand, in FK order, inside a transaction
+        // so a mid-delete failure doesn't leave half-deleted state.
+        //
+        // AlertRule.InstallationId is already Cascade, so EF clears those.
+        //
+        // Callers do permission + confirmation upstream; this just executes.
+        var installation = await _context.Installations
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(i => i.Id == id);
         if (installation == null) return;
 

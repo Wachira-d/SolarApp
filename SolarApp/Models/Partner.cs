@@ -1,6 +1,6 @@
 namespace SolarApp.Models;
 
-public class Partner
+public class Partner : ISoftDeletable
 {
     public int Id { get; set; }
     public string CompanyName { get; set; } = string.Empty;
@@ -24,4 +24,9 @@ public class Partner
 
     public ICollection<ApplicationUser> Users { get; set; } = new List<ApplicationUser>();
     public ICollection<Installation> Installations { get; set; } = new List<Installation>();
+
+    // ── Soft delete (see ISoftDeletable) ──
+    public DateTime? DeletedAt { get; set; }
+    public string? DeletedByUserId { get; set; }
+
 }

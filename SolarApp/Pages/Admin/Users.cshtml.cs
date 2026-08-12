@@ -147,7 +147,10 @@ public class UsersModel : PageModel
         => Dispatch(await _commandService.EditCustomerAsync(ToServiceInput(EditCustomer)));
 
     public async Task<IActionResult> OnPostDeleteCustomerAsync(int customerId)
-        => Dispatch(await _commandService.DeleteCustomerAsync(customerId));
+    {
+        var currentUser = await _userManager.GetUserAsync(User);
+        return Dispatch(await _commandService.DeleteCustomerAsync(customerId, currentUser?.Id));
+    }
 
     // ─────────── Partner handlers ───────────
 
@@ -158,7 +161,10 @@ public class UsersModel : PageModel
         => Dispatch(await _commandService.EditPartnerAsync(ToServiceInput(EditPartner)));
 
     public async Task<IActionResult> OnPostDeletePartnerAsync(int partnerId)
-        => Dispatch(await _commandService.DeletePartnerAsync(partnerId));
+    {
+        var currentUser = await _userManager.GetUserAsync(User);
+        return Dispatch(await _commandService.DeletePartnerAsync(partnerId, currentUser?.Id));
+    }
 
     // ─────────── Invite handlers ───────────
 

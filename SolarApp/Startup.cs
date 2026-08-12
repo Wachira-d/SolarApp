@@ -726,6 +726,21 @@ public class Startup
             // battery metadata so we don't lose existing hybrid sites.
             (Table: "Installations", Column: "HasBattery",
              Sql: "ALTER TABLE [Installations] ADD [HasBattery] bit NOT NULL DEFAULT 0"),
+
+            // Soft delete (see ISoftDeletable). Nullable with no default, so
+            // every existing row reads as "not deleted" without a backfill.
+            (Table: "Customers", Column: "DeletedAt",
+             Sql: "ALTER TABLE [Customers] ADD [DeletedAt] datetime2 NULL"),
+            (Table: "Customers", Column: "DeletedByUserId",
+             Sql: "ALTER TABLE [Customers] ADD [DeletedByUserId] nvarchar(450) NULL"),
+            (Table: "Partners", Column: "DeletedAt",
+             Sql: "ALTER TABLE [Partners] ADD [DeletedAt] datetime2 NULL"),
+            (Table: "Partners", Column: "DeletedByUserId",
+             Sql: "ALTER TABLE [Partners] ADD [DeletedByUserId] nvarchar(450) NULL"),
+            (Table: "Installations", Column: "DeletedAt",
+             Sql: "ALTER TABLE [Installations] ADD [DeletedAt] datetime2 NULL"),
+            (Table: "Installations", Column: "DeletedByUserId",
+             Sql: "ALTER TABLE [Installations] ADD [DeletedByUserId] nvarchar(450) NULL"),
         };
 
         var indexUpgrades = new (string Name, string Table, string Columns)[]

@@ -1,6 +1,6 @@
 namespace SolarApp.Models;
 
-public class Customer
+public class Customer : ISoftDeletable
 {
     public int Id { get; set; }
     public string? UserId { get; set; }
@@ -26,4 +26,9 @@ public class Customer
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<Installation> Installations { get; set; } = new List<Installation>();
+
+    // ── Soft delete (see ISoftDeletable) ──
+    public DateTime? DeletedAt { get; set; }
+    public string? DeletedByUserId { get; set; }
+
 }

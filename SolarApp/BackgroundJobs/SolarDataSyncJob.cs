@@ -811,11 +811,13 @@ public class SolarDataSyncJob
                 // Reset its circuit breaker (a device merely offline still
                 // counts as a successful sync — the cloud answered).
                 Services.InverterApi.Common.SyncCircuitBreaker.RecordSuccess(installation.Id);
+                await ResolveApiFailureAlertsAsync(installation);
             }
             catch (TaskCanceledException)
             {
                 totalApiFailures++;
-                Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id);
+                if (Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id))
+                    RaiseApiFailureAlert(installation, "การเชื่อมต่อหมดเวลาตอบกลับ (timeout)");
                 _logger.LogWarning("Sync timeout for {Id} ({Brand})", installation.Id, installation.InverterBrand);
                 LogApiCall(installation, "Sync", 0, false,
                     $"[TIMEOUT] Sync timed out for {installation.SiteName}. " +
@@ -825,7 +827,8 @@ public class SolarDataSyncJob
             catch (HttpRequestException hre)
             {
                 totalApiFailures++;
-                Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id);
+                if (Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id))
+                    RaiseApiFailureAlert(installation, $"ติดต่อเซิร์ฟเวอร์ไม่ได้: {hre.Message}");
                 _logger.LogWarning(hre, "Network error syncing {Id} ({Brand})", installation.Id, installation.InverterBrand);
                 LogApiCall(installation, "Sync", 0, false,
                     $"[NETWORK ERROR] Cannot reach {installation.InverterBrand} cloud: {hre.Message}. " +
@@ -835,7 +838,8 @@ public class SolarDataSyncJob
             catch (Exception ex)
             {
                 totalApiFailures++;
-                Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id);
+                if (Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id))
+                    RaiseApiFailureAlert(installation, $"{ex.GetType().Name}: {ex.Message}");
                 _logger.LogError(ex, "Sync failed for {Id} ({Brand})", installation.Id, installation.InverterBrand);
                 LogApiCall(installation, "Sync", 500, false,
                     $"[UNEXPECTED ERROR] {ex.GetType().Name}: {ex.Message}");
@@ -866,6 +870,75 @@ public class SolarDataSyncJob
             "{ApiFailures} API failures | {DeviceOffline} device-offline | {RateLimited} rate-limit-deferred",
             installations.Count, totalRealtime, totalDaily, totalAlarms,
             totalApiFailures, totalDeviceOffline, totalRateLimitDeferred);
+    }
+
+    /// <summary>
+    /// Raises the alert behind the per-site "แจ้งเตือนเมื่อ API ล้มเหลว" switch.
+    /// That switch was saved to the database and read by nothing — an operator
+    /// could turn it on and would never hear from it. Fired only when the
+    /// circuit breaker trips (5 consecutive failures, roughly 75 minutes of
+    /// solid failure at the default cadence) so a single flaky poll doesn't
+    /// page anyone, and deduped against an unresolved one so a site that stays
+    /// broken doesn't re-alert every round.
+    /// </summary>
+    private void RaiseApiFailureAlert(Installation installation, string reason)
+    {
+        if (!installation.NotifyOnApiFailure) return;
+
+        // Local first: a second failure in the same round would otherwise add a
+        // duplicate, because nothing has been saved yet.
+        if (_context.SystemAlerts.Local.Any(IsOpenApiFailure(installation.Id))) return;
+        if (_context.SystemAlerts.Any(a => a.InstallationId == installation.Id
+                                           && a.AlertType == AlertType.Error
+                                           && a.ResolvedAt == null
+                                           && a.Title.StartsWith(ApiFailureTitlePrefix))) return;
+
+        _context.SystemAlerts.Add(new SystemAlert
+        {
+            InstallationId = installation.Id,
+            AlertType = AlertType.Error,
+            Severity = AlertSeverity.High,
+            Title = $"{ApiFailureTitlePrefix}{installation.SiteName}",
+            Message =
+                $"ดึงข้อมูลจากคลาวด์ {installation.InverterBrand} ไม่สำเร็จติดต่อกัน " +
+                $"{Services.InverterApi.Common.SyncCircuitBreaker.FailureThreshold} ครั้ง — {reason}",
+            RootCauseAnalysis =
+                "นี่คือปัญหาการเชื่อมต่อ API ไม่ใช่ตัวอินเวอร์เตอร์ดับ — ระบบอาจยังผลิตไฟตามปกติ " +
+                "แต่ SolarApp มองไม่เห็นข้อมูล\n" +
+                "การตรวจสอบ:\n" +
+                "  1. เปิดหน้าตั้งค่าไซต์ → กด Test Connection ดูข้อความผิดพลาดจริง\n" +
+                "  2. ถ้าเป็นปัญหา credentials → ขอ API key / รหัสผ่านใหม่จากพอร์ทัลผู้ผลิต\n" +
+                "  3. ถ้าเป็นปัญหาเครือข่าย → ตรวจอินเทอร์เน็ตและ DNS ของเซิร์ฟเวอร์ SolarApp\n" +
+                "ระบบจะหยุดเรียกไซต์นี้ชั่วคราวเพื่อไม่ให้เปลือง rate limit และกลับมาลองเองอัตโนมัติ",
+            OccurredAt = DateTime.UtcNow,
+            IsNotified = false
+        });
+    }
+
+    private const string ApiFailureTitlePrefix = "เชื่อมต่อคลาวด์ไม่สำเร็จ: ";
+
+    private static Func<SystemAlert, bool> IsOpenApiFailure(int installationId) =>
+        a => a.InstallationId == installationId
+             && a.AlertType == AlertType.Error
+             && a.ResolvedAt == null
+             && a.Title.StartsWith(ApiFailureTitlePrefix);
+
+    /// <summary>
+    /// Closes the API-failure alert once the site answers again. Without this
+    /// the operator would have to clear by hand a problem that fixed itself,
+    /// and the dashboard count would never come down.
+    /// </summary>
+    private async Task ResolveApiFailureAlertsAsync(Installation installation)
+    {
+        var open = await _context.SystemAlerts
+            .Where(a => a.InstallationId == installation.Id
+                        && a.AlertType == AlertType.Error
+                        && a.ResolvedAt == null
+                        && a.Title.StartsWith(ApiFailureTitlePrefix))
+            .ToListAsync();
+
+        foreach (var a in open)
+            a.ResolvedAt = DateTime.UtcNow;
     }
 
     private void LogApiCall(Installation installation, string endpoint, int statusCode, bool success, string? error = null)

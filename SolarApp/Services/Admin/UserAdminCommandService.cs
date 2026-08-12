@@ -29,11 +29,11 @@ public interface IUserAdminCommandService
 
     Task<CommandResult> CreateCustomerAsync(CustomerAdminInput input);
     Task<CommandResult> EditCustomerAsync(CustomerAdminInput input);
-    Task<CommandResult> DeleteCustomerAsync(int customerId);
+    Task<CommandResult> DeleteCustomerAsync(int customerId, string? actingUserId = null);
 
     Task<CommandResult> CreatePartnerAsync(PartnerAdminInput input);
     Task<CommandResult> EditPartnerAsync(PartnerAdminInput input);
-    Task<CommandResult> DeletePartnerAsync(int partnerId);
+    Task<CommandResult> DeletePartnerAsync(int partnerId, string? actingUserId = null);
 
     Task<CommandResult> InviteCustomerAsync(int customerId, string? password);
     Task<CommandResult> InvitePartnerAsync(int partnerId, string? password, string? firstName, string? lastName);
@@ -317,7 +317,7 @@ public class UserAdminCommandService : IUserAdminCommandService
         return CommandResult.Ok($"Customer '{customer.FullName}' updated");
     }
 
-    public async Task<CommandResult> DeleteCustomerAsync(int customerId)
+    public async Task<CommandResult> DeleteCustomerAsync(int customerId, string? actingUserId = null)
     {
         var customer = await _context.Customers
             .Include(c => c.Installations)
@@ -327,11 +327,16 @@ public class UserAdminCommandService : IUserAdminCommandService
             return CommandResult.Fail("Customer not found");
 
         if (customer.Installations.Any())
-            return CommandResult.Fail($"Cannot delete: customer has {customer.Installations.Count} installation(s). Delete installations first.");
+            return CommandResult.Fail($"ลบไม่ได้: ลูกค้ารายนี้ยังมีไซต์งาน {customer.Installations.Count} แห่ง — ลบไซต์งานก่อน");
 
-        _context.Customers.Remove(customer);
+        // Soft delete: the production history, cleaning records and work orders
+        // tied to this customer are the evidence an O&M contract is settled on.
+        // A hard DELETE removed them at exactly the moment a dispute needs them.
+        customer.DeletedAt = DateTime.UtcNow;
+        customer.DeletedByUserId = actingUserId;
+        customer.IsActive = false;
         await _context.SaveChangesAsync();
-        return CommandResult.Ok($"Customer '{customer.FullName}' deleted");
+        return CommandResult.Ok($"ลบลูกค้า '{customer.FullName}' แล้ว (เก็บประวัติไว้ในระบบ)");
     }
 
     // ──────────────────────── PARTNERS ────────────────────────
@@ -398,7 +403,7 @@ public class UserAdminCommandService : IUserAdminCommandService
         return CommandResult.Ok($"Partner '{partner.CompanyName}' updated");
     }
 
-    public async Task<CommandResult> DeletePartnerAsync(int partnerId)
+    public async Task<CommandResult> DeletePartnerAsync(int partnerId, string? actingUserId = null)
     {
         var partner = await _context.Partners
             .Include(p => p.Installations)
@@ -409,15 +414,19 @@ public class UserAdminCommandService : IUserAdminCommandService
             return CommandResult.Fail("Partner not found");
 
         if (partner.Installations.Any())
-            return CommandResult.Fail($"Cannot delete: partner has {partner.Installations.Count} installation(s)");
+            return CommandResult.Fail($"ลบไม่ได้: พาร์ทเนอร์รายนี้ยังดูแลไซต์งาน {partner.Installations.Count} แห่ง");
 
-        // Nullify users + remove partner in a single SaveChanges round-trip.
-        // EF tracks both as pending; the SQL is two statements in one transaction.
+        // Users still lose their link — they must stop seeing this partner's
+        // sites immediately — but the partner row itself is kept so historical
+        // work orders can still say who carried the job out.
         foreach (var u in partner.Users)
             u.PartnerId = null;
-        _context.Partners.Remove(partner);
+
+        partner.DeletedAt = DateTime.UtcNow;
+        partner.DeletedByUserId = actingUserId;
+        partner.IsActive = false;
         await _context.SaveChangesAsync();
-        return CommandResult.Ok($"Partner '{partner.CompanyName}' deleted");
+        return CommandResult.Ok($"ลบพาร์ทเนอร์ '{partner.CompanyName}' แล้ว (เก็บประวัติไว้ในระบบ)");
     }
 
     // ──────────────────────── INVITES ────────────────────────

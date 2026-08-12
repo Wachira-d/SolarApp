@@ -2,7 +2,7 @@ using SolarApp.Models.Enums;
 
 namespace SolarApp.Models;
 
-public class Installation
+public class Installation : ISoftDeletable
 {
     public int Id { get; set; }
     public string SiteCode { get; set; } = string.Empty;
@@ -219,4 +219,9 @@ public class Installation
     public ICollection<CleaningRecord> CleaningRecords { get; set; } = new List<CleaningRecord>();
     public ICollection<InstallationDocument> Documents { get; set; } = new List<InstallationDocument>();
     public ICollection<ElectricityTariff> Tariffs { get; set; } = new List<ElectricityTariff>();
+
+    // ── Soft delete (see ISoftDeletable) ──
+    public DateTime? DeletedAt { get; set; }
+    public string? DeletedByUserId { get; set; }
+
 }
