@@ -37,9 +37,48 @@
         <li>Create Provider → Create Channel → เลือก <strong>Messaging API</strong></li>
         <li>ที่ Channel Settings → copy <strong>Channel Secret</strong></li>
         <li>ที่ Messaging API tab → Issue <strong>Channel access token (long-lived)</strong> → copy</li>
-        <li>เพิ่ม Bot เข้ากลุ่ม LINE → ได้ <strong>Group ID</strong> (ดูจาก webhook event)</li>
-        <li>สำหรับ User ID → ให้ user เพิ่มเพื่อน Bot แล้วดู User ID จาก webhook</li>
+        <li>ที่ Messaging API tab → <strong>Webhook URL</strong> → ใส่ URL ด้านล่าง แล้วเปิด <strong>Use webhook</strong></li>
+        <li>เพิ่ม Bot เข้ากลุ่ม LINE → Bot จะตอบ <strong>Group ID</strong> กลับมาในกลุ่มทันที</li>
+        <li>ให้ลูกค้าเพิ่มเพื่อน Bot → Bot จะตอบ <strong>User ID</strong> กลับไปให้ลูกค้าส่งมาให้</li>
     </ol>
+</div>
+
+@* Copying a group ID out of a debugger was the only way to get one. With
+   the webhook connected the bot answers with it, and customers can ask the
+   system how their site is doing instead of ringing the office. *@
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white">
+        <h6 class="mb-0"><i class="bi bi-arrow-left-right"></i> Webhook — ให้ลูกค้าถามสถานะผ่าน LINE ได้</h6>
+    </div>
+    <div class="card-body">
+        <label class="form-label fw-bold">Webhook URL (นำไปใส่ใน LINE Developers Console)</label>
+        <div class="input-group mb-2">
+            <input type="text" class="form-control font-monospace" readonly id="webhookUrl"
+                   value="@($"{Context.Request.Scheme}://{Context.Request.Host}/api/line/webhook")" />
+            <button type="button" class="btn btn-outline-secondary"
+                    onclick="navigator.clipboard.writeText(document.getElementById('webhookUrl').value); this.innerHTML='<i class=bi-check2></i> คัดลอกแล้ว'">
+                <i class="bi bi-clipboard"></i> คัดลอก
+            </button>
+        </div>
+        <div class="small text-muted">
+            ต้องเป็น <code>https://</code> — LINE ไม่รับ webhook ที่ไม่ได้เข้ารหัส<br>
+            ต้องตั้งค่า <strong>Channel Secret</strong> ด้านล่างก่อน มิฉะนั้นระบบจะปฏิเสธทุก request
+            (ใช้ตรวจลายเซ็นว่ามาจาก LINE จริง)
+        </div>
+        <hr />
+        <p class="small mb-1 fw-bold">คำสั่งที่ลูกค้าพิมพ์ได้:</p>
+        <ul class="small mb-0">
+            <li><code>สถานะ</code> — ระบบทำงานปกติไหม ผลิตได้เท่าไหร่วันนี้</li>
+            <li><code>เดือนนี้</code> — ผลผลิตและค่าไฟที่ประหยัดได้เดือนนี้</li>
+            <li><code>แจ้งเตือน</code> — รายการที่ยังไม่ได้จัดการ</li>
+            <li><code>ID</code> — ดู LINE ID ของตัวเองหรือของกลุ่ม</li>
+            <li><code>เมนู</code> — ดูคำสั่งทั้งหมด</li>
+        </ul>
+        <div class="small text-muted mt-2">
+            ระบบตอบเฉพาะข้อมูลของ LINE ID ที่ถามเท่านั้น — ถ้ายังไม่ได้ผูกกับบัญชีลูกค้า
+            จะได้รับแค่ ID ของตัวเองกลับไป
+        </div>
+    </div>
 </div>
 
 <div class="row">
