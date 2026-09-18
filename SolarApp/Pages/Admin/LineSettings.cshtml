@@ -46,6 +46,12 @@
 @* Copying a group ID out of a debugger was the only way to get one. With
    the webhook connected the bot answers with it, and customers can ask the
    system how their site is doing instead of ringing the office. *@
+@{
+    // Built from the live request so the operator copies the URL for THIS
+    // deployment, not a hard-coded one that would silently point at staging.
+    var req = ViewContext.HttpContext.Request;
+    var webhookUrl = $"{req.Scheme}://{req.Host}/api/line/webhook";
+}
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white">
         <h6 class="mb-0"><i class="bi bi-arrow-left-right"></i> Webhook — ให้ลูกค้าถามสถานะผ่าน LINE ได้</h6>
@@ -54,7 +60,7 @@
         <label class="form-label fw-bold">Webhook URL (นำไปใส่ใน LINE Developers Console)</label>
         <div class="input-group mb-2">
             <input type="text" class="form-control font-monospace" readonly id="webhookUrl"
-                   value="@($"{Context.Request.Scheme}://{Context.Request.Host}/api/line/webhook")" />
+                   value="@webhookUrl" />
             <button type="button" class="btn btn-outline-secondary"
                     onclick="navigator.clipboard.writeText(document.getElementById('webhookUrl').value); this.innerHTML='<i class=bi-check2></i> คัดลอกแล้ว'">
                 <i class="bi bi-clipboard"></i> คัดลอก

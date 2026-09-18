@@ -6,6 +6,17 @@
     var currentPage = (ViewContext.RouteData.Values["page"] as string)?.ToLower() ?? "";
     string ActiveClass(params string[] prefixes) =>
         prefixes.Any(p => currentPage.StartsWith(p.ToLower())) ? "active" : "";
+
+    // Which collapsed admin group the operator is currently inside, so a page
+    // reload doesn't fold away the section they're working in.
+    var inSetup = currentPage.StartsWith("/admin/workordertemplates")
+        || currentPage.StartsWith("/admin/schedule")
+        || currentPage.StartsWith("/admin/linesettings")
+        || currentPage.StartsWith("/admin/notificationroutes")
+        || currentPage.StartsWith("/admin/externalauth");
+    var inDiag = currentPage.StartsWith("/admin/connectionhealth")
+        || currentPage.StartsWith("/admin/startuplogs")
+        || currentPage.StartsWith("/admin/auditlogs");
 }
 
 <nav class="p-2 d-flex flex-column" style="flex: 1 1 auto;">
@@ -118,19 +129,6 @@
                     <i class="bi bi-file-earmark-text me-2"></i>สัญญาบริการ
                 </a>
             </li>
-            @{
-                // Open the group when the operator is already inside it, so a
-                // page reload doesn't hide the section they're working in.
-                var inSetup = currentPage.StartsWith("/admin/workordertemplates")
-                    || currentPage.StartsWith("/admin/schedule")
-                    || currentPage.StartsWith("/admin/linesettings")
-                    || currentPage.StartsWith("/admin/notificationroutes")
-                    || currentPage.StartsWith("/admin/externalauth");
-                var inDiag = currentPage.StartsWith("/admin/connectionhealth")
-                    || currentPage.StartsWith("/admin/startuplogs")
-                    || currentPage.StartsWith("/admin/auditlogs");
-            }
-
             <li class="nav-item">
                 <a class="nav-link text-white d-flex align-items-center @(inSetup ? "" : "collapsed")"
                    data-bs-toggle="collapse" href="#navSetup" role="button"
