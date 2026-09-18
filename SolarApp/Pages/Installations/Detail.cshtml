@@ -157,34 +157,81 @@
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white"><h6 class="mb-0">ประกัน</h6></div>
             <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-sm table-borderless mb-0">
-                        <tr><td class="text-muted">ระยะเวลา</td><td class="text-end">@inst.WarrantyYears ปี</td></tr>
-                        <tr>
-                            <td class="text-muted">ประกันหมดอายุ</td>
-                            <td class="text-end @(inst.IsWarrantyExpired ? "text-danger fw-bold" : "text-success")">
-                                @inst.WarrantyExpiryDate.ToString("dd/MM/yyyy")
-                                @(inst.IsWarrantyExpired ? " (หมดอายุ)" : "")
-                            </td>
-                        </tr>
-                        <tr>
-                            <td class="text-muted">เหลืออีก</td>
-                            <td class="text-end">
-                                @{
-                                    var daysLeft = (inst.WarrantyExpiryDate - DateTime.UtcNow).Days;
-                                }
-                                @(daysLeft > 0 ? $"{daysLeft} days" : "Expired")
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-
-                @if (inst.WarrantyExpiryDate > DateTime.UtcNow)
+                @if (!inst.HasWarrantyDate)
                 {
-                    var progress = (int)(100 - ((double)daysLeft / (inst.WarrantyYears * 365.0) * 100));
-                    <div class="progress mt-2" style="height: 8px;">
-                        <div class="progress-bar bg-warning" style="width: @progress%"></div>
+                    @* An unset date sits at 0001-01-01. Rendering that as
+                       "หมดอายุ 01/01/0001" told the operator the warranty had
+                       lapsed when in fact nobody had entered it. *@
+                    <div class="alert alert-warning small mb-0">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        ยังไม่ได้ระบุวันสิ้นสุดรับประกัน — ไซต์นี้จะไม่เข้าระบบแจ้งเตือนประกันใกล้หมด
+                        <a asp-page="Edit" asp-route-id="@inst.Id">ตั้งค่า</a>
                     </div>
+                }
+                else
+                {
+                    @* Counted in site-local days. The old sum used UtcNow, so
+                       the number flipped at 07:00 Thailand time. *@
+                    var daysLeft = inst.WarrantyDaysRemaining ?? 0;
+                    var calculatedEnd = SolarApp.Models.Installation.CalculateWarrantyEnd(
+                        inst.InstallationDate, inst.WarrantyYears);
+                    var isOverridden = calculatedEnd.Date != inst.WarrantyExpiryDate.Date;
+
+                    <div class="table-responsive">
+                        <table class="table table-sm table-borderless mb-0">
+                            <tr>
+                                <td class="text-muted">วันส่งมอบงาน</td>
+                                <td class="text-end">@inst.InstallationDate.ToString("dd/MM/yyyy")</td>
+                            </tr>
+                            <tr><td class="text-muted">ระยะประกัน</td><td class="text-end">@inst.WarrantyYears ปี</td></tr>
+                            <tr>
+                                <td class="text-muted">สิ้นสุดรับประกัน</td>
+                                <td class="text-end @(inst.IsWarrantyExpired ? "text-danger fw-bold" : "text-success")">
+                                    @inst.WarrantyExpiryDate.ToString("dd/MM/yyyy")
+                                    @if (isOverridden)
+                                    {
+                                        <br />
+                                        <small class="text-muted" title="ไม่ได้คำนวณจากวันส่งมอบ + ระยะประกัน">
+                                            กำหนดเอง
+                                        </small>
+                                    }
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="text-muted">เหลืออีก</td>
+                                <td class="text-end">
+                                    @if (daysLeft > 0)
+                                    {
+                                        @($"{daysLeft} วัน")
+                                    }
+                                    else if (daysLeft == 0)
+                                    {
+                                        <span class="text-danger fw-bold">หมดวันนี้</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-danger fw-bold">หมดอายุแล้ว @(-daysLeft) วัน</span>
+                                    }
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    @if (daysLeft >= 0)
+                    {
+                        @* Elapsed against the real term (handover → end), not
+                           WarrantyYears × 365. With an overridden end date the
+                           old formula could exceed 100% or go negative, and the
+                           bar rendered as full or empty either way. *@
+                        var totalDays = Math.Max(1, (inst.WarrantyExpiryDate.Date - inst.InstallationDate.Date).TotalDays);
+                        var elapsed = Math.Clamp(100 - (daysLeft / totalDays * 100), 0, 100);
+                        <div class="progress mt-2" style="height: 8px;" role="progressbar"
+                             aria-valuenow="@((int)elapsed)" aria-valuemin="0" aria-valuemax="100"
+                             title="ใช้ไปแล้ว @((int)elapsed)% ของระยะประกัน">
+                            <div class="progress-bar @(daysLeft <= 90 ? "bg-danger" : "bg-warning")"
+                                 style="width: @((int)elapsed)%"></div>
+                        </div>
+                    }
                 }
             </div>
         </div>

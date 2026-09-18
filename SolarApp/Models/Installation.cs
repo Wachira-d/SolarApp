@@ -73,14 +73,38 @@ public class Installation : ISoftDeletable
     public int? BatteryCount { get; set; }
 
     // Dates
+    /// <summary>
+    /// Handover date — the day the job was signed off and the warranty clock
+    /// started. Named "installation" for historical reasons and kept that way
+    /// so the column doesn't have to move; the UI calls it what it is.
+    /// </summary>
     public DateTime InstallationDate { get; set; }
     public DateTime? CommissionDate { get; set; }
 
     // Warranty
     public int WarrantyYears { get; set; }
+
+    /// <summary>
+    /// The agreed warranty end date.
+    ///
+    /// This used to be derived on every save — handover + WarrantyYears,
+    /// overwritten unconditionally — so an operator could type a correct end
+    /// date, save, and watch it revert. Real warranties don't always run a
+    /// whole number of years from handover: a supplier may date cover from
+    /// commissioning, a dispute may extend it, a contract may simply name a
+    /// date. It is a stored fact now, seeded from the calculation and editable
+    /// afterwards.
+    /// </summary>
     public DateTime WarrantyExpiryDate { get; set; }
     public int InverterWarrantyYears { get; set; }
     public DateTime? InverterWarrantyExpiryDate { get; set; }
+
+    /// <summary>
+    /// The end date the years would give, for pre-filling the form and for
+    /// showing the operator when the stored date has been overridden.
+    /// </summary>
+    public static DateTime CalculateWarrantyEnd(DateTime handoverDate, int years) =>
+        handoverDate.Date.AddYears(years);
 
     // Panel Cleaning
     public int CleaningFrequencyMonths { get; set; } = 6;
@@ -90,7 +114,32 @@ public class Installation : ISoftDeletable
     public DateTime? NextCleaningDueDate { get; set; }
 
     public int RemainingCleanings => TotalCleaningCount - CompletedCleaningCount;
-    public bool IsWarrantyExpired => DateTime.UtcNow > WarrantyExpiryDate;
+
+    /// <summary>
+    /// False when no end date was ever recorded. The column is non-nullable,
+    /// so an unset warranty reads as 0001-01-01 — which every comparison
+    /// treated as "expired two thousand years ago", quietly hiding the site
+    /// from the expiry reminder instead of flagging that nobody filled it in.
+    /// </summary>
+    public bool HasWarrantyDate => WarrantyExpiryDate.Year > 1900;
+
+    /// <summary>
+    /// Compared on site-local dates. UtcNow put the rollover at 07:00
+    /// Thailand time, so a warranty read as live for most of its last morning
+    /// and expired for the first seven hours of the day it should still cover.
+    /// </summary>
+    public bool IsWarrantyExpired =>
+        HasWarrantyDate && Services.SiteTime.Today > WarrantyExpiryDate.Date;
+
+    /// <summary>
+    /// Days until the warranty ends; negative once past, null when no date was
+    /// recorded. Callers that clamped at zero couldn't tell "expires today"
+    /// from "expired last year".
+    /// </summary>
+    public int? WarrantyDaysRemaining => HasWarrantyDate
+        ? (int)(WarrantyExpiryDate.Date - Services.SiteTime.Today).TotalDays
+        : null;
+
     public bool IsCleaningDue => NextCleaningDueDate.HasValue && NextCleaningDueDate.Value <= DateTime.UtcNow;
 
     // Status

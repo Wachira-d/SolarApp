@@ -45,7 +45,7 @@
     <div class="card-header bg-white"><h6 class="mb-0">รูปแบบไฟล์ CSV</h6></div>
     <div class="card-body">
         <p class="small mb-2">คอลัมน์ที่จำเป็น: <code>siteCode, siteName, customerEmail, capacityKw, inverterBrand, systemType</code></p>
-        <p class="small mb-2">คอลัมน์เพิ่มเติม (ไม่บังคับ): <code>partnerName, address, city, province, postalCode, latitude, longitude, installationDate</code></p>
+        <p class="small mb-2">คอลัมน์เพิ่มเติม (ไม่บังคับ): <code>partnerName, address, city, province, postalCode, latitude, longitude, installationDate, warrantyYears, warrantyEndDate</code></p>
         <pre class="mb-0 small bg-body-secondary p-2 rounded"><code>siteCode,siteName,customerEmail,capacityKw,inverterBrand,systemType,latitude,longitude
 SITE-001,Bangkok Factory,customer@example.com,30,Huawei,OnGrid,13.7563,100.5018
 SITE-002,Chiang Mai Home,home@example.com,10,FoxESS,Hybrid,18.7883,98.9853
@@ -53,7 +53,7 @@ SITE-002,Chiang Mai Home,home@example.com,10,FoxESS,Hybrid,18.7883,98.9853
         <div class="small mt-2 text-muted">
             ค่าที่ใช้ได้ของ <strong>inverterBrand</strong>: Huawei, FoxESS, Solis, GoodWe, Deye, Other<br>
             ค่าที่ใช้ได้ของ <strong>systemType</strong>: OnGrid, OffGrid, Hybrid<br>
-            <strong>customerEmail</strong> และ <strong>partnerName</strong> ต้องมีอยู่ในระบบแล้ว
+            <strong>customerEmail</strong> และ <strong>partnerName</strong> ต้องมีอยู่ในระบบแล้ว<br><strong>installationDate</strong> = วันที่ส่งมอบงาน (วันเริ่มรับประกัน) · <strong>warrantyEndDate</strong> เว้นว่าง = คำนวณจาก installationDate + warrantyYears (ค่าเริ่มต้น 10 ปี)
         </div>
     </div>
 </div>

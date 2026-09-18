@@ -385,7 +385,11 @@ public class PredictiveDiagnosticsEngine
         // Inverter warranty expiring + high age
         if (inst.InverterWarrantyExpiryDate.HasValue)
         {
-            var daysLeft = (inst.InverterWarrantyExpiryDate.Value - DateTime.UtcNow).TotalDays;
+            // Whole site-local days, like every other warranty countdown.
+            // Subtracting UtcNow gave a fractional day that rounded the
+            // displayed "เหลืออีก N วัน" down by one for most of the day.
+            var daysLeft = (inst.InverterWarrantyExpiryDate.Value.Date
+                            - SolarApp.Services.SiteTime.Today).TotalDays;
             if (daysLeft is > 0 and <= 180 && ageYears >= 4)
             {
                 alerts.Add(new PredictiveAlert

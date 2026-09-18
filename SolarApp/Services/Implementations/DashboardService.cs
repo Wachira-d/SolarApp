@@ -142,8 +142,11 @@ public class DashboardService : IDashboardService
                 IncludesWarrantyService = inst.IncludesWarrantyService,
                 RemainingCleanings = inst.RemainingCleanings,
                 NextCleaningDate = inst.NextCleaningDueDate,
+                HasWarrantyDate = inst.HasWarrantyDate,
                 WarrantyExpiry = inst.WarrantyExpiryDate,
-                WarrantyDaysLeft = Math.Max(0, (inst.WarrantyExpiryDate - DateTime.UtcNow).Days),
+                // Not clamped at zero any more: that made "expires today" and
+                // "expired eight months ago" both read as 0 days left.
+                WarrantyDaysLeft = inst.WarrantyDaysRemaining ?? 0,
                 InstallationDate = inst.InstallationDate,
                 TodayKwh = instToday?.EnergyGenerationKwh ?? 0
             });
@@ -217,17 +220,27 @@ public class DashboardService : IDashboardService
             // IncludesWarrantyService).  A site past its cleaning date that we
             // don't clean is not "action required" for us, so it's excluded.
             CleaningDueCount = installations.Count(i => i.IncludesCleaning && i.IsCleaningDue),
+            // Same rule as CheckWarrantyExpiryAsync and
+            // GetWarrantyExpiringAsync: recorded end date, inside 90 days,
+            // not yet past, and only where we carry the warranty.
             WarrantyExpiringCount = installations.Count(i =>
                 i.IncludesWarrantyService
-                && i.WarrantyExpiryDate <= DateTime.UtcNow.AddDays(90) && !i.IsWarrantyExpired),
+                && i.HasWarrantyDate
+                && !i.IsWarrantyExpired
+                && i.WarrantyDaysRemaining <= 90),
             PendingMaintenanceCount = pendingMaintenance,
             OpenTicketCount = openTickets,
 
             ActiveAlerts = activeAlerts,
             OfflineInstallations = items.Where(i => i.Status == "Offline").ToList(),
             CleaningDueInstallations = items.Where(i => i.IncludesCleaning && i.IsCleaningDue).ToList(),
-            WarrantyExpiringInstallations = items.Where(i =>
-                i.IncludesWarrantyService && i.WarrantyDaysLeft > 0 && i.WarrantyDaysLeft <= 90).ToList(),
+            // >= 0 so a warranty ending today is still on the list — it was
+            // the one day it most needed to be, and > 0 dropped it.
+            WarrantyExpiringInstallations = items
+                .Where(i => i.IncludesWarrantyService && i.HasWarrantyDate
+                            && i.WarrantyDaysLeft >= 0 && i.WarrantyDaysLeft <= 90)
+                .OrderBy(i => i.WarrantyDaysLeft)
+                .ToList(),
 
             AllInstallations = items.OrderByDescending(i => i.ActiveAlerts)
                 .ThenBy(i => i.Status == "Active" ? 1 : 0)

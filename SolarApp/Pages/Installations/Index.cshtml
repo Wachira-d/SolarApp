@@ -90,15 +90,22 @@
                             <span>@inst.Customer.FullName</span>
                         </div>
                         <div class="d-flex justify-content-between">
-                            <span>วันที่ติดตั้ง:</span>
+                            <span>วันที่ส่งมอบงาน:</span>
                             <span>@inst.InstallationDate.ToString("dd/MM/yyyy")</span>
                         </div>
                         <div class="d-flex justify-content-between">
-                            <span>ประกัน:</span>
-                            <span class="@(inst.IsWarrantyExpired ? "text-danger" : "")">
-                                @inst.WarrantyExpiryDate.ToString("dd/MM/yyyy")
-                                @(inst.IsWarrantyExpired ? "(หมดอายุ)" : "")
-                            </span>
+                            <span>ประกันถึง:</span>
+                            @if (!inst.HasWarrantyDate)
+                            {
+                                <span class="text-muted">ยังไม่ระบุ</span>
+                            }
+                            else
+                            {
+                                <span class="@(inst.IsWarrantyExpired ? "text-danger" : "")">
+                                    @inst.WarrantyExpiryDate.ToString("dd/MM/yyyy")
+                                    @(inst.IsWarrantyExpired ? "(หมดอายุ)" : "")
+                                </span>
+                            }
                         </div>
                         <div class="d-flex justify-content-between">
                             <span>การล้างแผง:</span>

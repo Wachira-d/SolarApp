@@ -123,11 +123,37 @@ public class ContractExpiryJob
             warned++;
         }
 
-        if (renewed + expired + warned > 0)
+        // Close alerts for contracts that have since been renewed or ended.
+        // Without this the alert stays open forever and the dedupe guard above
+        // then blocks the NEXT expiry from ever warning — the same trap the
+        // cleaning-due check had to be fixed for.
+        var stillWarned = contracts
+            .Where(c => c.EndDate.HasValue
+                        && c.EndDate.Value.Date >= today
+                        && (c.EndDate.Value.Date - today).TotalDays <= WarnWithinDays)
+            .Select(c => c.InstallationId)
+            .ToHashSet();
+
+        var openContractAlerts = await _context.SystemAlerts
+            .Where(a => a.AlertType == AlertType.WarrantyExpiring
+                        && a.ResolvedAt == null
+                        && a.Title.StartsWith(AlertTitlePrefix))
+            .ToListAsync();
+
+        var resolved = 0;
+        foreach (var a in openContractAlerts)
+        {
+            if (stillWarned.Contains(a.InstallationId)) continue;
+            a.ResolvedAt = DateTime.UtcNow;
+            resolved++;
+        }
+
+        if (renewed + expired + warned + resolved > 0)
             await _context.SaveChangesAsync();
 
         _logger.LogInformation(
-            "Contract expiry sweep: {Renewed} auto-renewed, {Expired} marked expired, {Warned} expiry alert(s) raised",
-            renewed, expired, warned);
+            "Contract expiry sweep: {Renewed} auto-renewed, {Expired} marked expired, "
+            + "{Warned} expiry alert(s) raised, {Resolved} closed",
+            renewed, expired, warned, resolved);
     }
 }

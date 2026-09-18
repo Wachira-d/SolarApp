@@ -79,7 +79,12 @@ public class CreateModel : PageModel
         public DateTime? CommissionDate { get; set; }
 
         [Required][Range(1, 30)] public int WarrantyYears { get; set; } = 10;
+
+        /// <summary>Pre-filled from handover + years by the form; editable.</summary>
+        public DateTime? WarrantyExpiryDate { get; set; }
+
         public int InverterWarrantyYears { get; set; } = 10;
+        public DateTime? InverterWarrantyExpiryDate { get; set; }
         [Range(0, 100)] public int TotalCleaningCount { get; set; }
         public int CleaningFrequencyMonths { get; set; } = 6;
         public decimal ElectricityRatePerKwh { get; set; } = 4.0m;
@@ -148,7 +153,11 @@ public class CreateModel : PageModel
             InstallationDate = Input.InstallationDate,
             CommissionDate = Input.CommissionDate,
             WarrantyYears = Input.WarrantyYears,
+            // Honour whatever the operator left in the field. CreateAsync only
+            // fills it in when it's still unset, so an edited date survives.
+            WarrantyExpiryDate = Input.WarrantyExpiryDate ?? default,
             InverterWarrantyYears = Input.InverterWarrantyYears,
+            InverterWarrantyExpiryDate = Input.InverterWarrantyExpiryDate,
             TotalCleaningCount = Input.TotalCleaningCount,
             CleaningFrequencyMonths = Input.CleaningFrequencyMonths,
             ElectricityRatePerKwh = Input.ElectricityRatePerKwh,

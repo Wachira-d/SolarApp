@@ -424,16 +424,32 @@ public class SystemHealthMonitorJob
         await _context.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Distinguishes these from the contract-expiry alerts that share the
+    /// WarrantyExpiring type, so each job only resolves its own.
+    /// </summary>
+    private const string WarrantyAlertTitlePrefix = "ประกันใกล้หมดอายุ: ";
+
     private async Task CheckWarrantyExpiryAsync()
     {
         // Warranty-expiry reminders are only relevant for sites where we
         // handle warranty service. Customer-managed warranty sites get no
         // reminder from us.
-        var threshold = DateTime.UtcNow.AddDays(90);
+        // Site-local dates. UtcNow put the window boundary at 07:00 Thailand
+        // time, so a warranty expiring today counted as already gone for the
+        // first seven hours of its last day.
+        var today = Services.SiteTime.Today;
+        var threshold = today.AddDays(90);
+
+        // Year > 1900 excludes rows where no end date was ever entered. Those
+        // read as 0001-01-01, which is "already expired" to every comparison,
+        // so they silently dropped out of the reminder instead of being
+        // flagged as incomplete. They're surfaced separately below.
         var installations = await _context.Installations
             .Where(i => i.IncludesWarrantyService
+                && i.WarrantyExpiryDate.Year > 1900
                 && i.WarrantyExpiryDate <= threshold
-                && i.WarrantyExpiryDate > DateTime.UtcNow)
+                && i.WarrantyExpiryDate >= today)
             .ToListAsync();
 
         foreach (var installation in installations)
@@ -445,14 +461,18 @@ public class SystemHealthMonitorJob
 
             if (!existingAlert)
             {
-                var daysLeft = (installation.WarrantyExpiryDate - DateTime.UtcNow).Days;
+                var daysLeft = (int)(installation.WarrantyExpiryDate.Date - today).TotalDays;
                 _context.SystemAlerts.Add(new SystemAlert
                 {
                     InstallationId = installation.Id,
                     AlertType = AlertType.WarrantyExpiring,
-                    Severity = AlertSeverity.Low,
-                    Title = $"Warranty Expiring: {installation.SiteName}",
-                    Message = $"Warranty expires in {daysLeft} days ({installation.WarrantyExpiryDate:dd/MM/yyyy})",
+                    // Inside a fortnight there is no longer time to quote,
+                    // agree and sign, so it stops being an FYI.
+                    Severity = daysLeft <= 14 ? AlertSeverity.Medium : AlertSeverity.Low,
+                    Title = $"{WarrantyAlertTitlePrefix}{installation.SiteName}",
+                    Message = $"ประกันสิ้นสุด {installation.WarrantyExpiryDate:dd/MM/yyyy} "
+                              + $"(อีก {daysLeft} วัน) · เริ่มประกัน {installation.InstallationDate:dd/MM/yyyy} "
+                              + $"ระยะ {installation.WarrantyYears} ปี",
                     IsNotified = false
                 });
             }
@@ -461,9 +481,15 @@ public class SystemHealthMonitorJob
         // Auto-resolve warranty alerts no longer in the expiring window
         // (warranty renewed/extended → expiry pushed out, already expired, or
         // warranty service dropped).  Same rationale as cleaning above.
+        // Scoped by title prefix. ContractExpiryJob also files under
+        // WarrantyExpiring — correctly, since a contract ending is a scheduled
+        // reminder and not a fault — so an unscoped sweep here would close
+        // every contract-expiry alert the moment this ran.
         var warnIds = installations.Select(i => i.Id).ToHashSet();
         var openWarranty = await _context.SystemAlerts
-            .Where(a => a.AlertType == AlertType.WarrantyExpiring && a.ResolvedAt == null)
+            .Where(a => a.AlertType == AlertType.WarrantyExpiring
+                        && a.ResolvedAt == null
+                        && a.Title.StartsWith(WarrantyAlertTitlePrefix))
             .ToListAsync();
         foreach (var a in openWarranty)
             if (!warnIds.Contains(a.InstallationId))

@@ -349,7 +349,8 @@ else
                                     <strong>@inst.SiteName</strong>
                                     <br /><small class="text-muted">@inst.CustomerName @(inst.PartnerName != null ? $"• {inst.PartnerName}" : "")</small>
                                     <br /><small class="text-warning">
-                                        หมดอายุ @inst.WarrantyExpiry.ToString("dd/MM/yyyy") · เหลือ @inst.WarrantyDaysLeft วัน
+                                        หมดอายุ @inst.WarrantyExpiry.ToString("dd/MM/yyyy") ·
+                                        @(inst.WarrantyDaysLeft == 0 ? "หมดวันนี้" : $"เหลือ {inst.WarrantyDaysLeft} วัน")
                                     </small>
                                 </div>
                                 <a asp-page="/Installations/Warranty" asp-route-id="@inst.Id" class="btn btn-sm btn-outline-warning">ดูประกัน</a>
@@ -443,9 +444,20 @@ else
                                 }
                             </td>
                             <td>
-                                @if (inst.WarrantyDaysLeft <= 0)
+                                @* "ไม่ระบุ" rather than "หมดประกัน": a site with no
+                                   recorded end date sits at 0001-01-01, and
+                                   calling that expired hides a blank field. *@
+                                @if (!inst.HasWarrantyDate)
+                                {
+                                    <small class="text-muted">ไม่ระบุ</small>
+                                }
+                                else if (inst.WarrantyDaysLeft < 0)
                                 {
                                     <span class="badge bg-danger">หมดประกัน</span>
+                                }
+                                else if (inst.WarrantyDaysLeft == 0)
+                                {
+                                    <span class="badge bg-danger">หมดวันนี้</span>
                                 }
                                 else if (inst.WarrantyDaysLeft <= 90)
                                 {

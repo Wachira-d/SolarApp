@@ -97,7 +97,16 @@ public class EditModel : PageModel
         public DateTime? CommissionDate { get; set; }
 
         [Required][Range(1, 30)] public int WarrantyYears { get; set; } = 10;
+
+        /// <summary>
+        /// Null only when the field was cleared — the form pre-fills it from
+        /// handover + years, so a normal save carries the calculated date and
+        /// an edited save carries the operator's.
+        /// </summary>
+        public DateTime? WarrantyExpiryDate { get; set; }
+
         public int InverterWarrantyYears { get; set; } = 10;
+        public DateTime? InverterWarrantyExpiryDate { get; set; }
         [Range(0, 100)] public int TotalCleaningCount { get; set; }
         public int CleaningFrequencyMonths { get; set; } = 6;
         public decimal ElectricityRatePerKwh { get; set; } = 4.0m;
@@ -526,20 +535,21 @@ public class EditModel : PageModel
         installation.NotifyOnCleaningDue = Input.NotifyOnCleaningDue;
         installation.NotifyOnWarrantyExpiry = Input.NotifyOnWarrantyExpiry;
 
-        // Recalculate WarrantyExpiryDate if WarrantyYears changed
-        if (installation.WarrantyYears != Input.WarrantyYears)
-        {
-            installation.WarrantyYears = Input.WarrantyYears;
-            installation.WarrantyExpiryDate = installation.InstallationDate.AddYears(Input.WarrantyYears);
-        }
-        else
-        {
-            installation.WarrantyYears = Input.WarrantyYears;
-        }
+        installation.WarrantyYears = Input.WarrantyYears;
 
-        // Also recalculate if InstallationDate changed (warranty is based on install date)
-        installation.WarrantyExpiryDate = installation.InstallationDate.AddYears(installation.WarrantyYears);
-        installation.InverterWarrantyExpiryDate = installation.InstallationDate.AddYears(installation.InverterWarrantyYears);
+        // The end date is whatever the operator saved. This line used to
+        // recompute it from handover + years on EVERY save, unconditionally,
+        // so a corrected end date reverted the moment it was submitted and
+        // there was no way to record a warranty that doesn't run a whole
+        // number of years from handover. The form pre-fills the calculated
+        // date, so leaving it alone still gives the old behaviour.
+        installation.WarrantyExpiryDate = Input.WarrantyExpiryDate
+            ?? Installation.CalculateWarrantyEnd(installation.InstallationDate, installation.WarrantyYears);
+
+        installation.InverterWarrantyExpiryDate = Input.InverterWarrantyExpiryDate
+            ?? (installation.InverterWarrantyYears > 0
+                ? Installation.CalculateWarrantyEnd(installation.InstallationDate, installation.InverterWarrantyYears)
+                : null);
 
         installation.UpdatedAt = DateTime.UtcNow;
 
@@ -624,7 +634,11 @@ public class EditModel : PageModel
             InstallationDate = installation.InstallationDate,
             CommissionDate = installation.CommissionDate,
             WarrantyYears = installation.WarrantyYears,
+            // Show the date that's actually stored, not a fresh calculation —
+            // the whole point is that it may have been overridden.
+            WarrantyExpiryDate = installation.HasWarrantyDate ? installation.WarrantyExpiryDate : null,
             InverterWarrantyYears = installation.InverterWarrantyYears,
+            InverterWarrantyExpiryDate = installation.InverterWarrantyExpiryDate,
             TotalCleaningCount = installation.TotalCleaningCount,
             CleaningFrequencyMonths = installation.CleaningFrequencyMonths,
             ElectricityRatePerKwh = installation.ElectricityRatePerKwh,

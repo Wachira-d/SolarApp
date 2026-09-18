@@ -73,9 +73,16 @@ public class InstallationService : IInstallationService
         var count = await _context.Installations.CountAsync();
         installation.SiteCode = $"SI-{DateTime.UtcNow:yyyy}-{(count + 1):D4}";
 
-        installation.WarrantyExpiryDate = installation.InstallationDate.AddYears(installation.WarrantyYears);
-        if (installation.InverterWarrantyYears > 0)
-            installation.InverterWarrantyExpiryDate = installation.InstallationDate.AddYears(installation.InverterWarrantyYears);
+        // Only seed the end date when the caller didn't supply one. Computing
+        // it unconditionally here was half of why an edited warranty date
+        // could never stick.
+        if (!installation.HasWarrantyDate)
+            installation.WarrantyExpiryDate =
+                Installation.CalculateWarrantyEnd(installation.InstallationDate, installation.WarrantyYears);
+
+        if (installation.InverterWarrantyExpiryDate == null && installation.InverterWarrantyYears > 0)
+            installation.InverterWarrantyExpiryDate =
+                Installation.CalculateWarrantyEnd(installation.InstallationDate, installation.InverterWarrantyYears);
 
         installation.CreatedAt = DateTime.UtcNow;
         installation.UpdatedAt = DateTime.UtcNow;
@@ -217,10 +224,16 @@ public class InstallationService : IInstallationService
 
     public async Task<List<Installation>> GetWarrantyExpiringAsync(int withinDays = 90)
     {
-        var threshold = DateTime.UtcNow.AddDays(withinDays);
+        // Site-local dates, and skip rows with no recorded end date — those
+        // sit at 0001-01-01 and would otherwise read as long expired.
+        var today = SolarApp.Services.SiteTime.Today;
+        var threshold = today.AddDays(withinDays);
         return await _context.Installations
             .Include(i => i.Customer)
-            .Where(i => i.WarrantyExpiryDate <= threshold && i.WarrantyExpiryDate > DateTime.UtcNow)
+            .Where(i => i.WarrantyExpiryDate.Year > 1900
+                        && i.WarrantyExpiryDate <= threshold
+                        && i.WarrantyExpiryDate >= today)
+            .OrderBy(i => i.WarrantyExpiryDate)
             .ToListAsync();
     }
 }

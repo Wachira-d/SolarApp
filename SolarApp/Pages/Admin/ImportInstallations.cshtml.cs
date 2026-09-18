@@ -160,9 +160,21 @@ public class ImportInstallationsModel : PageModel
             if (double.TryParse(Get("latitude"), NumberStyles.Any, CultureInfo.InvariantCulture, out var latVal)) lat = latVal;
             if (double.TryParse(Get("longitude"), NumberStyles.Any, CultureInfo.InvariantCulture, out var lngVal)) lng = lngVal;
 
-            var instDate = DateTime.TryParse(Get("installationdate"), out var parsedDate) ? parsedDate : DateTime.UtcNow;
+            // Handover date — the day the warranty starts.
+            var instDate = DateTime.TryParse(Get("installationdate"), out var parsedDate)
+                ? parsedDate.Date
+                : DateTime.UtcNow.Date;
             const int cleaningFreqMonths = 6;
-            const int warrantyYears = 10;
+
+            // Term and end date come from the file when present. Hard-coding
+            // ten years meant every imported site got a warranty nobody agreed
+            // to, and the expiry reminder then fired on a date that was made up.
+            var warrantyYears = int.TryParse(Get("warrantyyears"), out var wy) && wy is > 0 and <= 30
+                ? wy
+                : 10;
+            var warrantyEnd = DateTime.TryParse(Get("warrantyenddate"), out var we)
+                ? we.Date
+                : Installation.CalculateWarrantyEnd(instDate, warrantyYears);
 
             // Seed warranty + next-cleaning dates so imported sites actually
             // participate in the warranty/cleaning reminder jobs.  Without
@@ -193,7 +205,7 @@ public class ImportInstallationsModel : PageModel
                 CleaningFrequencyMonths = cleaningFreqMonths,
                 NextCleaningDueDate = nextCleaning,
                 WarrantyYears = warrantyYears,
-                WarrantyExpiryDate = instDate.AddYears(warrantyYears)
+                WarrantyExpiryDate = warrantyEnd
             });
             siteCodeSet.Add(siteCode);
             Results.Add(new ImportResult(row, siteName, DryRun ? "VALID" : "OK", null));

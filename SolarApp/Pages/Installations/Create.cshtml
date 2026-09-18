@@ -189,19 +189,38 @@
                     <h6 class="text-muted mb-3 mt-4">ประกันและการบำรุงรักษา</h6>
                     <div class="row mb-3">
                         <div class="col-md-3">
-                            <label asp-for="Input.InstallationDate" class="form-label">วันที่ติดตั้ง *</label>
-                            <input asp-for="Input.InstallationDate" class="form-control" type="date" />
+                            <label asp-for="Input.InstallationDate" class="form-label">
+                                วันที่ส่งมอบงาน <span class="text-muted">(วันเริ่มรับประกัน)</span> *
+                            </label>
+                            <input asp-for="Input.InstallationDate" class="form-control" type="date"
+                                   id="warrantyStart" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.WarrantyYears" class="form-label">ระยะประกัน (ปี) *</label>
+                            <input asp-for="Input.WarrantyYears" class="form-control" id="warrantyYears" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.WarrantyExpiryDate" class="form-label">
+                                วันที่สิ้นสุดรับประกัน
+                                <span class="badge bg-light text-muted border" id="warrantyEndState">คำนวณอัตโนมัติ</span>
+                            </label>
+                            <div class="input-group">
+                                <input asp-for="Input.WarrantyExpiryDate" class="form-control" type="date"
+                                       id="warrantyEnd" />
+                                <button type="button" class="btn btn-outline-secondary" id="warrantyEndReset"
+                                        title="คำนวณใหม่จากวันส่งมอบ + ระยะประกัน">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                            <div class="form-text" id="warrantyEndHint"></div>
                         </div>
                         <div class="col-md-3">
                             <label asp-for="Input.CommissionDate" class="form-label">วันที่เริ่มจ่ายไฟ</label>
                             <input asp-for="Input.CommissionDate" class="form-control" type="date" />
+                            <div class="form-text">ไม่เกี่ยวกับการนับประกัน</div>
                         </div>
                         <div class="col-md-3">
-                            <label asp-for="Input.WarrantyYears" class="form-label">ระยะประกัน (ปี) *</label>
-                            <input asp-for="Input.WarrantyYears" class="form-control" />
-                        </div>
-                        <div class="col-md-3">
-                            <label asp-for="Input.TotalCleaningCount" class="form-label">Total Cleanings (จำนวนครั้งในสัญญา)</label>
+                            <label asp-for="Input.TotalCleaningCount" class="form-label">จำนวนครั้งล้างแผงในสัญญา</label>
                             <input asp-for="Input.TotalCleaningCount" class="form-control" />
                         </div>
                     </div>
@@ -331,6 +350,77 @@
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
     <script>
+        // ─── Warranty end date ─────────────────────────────────────────
+        // Keeps the calculated date in the box while nobody has touched it, and
+        // stops the moment someone types their own — the server used to
+        // overwrite it on every save, which is what made a correct end date
+        // impossible to record.
+        (function () {
+            const start = document.getElementById('warrantyStart');
+            const years = document.getElementById('warrantyYears');
+            const end = document.getElementById('warrantyEnd');
+            const state = document.getElementById('warrantyEndState');
+            const hint = document.getElementById('warrantyEndHint');
+            const reset = document.getElementById('warrantyEndReset');
+            if (!start || !years || !end) return;
+
+            function calculated() {
+                if (!start.value) return '';
+                const y = parseInt(years.value, 10);
+                if (isNaN(y)) return '';
+
+                // Build from the parts rather than Date arithmetic on a local
+                // Date: a UTC round-trip shifts the day by one in Thailand, and
+                // a warranty ending 24/11 instead of 25/11 is the class of bug
+                // being fixed here.
+                const [yy, mm, dd] = start.value.split('-').map(Number);
+                const d = new Date(Date.UTC(yy + y, mm - 1, dd));
+
+                // 29 Feb + N years rolls to 1 Mar, which is the right
+                // direction — cover shouldn't end a day early.
+                return d.toISOString().slice(0, 10);
+            }
+
+            function thai(iso) {
+                if (!iso) return '';
+                const [y, m, d] = iso.split('-');
+                return d + '/' + m + '/' + y;
+            }
+
+            // A stored date that already differs from the calculation was set
+            // deliberately — don't recompute over it on load.
+            let overridden = end.value !== '' && end.value !== calculated();
+
+            function refresh() {
+                const calc = calculated();
+                if (!overridden && calc) end.value = calc;
+
+                const differs = calc && end.value && end.value !== calc;
+                if (state) {
+                    state.textContent = differs ? 'กำหนดเอง' : 'คำนวณอัตโนมัติ';
+                    state.className = differs
+                        ? 'badge bg-warning text-dark'
+                        : 'badge bg-light text-muted border';
+                }
+                if (hint) {
+                    hint.innerHTML = differs
+                        ? 'แก้ไขเอง — ระบบจะใช้วันที่นี้ ไม่ทับด้วยค่าที่คำนวณ ' +
+                          '<span class="text-muted">(คำนวณได้ ' + thai(calc) + ')</span>'
+                        : (calc ? 'คำนวณจากวันส่งมอบ + ระยะประกัน — แก้ไขได้' : '');
+                }
+            }
+
+            start.addEventListener('change', refresh);
+            years.addEventListener('input', refresh);
+            end.addEventListener('keydown', () => { overridden = true; });
+            end.addEventListener('change', () => { overridden = true; refresh(); });
+
+            reset?.addEventListener('click', () => { overridden = false; refresh(); });
+
+            refresh();
+        })();
+
+
         // ─── Service-scope preset → flag auto-toggling ───────────────────────
         const SERVICE_LEVEL_PRESETS = {
             0:  { mon: true,  clean: true,  pm: true,  cm: true,  warr: true  },

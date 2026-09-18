@@ -87,6 +87,11 @@ public class InstallationStatusItem
     public int RemainingCleanings { get; set; }
     public DateTime? NextCleaningDate { get; set; }
     public DateTime WarrantyExpiry { get; set; }
+
+    /// <summary>False when no warranty end date was recorded — see Installation.HasWarrantyDate.</summary>
+    public bool HasWarrantyDate { get; set; }
+
+    /// <summary>Negative once the warranty is past. Not clamped.</summary>
     public int WarrantyDaysLeft { get; set; }
     public DateTime InstallationDate { get; set; }
     public decimal TodayKwh { get; set; }

@@ -104,9 +104,18 @@ public class DailySummaryJob
         // Most overdue first, so the ten that fit are the ten that matter.
         var cleaningDueSites = cleaningDue.Take(10).ToList();
 
-        var warrantyExpiringCount = await _context.SystemAlerts
-            .CountAsync(a => a.ResolvedAt == null
-                             && a.AlertType == AlertType.WarrantyExpiring);
+        // Counted from the installations for the same reason as cleaning: the
+        // alert count drifts from reality whenever one is resolved by hand or
+        // the health monitor hasn't run yet. It also can't tell warranty from
+        // contract — ContractExpiryJob files under WarrantyExpiring too, so an
+        // alert count would report an expiring CONTRACT as an expiring
+        // WARRANTY. The dates are the facts.
+        var warrantyThreshold = siteToday.AddDays(90);
+        var warrantyExpiringCount = await _context.Installations
+            .CountAsync(i => i.IncludesWarrantyService
+                             && i.WarrantyExpiryDate.Year > 1900
+                             && i.WarrantyExpiryDate >= siteToday
+                             && i.WarrantyExpiryDate <= warrantyThreshold);
 
         // "New alerts today" = new SYSTEM PROBLEMS today (not reminders).
         var newAlertsToday = await _context.SystemAlerts
