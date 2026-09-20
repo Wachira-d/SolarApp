@@ -342,7 +342,7 @@ public class PredictiveDiagnosticsEngine
     private List<PredictiveAlert> AnalyzeAgeBasedRisks(Installation inst)
     {
         var alerts = new List<PredictiveAlert>();
-        var ageYears = (DateTime.UtcNow - inst.InstallationDate).TotalDays / 365.25;
+        var ageYears = (DateTime.UtcNow - inst.HardwareInServiceDate).TotalDays / 365.25;
 
         // Inverter fan typically fails at 5-7 years
         if (ageYears is >= 4.5 and < 6)
@@ -353,7 +353,7 @@ public class PredictiveDiagnosticsEngine
                 InstallationId = inst.Id,
                 SiteName = inst.SiteName,
                 Prediction = $"Inverter อายุ {ageYears:0.0} ปี — ใกล้ถึงจุดเสี่ยงพัดลมเสีย (5-7 ปี)",
-                Evidence = $"ติดตั้งวันที่ {inst.InstallationDate:dd/MM/yyyy} ({ageYears:0.1} ปี)\n" +
+                Evidence = $"เริ่มใช้งานวันที่ {inst.HardwareInServiceDate:dd/MM/yyyy} ({ageYears:0.1} ปี)\n" +
                            "สถิติจากอุตสาหกรรม: พัดลม inverter มักเริ่มมีปัญหาที่ 5-7 ปี " +
                            "ถ้าพังจะทำให้ inverter ร้อนเกิน → shutdown → ผลิตไฟลดลง",
                 CheckSteps = kb.CheckSteps,
@@ -372,7 +372,7 @@ public class PredictiveDiagnosticsEngine
                 InstallationId = inst.Id,
                 SiteName = inst.SiteName,
                 Prediction = $"Inverter อายุ {ageYears:0.0} ปี — ใกล้ถึงจุดเสี่ยง capacitor เสื่อม",
-                Evidence = $"ติดตั้งวันที่ {inst.InstallationDate:dd/MM/yyyy} ({ageYears:0.1} ปี)\n" +
+                Evidence = $"เริ่มใช้งานวันที่ {inst.HardwareInServiceDate:dd/MM/yyyy} ({ageYears:0.1} ปี)\n" +
                            "Electrolytic capacitor ใน inverter มีอายุใช้งาน 7-12 ปี " +
                            "โดยเฉพาะในสภาพอากาศร้อน อาการเริ่มแรก: output power ลดลง, ripple เพิ่ม",
                 CheckSteps = kb.CheckSteps,
@@ -436,13 +436,13 @@ public class PredictiveDiagnosticsEngine
 
         // Monsoon season: May-October → lightning + water damage risk
         // Skip sites < 90 days old — nothing to inspect yet on a fresh install
-        var daysSinceInstall = (DateTime.UtcNow - inst.InstallationDate).TotalDays;
+        var daysSinceInstall = (DateTime.UtcNow - inst.HardwareInServiceDate).TotalDays;
         if (thMonth is >= 5 and <= 6 && daysSinceInstall >= 90)
         {
             // Use install date as fallback if never cleaned (not a 999 sentinel)
-            var referenceDate = inst.LastCleaningDate ?? inst.InstallationDate;
+            var referenceDate = inst.LastCleaningDate ?? inst.HardwareInServiceDate;
             var daysSinceLastCleaning = (DateTime.UtcNow - referenceDate).TotalDays;
-            var refLabel = inst.LastCleaningDate.HasValue ? "ล้างแผงครั้งสุดท้าย" : "ตั้งแต่ติดตั้ง (ยังไม่เคยล้าง)";
+            var refLabel = inst.LastCleaningDate.HasValue ? "ล้างแผงครั้งสุดท้าย" : "ตั้งแต่เริ่มใช้งาน (ยังไม่เคยล้าง)";
 
             if (daysSinceLastCleaning > 120)
             {
@@ -479,7 +479,7 @@ public class PredictiveDiagnosticsEngine
         // Extreme heat: March-April → inverter thermal throttling risk
         if (thMonth is >= 3 and <= 4)
         {
-            var ageYears = (DateTime.UtcNow - inst.InstallationDate).TotalDays / 365.25;
+            var ageYears = (DateTime.UtcNow - inst.HardwareInServiceDate).TotalDays / 365.25;
             if (ageYears >= 3)
             {
                 alerts.Add(new PredictiveAlert
@@ -552,7 +552,7 @@ public class PredictiveDiagnosticsEngine
     private static List<PredictiveAlert> AnalyzeSafetyRecalls(Installation inst)
     {
         var alerts = new List<PredictiveAlert>();
-        var recall = InverterKnowledgeBase.GetSafetyRecallCase(inst.InverterBrand, inst.InverterModel, inst.InstallationDate);
+        var recall = InverterKnowledgeBase.GetSafetyRecallCase(inst.InverterBrand, inst.InverterModel, inst.HardwareInServiceDate);
         if (recall != null)
         {
             alerts.Add(new PredictiveAlert

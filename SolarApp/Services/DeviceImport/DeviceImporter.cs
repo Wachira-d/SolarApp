@@ -191,9 +191,19 @@ public class DeviceImporter : IDeviceImporter
                     SerialNumber = serial ?? dev.DeviceId,
                     Quantity = 1,
                     RatingKw = dev.RatedPowerKw,
-                    WarrantyYears = 10,
+                    // The site's own inverter warranty term, not a hard-coded
+                    // decade. Ten years was inventing cover nobody agreed to,
+                    // and the equipment list then showed an expiry date that
+                    // contradicted the site's warranty card.
+                    WarrantyYears = installation.InverterWarrantyYears > 0
+                        ? installation.InverterWarrantyYears
+                        : installation.WarrantyYears,
                     InstalledDate = dev.InstallDate ?? installation.InstallationDate,
-                    WarrantyExpiryDate = (dev.InstallDate ?? installation.InstallationDate).AddYears(10),
+                    WarrantyExpiryDate = Models.Installation.CalculateWarrantyEnd(
+                        dev.InstallDate ?? installation.InstallationDate,
+                        installation.InverterWarrantyYears > 0
+                            ? installation.InverterWarrantyYears
+                            : installation.WarrantyYears),
                     IsActive = dev.IsOnline,
                     Notes = string.IsNullOrEmpty(dev.FirmwareVersion)
                         ? $"Auto-imported from {installation.InverterBrand} cloud"

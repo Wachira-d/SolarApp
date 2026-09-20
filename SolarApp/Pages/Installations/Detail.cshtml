@@ -146,7 +146,17 @@
                         <tr><td class="text-muted">จำนวนแผง</td><td class="text-end">@inst.NumberOfPanels × @inst.PanelWattage W</td></tr>
                         <tr><td class="text-muted">ลูกค้า</td><td class="text-end">@inst.Customer.FullName</td></tr>
                         <tr><td class="text-muted">พาร์ทเนอร์</td><td class="text-end">@(inst.Partner?.CompanyName ?? "Direct")</td></tr>
-                        <tr><td class="text-muted">วันที่ติดตั้ง</td><td class="text-end">@inst.InstallationDate.ToString("dd/MM/yyyy")</td></tr>
+                        @* วันส่งมอบงาน lives in the warranty card beside the term it
+                           starts. It was repeated here as "วันที่ติดตั้ง" — the same
+                           field under a second name, five centimetres away, which
+                           reads as two different dates that happen to match. *@
+                        @if (inst.CommissionDate.HasValue)
+                        {
+                            <tr>
+                                <td class="text-muted">วันที่เริ่มจ่ายไฟ</td>
+                                <td class="text-end">@inst.CommissionDate.Value.ToString("dd/MM/yyyy")</td>
+                            </tr>
+                        }
                         <tr><td class="text-muted">ออนไลน์ล่าสุด</td><td class="text-end">@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "N/A")</td></tr>
                     </table>
                 </div>

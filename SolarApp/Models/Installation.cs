@@ -106,6 +106,23 @@ public class Installation : ISoftDeletable
     public static DateTime CalculateWarrantyEnd(DateTime handoverDate, int years) =>
         handoverDate.Date.AddYears(years);
 
+    /// <summary>
+    /// When the hardware started ageing in the field — the earliest date we
+    /// hold for it.
+    ///
+    /// Age-based predictions (fan wear, capacitor drift, recall windows) must
+    /// not be measured from handover: that is a paperwork date, and on sites
+    /// where commissioning and sign-off are months apart it makes the
+    /// equipment look younger than it is, which delays exactly the inspection
+    /// the prediction exists to trigger. Taking the earliest of the two can
+    /// only age equipment, never make it younger, so nothing that used to
+    /// warn stops warning.
+    /// </summary>
+    public DateTime HardwareInServiceDate =>
+        CommissionDate.HasValue && CommissionDate.Value.Date < InstallationDate.Date
+            ? CommissionDate.Value.Date
+            : InstallationDate.Date;
+
     // Panel Cleaning
     public int CleaningFrequencyMonths { get; set; } = 6;
     public int TotalCleaningCount { get; set; }

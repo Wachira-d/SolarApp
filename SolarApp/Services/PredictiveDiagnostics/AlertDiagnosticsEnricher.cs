@@ -83,14 +83,14 @@ public class AlertDiagnosticsEnricher
         }
 
         // ── 4. Check for safety recalls ──
-        var recall = InverterKnowledgeBase.GetSafetyRecallCase(brand, installation.InverterModel, installation.InstallationDate);
+        var recall = InverterKnowledgeBase.GetSafetyRecallCase(brand, installation.InverterModel, installation.HardwareInServiceDate);
         if (recall != null)
         {
             diag.SafetyWarning = recall.CaseRef;
         }
 
         // ── 5. Add age-based context ──
-        var ageYears = (DateTime.UtcNow - installation.InstallationDate).TotalDays / 365.25;
+        var ageYears = (DateTime.UtcNow - installation.HardwareInServiceDate).TotalDays / 365.25;
         if (ageYears >= 5)
         {
             diag.AddContextNote($"อายุ inverter: {ageYears:0.1} ปี — อาจมีชิ้นส่วนเสื่อม (พัดลม, capacitor)");
