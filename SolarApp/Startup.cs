@@ -796,9 +796,17 @@ public class Startup
         // that are still 0 AND carry battery metadata (capacity / count) or
         // are Hybrid systems.  Once an operator unchecks battery on a site
         // (which also nulls the metadata), this won't re-flip it.
+        //
+        // Runs ONCE, recorded in SystemSettings. It used to run on every start,
+        // so unticking battery on a Hybrid site was silently undone at the next
+        // app-pool recycle — the WHERE clause matches SystemType = Hybrid, not
+        // "this row predates the column". That was masked while the Edit form
+        // reset every site to OnGrid on save; now SystemType survives a save,
+        // the re-flip would have become visible.
         stages.Add(("BackfillHasBattery", @"
 IF EXISTS (SELECT 1 FROM sys.columns
     WHERE Name = N'HasBattery' AND Object_ID = Object_ID(N'[Installations]'))
+AND NOT EXISTS (SELECT 1 FROM [SystemSettings] WHERE [Key] = N'Migration.BackfillHasBattery')
 BEGIN
     UPDATE [Installations]
     SET [HasBattery] = 1
@@ -806,6 +814,11 @@ BEGIN
       AND ( ([BatteryCapacityKwh] IS NOT NULL AND [BatteryCapacityKwh] > 0)
             OR ([BatteryCount] IS NOT NULL AND [BatteryCount] > 0)
             OR [SystemType] = 3 );  -- 3 = SystemType.Hybrid
+
+    INSERT INTO [SystemSettings] ([Key], [Value], [Description], [UpdatedAt])
+    VALUES (N'Migration.BackfillHasBattery', N'done',
+            N'One-time HasBattery backfill has run; do not re-run (it would undo operator choices).',
+            SYSUTCDATETIME());
 END"));
 
         // Stage 2: each table CREATE in its own stage. Failures in one don't block others.

@@ -29,6 +29,23 @@
                             <span asp-validation-for="Input.Address" class="text-danger"></span>
                         </div>
                     </div>
+                    @* City, province and postcode had no inputs here, so new sites
+                       were created without them — and province is what the map's route planner
+                       groups by. *@
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label asp-for="Input.City" class="form-label">อำเภอ / เขต</label>
+                            <input asp-for="Input.City" class="form-control" />
+                        </div>
+                        <div class="col-md-4">
+                            <label asp-for="Input.Province" class="form-label">จังหวัด</label>
+                            <input asp-for="Input.Province" class="form-control" list="provinceList" />
+                        </div>
+                        <div class="col-md-4">
+                            <label asp-for="Input.PostalCode" class="form-label">รหัสไปรษณีย์</label>
+                            <input asp-for="Input.PostalCode" class="form-control" inputmode="numeric" maxlength="5" />
+                        </div>
+                    </div>
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label asp-for="Input.Latitude" class="form-label">ละติจูด</label>
@@ -96,6 +113,16 @@
                         <div class="col-md-3">
                             <label asp-for="Input.SystemType" class="form-label">ประเภทระบบ</label>
                             <select asp-for="Input.SystemType" asp-items="Html.GetEnumSelectList<SystemType>()" class="form-select"></select>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label asp-for="Input.PanelBrand" class="form-label">ยี่ห้อแผง</label>
+                            <input asp-for="Input.PanelBrand" class="form-control" placeholder="เช่น Jinko, LONGi, Trina" />
+                        </div>
+                        <div class="col-md-6">
+                            <label asp-for="Input.PanelModel" class="form-label">รุ่นแผง</label>
+                            <input asp-for="Input.PanelModel" class="form-control" />
                         </div>
                     </div>
 
@@ -224,6 +251,33 @@
                             <input asp-for="Input.TotalCleaningCount" class="form-control" />
                         </div>
                     </div>
+                    @* The inverter carries its own warranty, usually longer than
+                       the installation's. It had no input here, so every new
+                       site got ten years from handover — and the
+                       predictive engine and device import both read it. *@
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label asp-for="Input.InverterWarrantyYears" class="form-label">ประกันอินเวอร์เตอร์ (ปี)</label>
+                            <input asp-for="Input.InverterWarrantyYears" class="form-control" type="number"
+                                   min="0" max="30" id="invWarrantyYears" />
+                            <small class="text-muted">0 = ไม่มีประกันแยกจากระบบ</small>
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.InverterWarrantyExpiryDate" class="form-label">
+                                สิ้นสุดประกันอินเวอร์เตอร์
+                                <span class="badge bg-light text-muted border" id="invWarrantyEndState">คำนวณอัตโนมัติ</span>
+                            </label>
+                            <div class="input-group">
+                                <input asp-for="Input.InverterWarrantyExpiryDate" class="form-control" type="date"
+                                       id="invWarrantyEnd" />
+                                <button type="button" class="btn btn-outline-secondary" id="invWarrantyEndReset"
+                                        title="คำนวณใหม่จากวันส่งมอบ + ระยะประกันอินเวอร์เตอร์">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                            <div class="form-text" id="invWarrantyEndHint"></div>
+                        </div>
+                    </div>
                     <div class="row mb-3">
                         <div class="col-md-4">
                             <label asp-for="Input.CleaningFrequencyMonths" class="form-label">ความถี่ในการล้างแผง</label>
@@ -261,6 +315,15 @@
                         <div class="col-md-3">
                             <label asp-for="Input.ElectricityRatePerKwh" class="form-label">ค่าไฟ (บาท/kWh)</label>
                             <input asp-for="Input.ElectricityRatePerKwh" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.FeedInTariffRate" class="form-label">ค่าขายไฟคืน (บาท/kWh)</label>
+                            <input asp-for="Input.FeedInTariffRate" class="form-control" type="number" step="any" min="0" />
+                            <small class="text-muted">เว้นว่าง = ไม่ได้ขายไฟคืน</small>
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Input.ContractValue" class="form-label">มูลค่าโครงการ (บาท)</label>
+                            <input asp-for="Input.ContractValue" class="form-control" type="number" step="any" min="0" />
                         </div>
                     </div>
 
@@ -350,34 +413,32 @@
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
     <script>
-        // ─── Warranty end date ─────────────────────────────────────────
-        // Keeps the calculated date in the box while nobody has touched it, and
-        // stops the moment someone types their own — the server used to
-        // overwrite it on every save, which is what made a correct end date
-        // impossible to record.
-        (function () {
+        // ─── Warranty end dates ────────────────────────────────────────
+        // Keeps each calculated date in its box while nobody has touched it,
+        // and stops the moment someone types their own — the server used to
+        // overwrite it on every save, which made a correct end date impossible
+        // to record. Used for the site warranty and the inverter warranty.
+        function bindWarrantyEnd(ids) {
             const start = document.getElementById('warrantyStart');
-            const years = document.getElementById('warrantyYears');
-            const end = document.getElementById('warrantyEnd');
-            const state = document.getElementById('warrantyEndState');
-            const hint = document.getElementById('warrantyEndHint');
-            const reset = document.getElementById('warrantyEndReset');
+            const years = document.getElementById(ids.years);
+            const end = document.getElementById(ids.end);
+            const state = document.getElementById(ids.state);
+            const hint = document.getElementById(ids.hint);
+            const reset = document.getElementById(ids.reset);
             if (!start || !years || !end) return;
 
             function calculated() {
                 if (!start.value) return '';
                 const y = parseInt(years.value, 10);
-                if (isNaN(y)) return '';
+                if (isNaN(y) || y <= 0) return '';
 
-                // Build from the parts rather than Date arithmetic on a local
-                // Date: a UTC round-trip shifts the day by one in Thailand, and
-                // a warranty ending 24/11 instead of 25/11 is the class of bug
-                // being fixed here.
+                // Built from Y/M/D parts: a local Date round-trip shifts the day
+                // by one in UTC+7. And 29 Feb clamps to 28 Feb, matching
+                // DateTime.AddYears on the server — otherwise the two disagree
+                // and the stored date loads as "กำหนดเอง" for no reason.
                 const [yy, mm, dd] = start.value.split('-').map(Number);
-                const d = new Date(Date.UTC(yy + y, mm - 1, dd));
-
-                // 29 Feb + N years rolls to 1 Mar, which is the right
-                // direction — cover shouldn't end a day early.
+                let d = new Date(Date.UTC(yy + y, mm - 1, dd));
+                if (d.getUTCMonth() !== mm - 1) d = new Date(Date.UTC(yy + y, mm, 0));
                 return d.toISOString().slice(0, 10);
             }
 
@@ -393,7 +454,7 @@
 
             function refresh() {
                 const calc = calculated();
-                if (!overridden && calc) end.value = calc;
+                if (!overridden) end.value = calc;
 
                 const differs = calc && end.value && end.value !== calc;
                 if (state) {
@@ -414,11 +475,15 @@
             years.addEventListener('input', refresh);
             end.addEventListener('keydown', () => { overridden = true; });
             end.addEventListener('change', () => { overridden = true; refresh(); });
-
             reset?.addEventListener('click', () => { overridden = false; refresh(); });
 
             refresh();
-        })();
+        }
+
+        bindWarrantyEnd({ years: 'warrantyYears', end: 'warrantyEnd', state: 'warrantyEndState',
+                          hint: 'warrantyEndHint', reset: 'warrantyEndReset' });
+        bindWarrantyEnd({ years: 'invWarrantyYears', end: 'invWarrantyEnd', state: 'invWarrantyEndState',
+                          hint: 'invWarrantyEndHint', reset: 'invWarrantyEndReset' });
 
 
         // ─── Service-scope preset → flag auto-toggling ───────────────────────
@@ -532,3 +597,22 @@
         applyBatteryVisibility();
     </script>
 }
+
+@* The 77 provinces, so the route planner's province filter gets one spelling
+   per province instead of "กทม", "กรุงเทพ" and "Bangkok" as three groups. *@
+<datalist id="provinceList">
+    @foreach (var prov in new[] {
+        "กรุงเทพมหานคร","กระบี่","กาญจนบุรี","กาฬสินธุ์","กำแพงเพชร","ขอนแก่น","จันทบุรี","ฉะเชิงเทรา",
+        "ชลบุรี","ชัยนาท","ชัยภูมิ","ชุมพร","เชียงราย","เชียงใหม่","ตรัง","ตราด","ตาก","นครนายก",
+        "นครปฐม","นครพนม","นครราชสีมา","นครศรีธรรมราช","นครสวรรค์","นนทบุรี","นราธิวาส","น่าน",
+        "บึงกาฬ","บุรีรัมย์","ปทุมธานี","ประจวบคีรีขันธ์","ปราจีนบุรี","ปัตตานี","พระนครศรีอยุธยา",
+        "พะเยา","พังงา","พัทลุง","พิจิตร","พิษณุโลก","เพชรบุรี","เพชรบูรณ์","แพร่","ภูเก็ต",
+        "มหาสารคาม","มุกดาหาร","แม่ฮ่องสอน","ยโสธร","ยะลา","ร้อยเอ็ด","ระนอง","ระยอง","ราชบุรี",
+        "ลพบุรี","ลำปาง","ลำพูน","เลย","ศรีสะเกษ","สกลนคร","สงขลา","สตูล","สมุทรปราการ",
+        "สมุทรสงคราม","สมุทรสาคร","สระแก้ว","สระบุรี","สิงห์บุรี","สุโขทัย","สุพรรณบุรี","สุราษฎร์ธานี",
+        "สุรินทร์","หนองคาย","หนองบัวลำภู","อ่างทอง","อำนาจเจริญ","อุดรธานี","อุตรดิตถ์","อุทัยธานี",
+        "อุบลราชธานี" })
+    {
+        <option value="@prov"></option>
+    }
+</datalist>
