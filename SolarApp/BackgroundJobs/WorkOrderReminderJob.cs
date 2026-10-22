@@ -56,8 +56,11 @@ public class WorkOrderReminderJob
         }
 
         var now = DateTime.UtcNow;
-        var upcomingWindowEnd = now.AddHours(36);
-        var todayStart = now.Date;
+        // ScheduledDate is a site-local date, so the windows are site-local
+        // too. With UTC, a job dated today counted as overdue until 07:00 and
+        // got an "เลยกำหนด" nudge on the morning it was due.
+        var upcomingWindowEnd = SolarApp.Services.SiteTime.Now.AddHours(36);
+        var todayStart = SolarApp.Services.SiteTime.Today;
 
         // Statuses that still need attention
         var openStatuses = new[]
@@ -124,7 +127,9 @@ public class WorkOrderReminderJob
     {
         var siteName = wo.SiteName;
         var typeLabel = wo.Type.ToString();
-        var dateStr = wo.ScheduledDate.ToLocalTime().ToString("dd/MM/yyyy");
+        // ScheduledDate is the date picked in the form — already site-local.
+        // ToLocalTime() treated it as UTC and could shift it a day.
+        var dateStr = wo.ScheduledDate.ToString("dd/MM/yyyy");
         var timeStr = wo.ScheduledTime.HasValue
             ? wo.ScheduledTime.Value.ToString(@"hh\:mm")
             : "—";
@@ -132,7 +137,7 @@ public class WorkOrderReminderJob
         string title, body;
         if (isOverdue)
         {
-            var daysLate = Math.Max(1, (int)Math.Round((DateTime.UtcNow.Date - wo.ScheduledDate.Date).TotalDays));
+            var daysLate = Math.Max(1, (int)Math.Round((SolarApp.Services.SiteTime.Today - wo.ScheduledDate.Date).TotalDays));
             title = $"⚠ Overdue WO: {wo.WorkOrderNumber}";
             body = $"งาน{typeLabel} ที่ '{siteName}' เลยกำหนด {daysLate} วัน " +
                    $"(เดิม {dateStr}). โปรดอัพเดตสถานะหรือเลื่อนนัดหมายในระบบ.";

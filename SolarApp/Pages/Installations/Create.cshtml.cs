@@ -75,7 +75,7 @@ public class CreateModel : PageModel
         public decimal? BatteryCapacityKwh { get; set; }
         public int? BatteryCount { get; set; }
 
-        [Required] public DateTime InstallationDate { get; set; } = DateTime.Today;
+        [Required] public DateTime InstallationDate { get; set; } = SolarApp.Services.SiteTime.Today;
         public DateTime? CommissionDate { get; set; }
 
         [Required][Range(1, 30)] public int WarrantyYears { get; set; } = 10;

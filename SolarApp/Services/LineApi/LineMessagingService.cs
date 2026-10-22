@@ -82,7 +82,7 @@ public class LineMessagingService : ILineMessagingService
             var client = _httpClientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
-            var testMsg = $"[SolarApp] Test notification\nTime: {DateTime.Now:dd/MM/yyyy HH:mm:ss}\nIf you see this, LINE integration is working!";
+            var testMsg = $"[SolarApp] Test notification\nTime: {SolarApp.Services.SiteTime.Now:dd/MM/yyyy HH:mm:ss}\nIf you see this, LINE integration is working!";
 
             var payload = new
             {
@@ -304,7 +304,7 @@ public class LineMessagingService : ILineMessagingService
                     new
                     {
                         type = "text",
-                        text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"),
+                        text = SolarApp.Services.SiteTime.Now.ToString("dd/MM/yyyy HH:mm"),
                         size = "xs",
                         color = "#AAAAAA",
                         align = "center"
@@ -476,7 +476,7 @@ public class LineMessagingService : ILineMessagingService
                 type = "box", layout = "vertical",
                 contents = new object[]
                 {
-                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                    new { type = "text", text = SolarApp.Services.SiteTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
                 }
             }
         };
@@ -598,7 +598,7 @@ public class LineMessagingService : ILineMessagingService
                 type = "box", layout = "vertical",
                 contents = new object[]
                 {
-                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                    new { type = "text", text = SolarApp.Services.SiteTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
                 }
             }
         };
@@ -708,7 +708,7 @@ public class LineMessagingService : ILineMessagingService
                 type = "box", layout = "vertical",
                 contents = new object[]
                 {
-                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                    new { type = "text", text = SolarApp.Services.SiteTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
                 }
             }
         };
@@ -827,7 +827,7 @@ public class LineMessagingService : ILineMessagingService
                 type = "box", layout = "vertical",
                 contents = new object[]
                 {
-                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
+                    new { type = "text", text = SolarApp.Services.SiteTime.Now.ToString("dd/MM/yyyy HH:mm"), size = "xs", color = "#AAAAAA", align = "center" }
                 }
             }
         };
@@ -1019,7 +1019,7 @@ public class LineMessagingService : ILineMessagingService
                 size = "xs", color = "#FF8C00", wrap = true, align = "center",
             });
         }
-        footerContents.Add(new { type = "text", text = $"Report generated {DateTime.Now:HH:mm}", size = "xs", color = "#AAAAAA", align = "center", margin = "sm" });
+        footerContents.Add(new { type = "text", text = $"Report generated {SolarApp.Services.SiteTime.Now:HH:mm}", size = "xs", color = "#AAAAAA", align = "center", margin = "sm" });
 
         var flexContent = new
         {
@@ -1030,7 +1030,7 @@ public class LineMessagingService : ILineMessagingService
                 contents = new object[]
                 {
                     new { type = "text", text = "Daily Summary Report", color = "#FFFFFF", weight = "bold", size = "lg" },
-                    new { type = "text", text = DateTime.Now.ToString("dd/MM/yyyy"), color = "#BBDEFB", size = "sm" }
+                    new { type = "text", text = SolarApp.Services.SiteTime.Now.ToString("dd/MM/yyyy"), color = "#BBDEFB", size = "sm" }
                 }
             },
             body = new { type = "box", layout = "vertical", spacing = "md", contents = bodyContents.ToArray() },

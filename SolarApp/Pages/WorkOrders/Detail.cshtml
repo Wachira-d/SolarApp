@@ -131,7 +131,7 @@
                                     @if (item.CompletedAt.HasValue)
                                     {
                                         <small class="d-block text-muted">
-                                            ✓ @item.CompletedAt.Value.ToString("dd/MM HH:mm")
+                                            ✓ @SolarApp.Services.SiteTime.ToSiteTime(item.CompletedAt.Value).ToString("dd/MM HH:mm")
                                         </small>
                                     }
                                 </span>
@@ -229,9 +229,9 @@
                     <div class="col-6"><strong>Team:</strong> @(wo.AssignedTeam ?? "—")</div>
                     <div class="col-6"><strong>Assigned:</strong> @(wo.AssignedToUser?.FullName ?? "Unassigned")</div>
                     <div class="col-6"><strong>Created by:</strong> @(wo.CreatedByUser?.FullName ?? "—")</div>
-                    <div class="col-6"><strong>Created:</strong> @wo.CreatedAt.ToString("dd/MM/yy HH:mm")</div>
-                    @if (wo.ActualStartTime.HasValue) { <div class="col-6"><strong>Started:</strong> @wo.ActualStartTime.Value.ToString("dd/MM HH:mm")</div> }
-                    @if (wo.ActualEndTime.HasValue) { <div class="col-6"><strong>Ended:</strong> @wo.ActualEndTime.Value.ToString("dd/MM HH:mm")</div> }
+                    <div class="col-6"><strong>Created:</strong> @SolarApp.Services.SiteTime.ToSiteTime(wo.CreatedAt).ToString("dd/MM/yy HH:mm")</div>
+                    @if (wo.ActualStartTime.HasValue) { <div class="col-6"><strong>Started:</strong> @SolarApp.Services.SiteTime.ToSiteTime(wo.ActualStartTime.Value).ToString("dd/MM HH:mm")</div> }
+                    @if (wo.ActualEndTime.HasValue) { <div class="col-6"><strong>Ended:</strong> @SolarApp.Services.SiteTime.ToSiteTime(wo.ActualEndTime.Value).ToString("dd/MM HH:mm")</div> }
                 </div>
             </div>
         </div>

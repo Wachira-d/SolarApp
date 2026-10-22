@@ -30,7 +30,10 @@ public class DetailModel : PageModel
     public Customer Customer { get; private set; } = null!;
     public List<Installation> Sites { get; private set; } = new();
     public List<SystemAlert> OpenAlerts { get; private set; } = new();
+    /// <summary>All open alerts — OpenAlerts holds only the first 20, and the header showed that as the total.</summary>
+    public int OpenAlertTotal { get; private set; }
     public List<ServiceTicket> OpenTickets { get; private set; } = new();
+    public int OpenTicketTotal { get; private set; }
     public bool IsAdmin { get; private set; }
 
     public decimal TotalCapacityKw { get; private set; }
@@ -66,6 +69,8 @@ public class DetailModel : PageModel
 
         var siteIds = Sites.Select(s => s.Id).ToList();
 
+        OpenAlertTotal = await _context.SystemAlerts.AsNoTracking()
+            .CountAsync(a => siteIds.Contains(a.InstallationId) && a.ResolvedAt == null);
         OpenAlerts = await _context.SystemAlerts.AsNoTracking()
             .Include(a => a.Installation)
             .Where(a => siteIds.Contains(a.InstallationId) && a.ResolvedAt == null)
@@ -75,6 +80,10 @@ public class DetailModel : PageModel
             .Take(20)
             .ToListAsync();
 
+        OpenTicketTotal = await _context.ServiceTickets.AsNoTracking()
+            .CountAsync(t => siteIds.Contains(t.InstallationId)
+                        && t.Status != TicketStatus.Closed
+                        && t.Status != TicketStatus.Resolved);
         OpenTickets = await _context.ServiceTickets.AsNoTracking()
             .Include(t => t.Installation)
             .Where(t => siteIds.Contains(t.InstallationId)

@@ -38,7 +38,7 @@ public class CleaningModel : PageModel
     public class CleaningInput
     {
         public int InstallationId { get; set; }
-        public DateTime ScheduledDate { get; set; } = DateTime.Today;
+        public DateTime ScheduledDate { get; set; } = SolarApp.Services.SiteTime.Today;
         public DateTime? ActualDate { get; set; }
         public string? PerformedByExternal { get; set; }
         public string? Notes { get; set; }

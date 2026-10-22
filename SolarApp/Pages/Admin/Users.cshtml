@@ -78,7 +78,7 @@
                                             @(u.IsActive ? "ใช้งาน" : "ปิดใช้งาน")
                                         </span>
                                     </td>
-                                    <td><small>@(u.LastLoginAt?.ToString("dd/MM HH:mm") ?? "-")</small></td>
+                                    <td><small>@(SolarApp.Services.SiteTime.ToSiteTime(u.LastLoginAt)?.ToString("dd/MM HH:mm") ?? "-")</small></td>
                                     <td class="text-end">
                                         <div class="btn-group btn-group-sm">
                                             <button class="btn btn-outline-primary edit-user-btn" type="button"

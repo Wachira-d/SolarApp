@@ -2,7 +2,7 @@
 @model SolarApp.Pages.Jobs.IndexModel
 @{
     ViewData["Title"] = "งานภาคสนาม";
-    var today = DateTime.UtcNow.Date;
+    var today = SolarApp.Services.SiteTime.Today;
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -66,10 +66,10 @@
         </select>
         <div class="d-flex gap-1 align-items-center">
             <input type="date" name="from" class="form-control form-control-sm" style="width:auto"
-                   value="@((Model.From ?? DateTime.UtcNow.Date.AddDays(-14)).ToString("yyyy-MM-dd"))" />
+                   value="@((Model.From ?? SolarApp.Services.SiteTime.Today.AddDays(-14)).ToString("yyyy-MM-dd"))" />
             <span class="text-muted small">ถึง</span>
             <input type="date" name="to" class="form-control form-control-sm" style="width:auto"
-                   value="@((Model.To ?? DateTime.UtcNow.Date.AddDays(30)).ToString("yyyy-MM-dd"))" />
+                   value="@((Model.To ?? SolarApp.Services.SiteTime.Today.AddDays(30)).ToString("yyyy-MM-dd"))" />
         </div>
         <input type="text" name="q" value="@Model.Q" class="form-control form-control-sm"
                style="max-width:200px" placeholder="ค้นหาไซต์ / งาน…" />

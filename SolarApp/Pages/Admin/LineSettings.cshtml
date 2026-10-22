@@ -239,7 +239,7 @@
                         var recipientType = n.RecipientLineId?.StartsWith("C") == true ? "Group" :
                                            n.RecipientLineId?.StartsWith("U") == true ? "User" : "?";
                         <tr>
-                            <td><small>@n.CreatedAt.ToString("dd/MM HH:mm")</small></td>
+                            <td><small>@SolarApp.Services.SiteTime.ToSiteTime(n.CreatedAt).ToString("dd/MM HH:mm")</small></td>
                             <td>
                                 <span class="badge bg-secondary me-1">@recipientType</span>
                                 <code class="small">@(n.RecipientLineId?.Length > 16 ? n.RecipientLineId[..16] + "..." : n.RecipientLineId)</code>

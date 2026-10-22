@@ -24,9 +24,24 @@ public static class SiteTime
     /// <summary>Site local "now" (date + time of day).</summary>
     public static DateTime Now => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _tz);
 
+    /// <summary>
+    /// The UTC instant at which today began at the site. Use for "today"
+    /// windows over UTC timestamps (OccurredAt, ResolvedAt, UpdatedAt):
+    /// UtcNow.Date starts at 07:00 Thailand time and drops the first seven
+    /// hours of every day.
+    /// </summary>
+    public static DateTime TodayStartUtc => ToUtc(Today);
+
+    /// <summary>Convert a site-local time (e.g. a date picked in a form) to UTC.</summary>
+    public static DateTime ToUtc(DateTime siteLocal) =>
+        TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(siteLocal, DateTimeKind.Unspecified), _tz);
+
     /// <summary>Convert an arbitrary UTC instant to site-local time.</summary>
     public static DateTime ToSiteTime(DateTime utc) =>
         TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), _tz);
+
+    /// <summary>Nullable overload, for "last seen" style fields that may be empty.</summary>
+    public static DateTime? ToSiteTime(DateTime? utc) => utc.HasValue ? ToSiteTime(utc.Value) : null;
 
     public static TimeZoneInfo TimeZone => _tz;
 

@@ -18,10 +18,10 @@ public class IndexModel : PageModel
     public FleetPerformance Fleet { get; set; } = new();
 
     [BindProperty(SupportsGet = true)]
-    public DateTime From { get; set; } = DateTime.UtcNow.Date.AddDays(-29);
+    public DateTime From { get; set; } = SolarApp.Services.SiteTime.Today.AddDays(-29);
 
     [BindProperty(SupportsGet = true)]
-    public DateTime To { get; set; } = DateTime.UtcNow.Date;
+    public DateTime To { get; set; } = SolarApp.Services.SiteTime.Today;
 
     /// <summary>"csv" streams the comparison table instead of rendering it.</summary>
     [BindProperty(SupportsGet = true)]

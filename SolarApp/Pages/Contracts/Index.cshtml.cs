@@ -81,7 +81,7 @@ public class IndexModel : PageModel
 
         OverdueInvoices = await _context.ContractInvoices.AsNoTracking()
             .Include(i => i.ServiceContract).ThenInclude(c => c.Installation)
-            .Where(i => i.PaidDate == null && i.DueDate < DateTime.UtcNow.Date)
+            .Where(i => i.PaidDate == null && i.DueDate < SolarApp.Services.SiteTime.Today)
             .OrderBy(i => i.DueDate)
             .Take(50)
             .ToListAsync();
@@ -173,9 +173,9 @@ public class IndexModel : PageModel
         // Extend from whichever is later: the old end date, or today. Renewing
         // a contract that lapsed six months ago should not hand the customer
         // six months of free cover.
-        var basis = contract.EndDate.HasValue && contract.EndDate.Value.Date > DateTime.UtcNow.Date
+        var basis = contract.EndDate.HasValue && contract.EndDate.Value.Date > SolarApp.Services.SiteTime.Today
             ? contract.EndDate.Value.Date
-            : DateTime.UtcNow.Date;
+            : SolarApp.Services.SiteTime.Today;
 
         contract.EndDate = contract.BillingCycle switch
         {
@@ -208,7 +208,7 @@ public class IndexModel : PageModel
             InvoiceNumber = string.IsNullOrWhiteSpace(invoiceNumber) ? null : invoiceNumber.Trim(),
             PeriodStart = periodStart.Date,
             PeriodEnd = periodEnd.Date,
-            IssuedDate = DateTime.UtcNow.Date,
+            IssuedDate = SolarApp.Services.SiteTime.Today,
             DueDate = dueDate.Date,
             Amount = amount,
             Notes = notes
@@ -228,7 +228,7 @@ public class IndexModel : PageModel
             return RedirectToPage();
         }
 
-        invoice.PaidDate = DateTime.UtcNow.Date;
+        invoice.PaidDate = SolarApp.Services.SiteTime.Today;
         // A short payment is recorded as what actually arrived, not as the
         // amount billed — otherwise the shortfall disappears.
         invoice.PaidAmount = paidAmount is > 0 ? paidAmount : invoice.Amount;

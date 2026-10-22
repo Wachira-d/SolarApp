@@ -112,6 +112,7 @@ public class IndexModel : PageModel
             .ToDictionaryAsync(x => x.InstId, x => x.Latest);
 
         var alertCountsByInst = await _context.SystemAlerts
+            .Where(SystemAlert.CustomerVisible)   // same set as the alerts page
             .Where(a => instIds.Contains(a.InstallationId) && a.ResolvedAt == null)
             .GroupBy(a => a.InstallationId)
             .Select(g => new { InstId = g.Key, Count = g.Count() })

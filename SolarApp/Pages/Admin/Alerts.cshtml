@@ -48,7 +48,7 @@
                             <td>@alert.Installation.SiteName</td>
                             <td>@alert.DisplayTitle</td>
                             <td><small>@(alert.RootCauseAnalysis ?? "-")</small></td>
-                            <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
+                            <td>@SolarApp.Services.SiteTime.ToSiteTime(alert.OccurredAt).ToString("dd/MM HH:mm")</td>
                             <td>
                                 @if (alert.IsNotified)
                                 {
@@ -116,7 +116,7 @@
                             </td>
                             <td>@alert.Installation.SiteName</td>
                             <td>@alert.DisplayTitle</td>
-                            <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
+                            <td>@SolarApp.Services.SiteTime.ToSiteTime(alert.OccurredAt).ToString("dd/MM HH:mm")</td>
                             <td>
                                 @if (alert.IsNotified)
                                 {

@@ -137,8 +137,8 @@ public class AdapterDiagnostics : IAdapterDiagnostics
         {
             await RunStepAsync(report, "4. Historical Data (7 days)", async () =>
             {
-                var from = DateTime.UtcNow.Date.AddDays(-7);
-                var to = DateTime.UtcNow.Date.AddDays(-1);
+                var from = SolarApp.Services.SiteTime.Today.AddDays(-7);
+                var to = SolarApp.Services.SiteTime.Today.AddDays(-1);
                 var records = await adapter.GetHistoricalDataAsync(credentials, from, to);
                 if (records.Count == 0) return (true, "No historical records (may be empty / rate limited)", 0, null);
 

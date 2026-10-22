@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models;
+using SolarApp.Models.Enums;
 using SolarApp.Services.Authorization;
 using SolarApp.Services.Interfaces;
 
@@ -31,7 +32,22 @@ public class AlertsModel : PageModel
 
     public async Task OnGetAsync()
     {
-        ActiveAlerts = await _alertService.GetActiveAlertsAsync();
+        var alerts = await _alertService.GetActiveAlertsAsync();
+
+        // The page is open to Partners, but the list was never scoped: every
+        // partner saw every other partner's sites and customers. Admins keep
+        // the full list; a partner sees only their own sites, and one with no
+        // PartnerId sees nothing.
+        if (!User.IsInRole(UserRoles.Admin))
+        {
+            var user = await _userManager.GetUserAsync(User);
+            var partnerId = user?.PartnerId;
+            alerts = partnerId == null
+                ? new List<SystemAlert>()
+                : alerts.Where(a => a.Installation.PartnerId == partnerId).ToList();
+        }
+
+        ActiveAlerts = alerts;
     }
 
     public async Task<IActionResult> OnPostAcknowledgeAsync(int alertId)

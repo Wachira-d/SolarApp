@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using SolarApp.Models.Enums;
 
 namespace SolarApp.Models;
@@ -43,6 +44,22 @@ public class SystemAlert
     /// </summary>
     public int? AlertRuleId { get; set; }
     public bool IsResolved => ResolvedAt.HasValue;
+
+    /// <summary>
+    /// Alerts a customer sees in the portal — the kinds that can reach their
+    /// LINE channel, minus contract-renewal reminders, which are a sales
+    /// matter for us. The menu badge and the alert list both use this; the
+    /// badge used to count every open alert (predictions, rule alerts,
+    /// contract reminders) while the list showed only some, so it promised
+    /// alerts the customer could never find.
+    /// </summary>
+    public static readonly Expression<Func<SystemAlert, bool>> CustomerVisible = a =>
+        (a.AlertType == AlertType.Offline
+         || a.AlertType == AlertType.Error
+         || a.AlertType == AlertType.LowPerformance
+         || a.AlertType == AlertType.MaintenanceDue
+         || a.AlertType == AlertType.WarrantyExpiring)
+        && !a.Title.StartsWith(AlertTitles.ContractExpiring);
 
     /// <summary>
     /// Title as it should be shown. Vendor alarms imported before the adapters

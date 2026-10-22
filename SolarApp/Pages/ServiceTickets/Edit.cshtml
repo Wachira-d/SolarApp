@@ -92,11 +92,11 @@
                         <tr><td class="text-muted">ไซต์งาน</td><td>@Model.Ticket.Installation.SiteName</td></tr>
                         <tr><td class="text-muted">ลูกค้า</td><td>@Model.Ticket.Installation.Customer.FullName</td></tr>
                         <tr><td class="text-muted">ผู้แจ้ง</td><td>@Model.Ticket.ReportedByUser.FullName</td></tr>
-                        <tr><td class="text-muted">แจ้งเมื่อ</td><td>@Model.Ticket.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
-                        <tr><td class="text-muted">แก้ไขล่าสุด</td><td>@Model.Ticket.UpdatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                        <tr><td class="text-muted">แจ้งเมื่อ</td><td>@SolarApp.Services.SiteTime.ToSiteTime(Model.Ticket.CreatedAt).ToString("dd/MM/yyyy HH:mm")</td></tr>
+                        <tr><td class="text-muted">แก้ไขล่าสุด</td><td>@SolarApp.Services.SiteTime.ToSiteTime(Model.Ticket.UpdatedAt).ToString("dd/MM/yyyy HH:mm")</td></tr>
                         @if (Model.Ticket.ResolvedAt.HasValue)
                         {
-                            <tr><td class="text-muted">แก้ไขเสร็จ</td><td>@Model.Ticket.ResolvedAt?.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                            <tr><td class="text-muted">แก้ไขเสร็จ</td><td>@(SolarApp.Services.SiteTime.ToSiteTime(Model.Ticket.ResolvedAt)?.ToString("dd/MM/yyyy HH:mm"))</td></tr>
                         }
                     </table>
                 </div>

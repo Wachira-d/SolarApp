@@ -76,7 +76,7 @@ public class CreateModel : PageModel
         public int? CustomerId { get; set; }
 
         [Required(ErrorMessage = "กรุณาเลือกวันที่นัด")]
-        public DateTime ScheduledDate { get; set; } = DateTime.Today.AddDays(1);
+        public DateTime ScheduledDate { get; set; } = SolarApp.Services.SiteTime.Today.AddDays(1);
         public string? ScheduledTimeStr { get; set; }
 
         [Range(15, 24 * 60, ErrorMessage = "ระยะเวลาต้องอยู่ระหว่าง 15 นาที ถึง 24 ชั่วโมง")]
@@ -123,11 +123,11 @@ public class CreateModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
-        if (Input.ScheduledDate.Date < DateTime.UtcNow.Date.AddDays(-MaxBackdateDays))
+        if (Input.ScheduledDate.Date < SolarApp.Services.SiteTime.Today.AddDays(-MaxBackdateDays))
             ModelState.AddModelError("Input.ScheduledDate",
                 $"วันที่นัดไม่สามารถย้อนหลังเกิน {MaxBackdateDays} วันได้");
 
-        if (Input.ScheduledDate.Date > DateTime.UtcNow.Date.AddYears(MaxFutureYears))
+        if (Input.ScheduledDate.Date > SolarApp.Services.SiteTime.Today.AddYears(MaxFutureYears))
             ModelState.AddModelError("Input.ScheduledDate",
                 $"วันที่นัดไม่สามารถเกิน {MaxFutureYears} ปีในอนาคตได้");
 

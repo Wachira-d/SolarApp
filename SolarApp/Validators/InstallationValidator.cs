@@ -36,7 +36,7 @@ public class InstallationValidator : AbstractValidator<CreateModel.InstallationI
         // The column keeps its old name; the messages say what it means.
         RuleFor(x => x.InstallationDate)
             .NotEmpty().WithMessage("ต้องระบุวันที่ส่งมอบงาน")
-            .LessThanOrEqualTo(DateTime.Today.AddDays(1))
+            .LessThanOrEqualTo(SolarApp.Services.SiteTime.Today.AddDays(1))
             .WithMessage("วันที่ส่งมอบงานต้องไม่เป็นวันในอนาคต");
 
         // A warranty that ends before it starts is a typo, and it would make

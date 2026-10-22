@@ -101,7 +101,7 @@ public class IndexModel : PageModel
                           || (w.ExternalSiteName ?? "").ToLower().Contains(s));
         }
 
-        var now = DateTime.UtcNow.Date;
+        var now = SolarApp.Services.SiteTime.Today;
         var weekEnd = now.AddDays(7);
 
         TotalCount = await q.CountAsync();

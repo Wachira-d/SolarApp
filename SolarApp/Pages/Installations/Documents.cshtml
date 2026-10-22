@@ -63,7 +63,7 @@
                             <td><strong>@doc.Title</strong></td>
                             <td>@((doc.FileSizeBytes / 1024.0).ToString("N0")) KB</td>
                             <td>@doc.UploadedByUser.FullName</td>
-                            <td>@doc.CreatedAt.ToString("dd/MM/yyyy")</td>
+                            <td>@SolarApp.Services.SiteTime.ToSiteTime(doc.CreatedAt).ToString("dd/MM/yyyy")</td>
                             <td><small>@(doc.Notes ?? "-")</small></td>
                             <td>
                                 <form method="post" asp-page-handler="Delete" class="d-inline">

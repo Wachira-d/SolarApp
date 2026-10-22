@@ -21,10 +21,10 @@ public class DetailModel : PageModel
     public InstallationPerformance Report { get; set; } = null!;
 
     [BindProperty(SupportsGet = true)]
-    public DateTime From { get; set; } = DateTime.UtcNow.Date.AddDays(-29);
+    public DateTime From { get; set; } = SolarApp.Services.SiteTime.Today.AddDays(-29);
 
     [BindProperty(SupportsGet = true)]
-    public DateTime To { get; set; } = DateTime.UtcNow.Date;
+    public DateTime To { get; set; } = SolarApp.Services.SiteTime.Today;
 
     public async Task<IActionResult> OnGetAsync(int id)
     {

@@ -45,7 +45,11 @@ public class DashboardService : IDashboardService
         }
 
         // Partner filter (admin can filter by partner)
-        if (filterPartnerId.HasValue && filterPartnerId > 0)
+        // -1 is the "Direct Sales" option: sites with no partner. It used to
+        // fall through to no filter at all and show every site.
+        if (filterPartnerId == -1)
+            query = query.Where(i => i.PartnerId == null);
+        else if (filterPartnerId.HasValue && filterPartnerId > 0)
             query = query.Where(i => i.PartnerId == filterPartnerId);
 
         // ── Project-type filters ──
@@ -76,11 +80,20 @@ public class DashboardService : IDashboardService
         var activeAlerts = await _context.SystemAlerts
             .AsNoTracking()
             .Where(a => installationIds.Contains(a.InstallationId) && a.ResolvedAt == null)
-            .OrderByDescending(a => a.Severity)
+            .OrderBy(a => a.Severity)              // Critical = 1, so worst first
             .ThenByDescending(a => a.OccurredAt)
             .Take(20)
             .Include(a => a.Installation)
             .ToListAsync();
+
+        // Severity tiles count every open alert, not just the 20 listed.
+        var severityCounts = await _context.SystemAlerts
+            .AsNoTracking()
+            .Where(a => installationIds.Contains(a.InstallationId) && a.ResolvedAt == null
+                        && (a.Severity == AlertSeverity.Critical || a.Severity == AlertSeverity.High))
+            .GroupBy(a => a.Severity)
+            .Select(g => new { Severity = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Severity, x => x.Count);
 
         // Pre-compute active alert counts per installation (was: O(installations)
         // .Count() calls each scanning activeAlerts in inner loop below).
@@ -169,9 +182,12 @@ public class DashboardService : IDashboardService
                 .ToListAsync();
 
             // Add "Direct (no partner)" option
-            var directCount = installations.Count(i => i.PartnerId == null);
+            // Counted over all sites, not the filtered list — otherwise the
+            // option vanished as soon as any partner was selected. The view
+            // appends the count itself, so it isn't baked into the name.
+            var directCount = await _context.Installations.CountAsync(i => i.PartnerId == null);
             if (directCount > 0)
-                partners.Insert(0, new PartnerOption { Id = -1, Name = $"Direct Sales ({directCount})" });
+                partners.Insert(0, new PartnerOption { Id = -1, Name = "ขายตรง (ไม่มีพาร์ทเนอร์)", InstallationCount = directCount });
         }
 
         var avgRate = installations.Any() ? installations.Average(i => i.ElectricityRatePerKwh) : 4.0m;
@@ -213,8 +229,8 @@ public class DashboardService : IDashboardService
             MaintenanceCount = installations.Count(i => i.Status == InstallationStatus.Maintenance),
             InactiveCount = installations.Count(i => i.Status == InstallationStatus.Inactive),
 
-            CriticalAlertCount = activeAlerts.Count(a => a.Severity == AlertSeverity.Critical),
-            HighAlertCount = activeAlerts.Count(a => a.Severity == AlertSeverity.High),
+            CriticalAlertCount = severityCounts.GetValueOrDefault(AlertSeverity.Critical),
+            HighAlertCount = severityCounts.GetValueOrDefault(AlertSeverity.High),
             // Cleaning-due / warranty counts respect the service-scope flags so
             // they match the alert job (CheckMaintenanceDueAsync gates on
             // IncludesCleaning; CheckWarrantyExpiryAsync gates on

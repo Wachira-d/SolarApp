@@ -30,6 +30,8 @@ public class DetailModel : PageModel
     public List<Installation> Sites { get; private set; } = new();
     public List<ApplicationUser> Users { get; private set; } = new();
     public List<SystemAlert> OpenAlerts { get; private set; } = new();
+    /// <summary>All open alerts — OpenAlerts holds only the first 20, and the header showed that as the total.</summary>
+    public int OpenAlertTotal { get; private set; }
     public bool IsAdmin { get; private set; }
 
     public decimal TotalCapacityKw { get; private set; }
@@ -64,6 +66,8 @@ public class DetailModel : PageModel
 
         var siteIds = Sites.Select(s => s.Id).ToList();
 
+        OpenAlertTotal = await _context.SystemAlerts.AsNoTracking()
+            .CountAsync(a => siteIds.Contains(a.InstallationId) && a.ResolvedAt == null);
         OpenAlerts = await _context.SystemAlerts.AsNoTracking()
             .Include(a => a.Installation)
             .Where(a => siteIds.Contains(a.InstallationId) && a.ResolvedAt == null)

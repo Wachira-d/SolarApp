@@ -157,7 +157,7 @@
                                 <td class="text-end">@inst.CommissionDate.Value.ToString("dd/MM/yyyy")</td>
                             </tr>
                         }
-                        <tr><td class="text-muted">ออนไลน์ล่าสุด</td><td class="text-end">@(inst.LastOnlineAt?.ToString("dd/MM HH:mm") ?? "N/A")</td></tr>
+                        <tr><td class="text-muted">ออนไลน์ล่าสุด</td><td class="text-end">@(SolarApp.Services.SiteTime.ToSiteTime(inst.LastOnlineAt)?.ToString("dd/MM HH:mm") ?? "N/A")</td></tr>
                     </table>
                 </div>
             </div>
@@ -399,7 +399,7 @@
                                 <td class="@alertClass">@alert.Severity</td>
                                 <td>@alert.AlertType</td>
                                 <td>@alert.DisplayTitle</td>
-                                <td>@alert.OccurredAt.ToString("dd/MM HH:mm")</td>
+                                <td>@SolarApp.Services.SiteTime.ToSiteTime(alert.OccurredAt).ToString("dd/MM HH:mm")</td>
                                 <td><small>@(alert.RootCauseAnalysis ?? "-")</small></td>
                             </tr>
                         }

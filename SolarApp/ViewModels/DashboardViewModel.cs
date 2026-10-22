@@ -112,11 +112,11 @@ public class InstallationStatusItem
     {
         get
         {
-            if (!LastOnline.HasValue) return "Never";
+            if (!LastOnline.HasValue) return "ไม่เคยออนไลน์";
             var diff = DateTime.UtcNow - LastOnline.Value;
-            if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes} min ago";
-            if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
-            return $"{(int)diff.TotalDays}d ago";
+            if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes} นาทีที่แล้ว";
+            if (diff.TotalHours < 24) return $"{(int)diff.TotalHours} ชม. ที่แล้ว";
+            return $"{(int)diff.TotalDays} วันที่แล้ว";
         }
     }
 }

@@ -58,11 +58,11 @@ public class ServiceContract
 
     // ─── Computed ───
 
-    public bool IsExpired => EndDate.HasValue && EndDate.Value.Date < DateTime.UtcNow.Date;
+    public bool IsExpired => EndDate.HasValue && EndDate.Value.Date < SolarApp.Services.SiteTime.Today;
 
     /// <summary>Days until the contract ends; negative once past. Null when open-ended.</summary>
     public int? DaysRemaining => EndDate.HasValue
-        ? (int)Math.Floor((EndDate.Value.Date - DateTime.UtcNow.Date).TotalDays)
+        ? (int)Math.Floor((EndDate.Value.Date - SolarApp.Services.SiteTime.Today).TotalDays)
         : null;
 
     /// <summary>
@@ -107,7 +107,7 @@ public class ContractInvoice
     public DateTime PeriodStart { get; set; }
     public DateTime PeriodEnd { get; set; }
 
-    public DateTime IssuedDate { get; set; } = DateTime.UtcNow.Date;
+    public DateTime IssuedDate { get; set; } = SolarApp.Services.SiteTime.Today;
     public DateTime DueDate { get; set; }
 
     public decimal Amount { get; set; }
@@ -122,9 +122,9 @@ public class ContractInvoice
     public bool IsPaid => PaidDate.HasValue;
 
     /// <summary>Past its due date and unpaid. Paid-late is not overdue — it's settled.</summary>
-    public bool IsOverdue => !IsPaid && DueDate.Date < DateTime.UtcNow.Date;
+    public bool IsOverdue => !IsPaid && DueDate.Date < SolarApp.Services.SiteTime.Today;
 
     public int DaysOverdue => IsOverdue
-        ? (int)Math.Floor((DateTime.UtcNow.Date - DueDate.Date).TotalDays)
+        ? (int)Math.Floor((SolarApp.Services.SiteTime.Today - DueDate.Date).TotalDays)
         : 0;
 }

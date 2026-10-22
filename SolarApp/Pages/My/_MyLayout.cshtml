@@ -23,6 +23,7 @@
                     .Select(c => c.FirstName)
                     .FirstOrDefaultAsync();
                 unresolvedAlerts = await Db.SystemAlerts
+                    .Where(SolarApp.Models.SystemAlert.CustomerVisible)
                     .Where(a => a.ResolvedAt == null
                         && a.Installation.CustomerId == custId.Value)
                     .CountAsync();

@@ -320,8 +320,8 @@ public class ConnectionHealthChecker : IConnectionHealthChecker
         var sw = Stopwatch.StartNew();
         try
         {
-            var from = DateTime.UtcNow.Date.AddDays(-7);
-            var to = DateTime.UtcNow.Date.AddDays(-1);
+            var from = SolarApp.Services.SiteTime.Today.AddDays(-7);
+            var to = SolarApp.Services.SiteTime.Today.AddDays(-1);
             var data = await adapter.GetHistoricalDataAsync(cred, from, to);
             sw.Stop();
 

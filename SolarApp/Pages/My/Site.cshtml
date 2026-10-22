@@ -136,7 +136,7 @@
             <div class="icon"><i class="bi @icon"></i></div>
             <div style="flex:1">
                 <div class="title">@a.Title @(a.Resolved ? "(แก้ไขแล้ว)" : "")</div>
-                <div class="when">@a.When.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+                <div class="when">@SolarApp.Services.SiteTime.ToSiteTime(a.When).ToString("dd/MM/yyyy HH:mm")</div>
             </div>
         </div>
     }

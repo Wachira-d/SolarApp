@@ -57,7 +57,7 @@ public class IndexModel : PageModel
         string Url)
     {
         /// <summary>Open and past its date. The reason this page is read at all.</summary>
-        public bool IsOverdue => IsOpen && ScheduledDate.Date < DateTime.UtcNow.Date;
+        public bool IsOverdue => IsOpen && ScheduledDate.Date < SolarApp.Services.SiteTime.Today;
     }
 
     public List<JobRow> Jobs { get; private set; } = new();
@@ -81,10 +81,15 @@ public class IndexModel : PageModel
         // Default window: a fortnight back for things left undone, a month
         // ahead for planning. Loading all history by default would make the
         // page slow and the useful rows hard to find.
-        var from = (From ?? DateTime.UtcNow.Date.AddDays(-14)).Date;
-        var to = (To ?? DateTime.UtcNow.Date.AddDays(30)).Date;
+        var from = (From ?? SolarApp.Services.SiteTime.Today.AddDays(-14)).Date;
+        var to = (To ?? SolarApp.Services.SiteTime.Today.AddDays(30)).Date;
         if (to < from) (from, to) = (to, from);
         var toExclusive = to.AddDays(1);
+        // The default window starts 14 days back, which hid any job still open
+        // from before then — the most overdue work vanished from the list and
+        // from the overdue count. Unless the operator picks a start date,
+        // still-open jobs are shown however old they are.
+        var includeOlderOpen = From == null;
 
         var isAdmin = roles.Contains(UserRoles.Admin);
 
@@ -106,7 +111,9 @@ public class IndexModel : PageModel
         var workOrders = await _context.WorkOrders.AsNoTracking()
             .Include(w => w.Installation).ThenInclude(i => i!.Customer)
             .Include(w => w.AssignedToUser)
-            .Where(w => w.ScheduledDate >= from && w.ScheduledDate < toExclusive)
+            .Where(w => (w.ScheduledDate >= from
+                         || (includeOlderOpen && w.Status < WorkOrderStatus.Completed))
+                        && w.ScheduledDate < toExclusive)
             .Where(w => (w.InstallationId != null && siteIds.Contains(w.InstallationId.Value))
                         // Standalone jobs have no site to scope by, so only an
                         // admin sees them.
@@ -129,7 +136,10 @@ public class IndexModel : PageModel
             .Include(m => m.Installation).ThenInclude(i => i.Customer)
             .Include(m => m.PerformedByUser)
             .Where(m => siteIds.Contains(m.InstallationId))
-            .Where(m => m.ScheduledDate >= from && m.ScheduledDate < toExclusive)
+            .Where(m => (m.ScheduledDate >= from
+                         || (includeOlderOpen && m.Status != MaintenanceStatus.Completed
+                             && m.Status != MaintenanceStatus.Cancelled))
+                        && m.ScheduledDate < toExclusive)
             .ToListAsync();
 
         rows.AddRange(maintenance.Select(m => new JobRow(
@@ -155,7 +165,9 @@ public class IndexModel : PageModel
             .Include(c => c.Installation).ThenInclude(i => i.Customer)
             .Include(c => c.PerformedByUser)
             .Where(c => siteIds.Contains(c.InstallationId))
-            .Where(c => c.ScheduledDate >= from && c.ScheduledDate < toExclusive)
+            .Where(c => (c.ScheduledDate >= from
+                         || (includeOlderOpen && c.Status == CleaningStatus.Scheduled))
+                        && c.ScheduledDate < toExclusive)
             .ToListAsync();
 
         rows.AddRange(cleaning.Select(c => new JobRow(
@@ -180,11 +192,11 @@ public class IndexModel : PageModel
 
         // Counts are taken before the view filter, so the summary keeps telling
         // the truth while the operator narrows the list down.
-        var weekEnd = DateTime.UtcNow.Date.AddDays(7);
+        var weekEnd = SolarApp.Services.SiteTime.Today.AddDays(7);
         OverdueCount = rows.Count(r => r.IsOverdue);
         OpenCount = rows.Count(r => r.IsOpen);
         DueThisWeekCount = rows.Count(r => r.IsOpen
-                                           && r.ScheduledDate.Date >= DateTime.UtcNow.Date
+                                           && r.ScheduledDate.Date >= SolarApp.Services.SiteTime.Today
                                            && r.ScheduledDate.Date <= weekEnd);
 
         if (!string.IsNullOrWhiteSpace(Source))

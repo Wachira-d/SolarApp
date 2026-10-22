@@ -163,7 +163,7 @@ public class ImportInstallationsModel : PageModel
             // Handover date — the day the warranty starts.
             var instDate = DateTime.TryParse(Get("installationdate"), out var parsedDate)
                 ? parsedDate.Date
-                : DateTime.UtcNow.Date;
+                : SolarApp.Services.SiteTime.Today;
             const int cleaningFreqMonths = 6;
 
             // Term and end date come from the file when present. Hard-coding

@@ -278,7 +278,7 @@ else
                         <span class="badge @badge me-2 mt-1" style="min-width:70px">@alert.Severity</span>
                         <div class="flex-grow-1">
                             <strong>@alert.DisplayTitle</strong>
-                            <br /><small class="text-muted">@alert.Installation.SiteName • @alert.OccurredAt.ToString("dd/MM HH:mm")</small>
+                            <br /><small class="text-muted">@alert.Installation.SiteName • @SolarApp.Services.SiteTime.ToSiteTime(alert.OccurredAt).ToString("dd/MM HH:mm")</small>
                         </div>
                     </div>
                 }
@@ -316,7 +316,7 @@ else
                                     <br />
                                     @{
                                         var overdueDays = inst.NextCleaningDate.HasValue
-                                            ? (DateTime.UtcNow.Date - inst.NextCleaningDate.Value.Date).Days
+                                            ? (SolarApp.Services.SiteTime.Today - inst.NextCleaningDate.Value.Date).Days
                                             : 0;
                                         var cleaningWhen = overdueDays > 0
                                             ? $"เลยกำหนด {overdueDays} วัน"

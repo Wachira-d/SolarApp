@@ -145,7 +145,7 @@ public class WorkOrder
         }
     }
     public bool IsOverdue => Status < WorkOrderStatus.Completed
-                             && ScheduledDate.Date < DateTime.UtcNow.Date;
+                             && ScheduledDate.Date < SolarApp.Services.SiteTime.Today;
 
     public string StatusBadgeClass => Status switch
     {

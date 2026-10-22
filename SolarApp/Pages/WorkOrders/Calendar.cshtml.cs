@@ -42,7 +42,7 @@ public class CalendarModel : PageModel
             })
             .ToListAsync();
 
-        var now = DateTime.UtcNow.Date;
+        var now = SolarApp.Services.SiteTime.Today;
         var events = raw.Select(w => new
         {
             id = w.Id,

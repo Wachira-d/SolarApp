@@ -26,7 +26,7 @@ public class AlertService : IAlertService
             query = query.Where(a => a.InstallationId == installationId.Value);
 
         return await query
-            .OrderByDescending(a => a.Severity)
+            .OrderBy(a => a.Severity)              // Critical = 1, so worst first
             .ThenByDescending(a => a.OccurredAt)
             .ToListAsync();
     }

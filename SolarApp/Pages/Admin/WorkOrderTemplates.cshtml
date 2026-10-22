@@ -72,7 +72,7 @@
                     {
                         <small class="text-muted">
                             <i class="bi bi-clock-history"></i>
-                            แก้ไขล่าสุด: @tmpl.UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")
+                            แก้ไขล่าสุด: @SolarApp.Services.SiteTime.ToSiteTime(tmpl.UpdatedAt).ToString("dd/MM/yyyy HH:mm")
                         </small>
                     }
                 </div>

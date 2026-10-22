@@ -212,7 +212,7 @@
                     <table class="table table-sm table-borderless mb-0">
                         <tr><td class="text-muted">ไซต์งาน</td><td>@Model.Record.Installation.SiteName</td></tr>
                         <tr><td class="text-muted">ลูกค้า</td><td>@Model.Record.Installation.Customer.FullName</td></tr>
-                        <tr><td class="text-muted">สร้างเมื่อ</td><td>@Model.Record.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td></tr>
+                        <tr><td class="text-muted">สร้างเมื่อ</td><td>@SolarApp.Services.SiteTime.ToSiteTime(Model.Record.CreatedAt).ToString("dd/MM/yyyy HH:mm")</td></tr>
                     </table>
                 </div>
             </div>

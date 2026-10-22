@@ -91,7 +91,7 @@
                                     @r.Severity
                                 </span>
                             </td>
-                            <td><small class="text-muted">@(r.LastFiredAt?.ToString("dd/MM HH:mm") ?? "-")</small></td>
+                            <td><small class="text-muted">@(SolarApp.Services.SiteTime.ToSiteTime(r.LastFiredAt)?.ToString("dd/MM HH:mm") ?? "-")</small></td>
                             <td class="text-end">
                                 <form method="post" asp-page-handler="Toggle" asp-route-ruleId="@r.Id" class="d-inline">
                                     <button type="submit" class="btn btn-sm btn-outline-secondary" title="เปิด/ปิดกฎ">

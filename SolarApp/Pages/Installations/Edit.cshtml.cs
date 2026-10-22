@@ -93,7 +93,7 @@ public class EditModel : PageModel
         public decimal? BatteryCapacityKwh { get; set; }
         public int? BatteryCount { get; set; }
 
-        [Required] public DateTime InstallationDate { get; set; } = DateTime.Today;
+        [Required] public DateTime InstallationDate { get; set; } = SolarApp.Services.SiteTime.Today;
         public DateTime? CommissionDate { get; set; }
 
         [Required][Range(1, 30)] public int WarrantyYears { get; set; } = 10;
@@ -485,6 +485,8 @@ public class EditModel : PageModel
         // depend on what changed, not just on the new values.
         var cleaningWasInScope = installation.HasCleaningInScope;
         var previousCleaningFrequency = installation.CleaningFrequencyMonths;
+        var previousWarrantyEnd = installation.WarrantyExpiryDate.Date;
+        var hadWarrantyService = installation.IncludesWarrantyService;
 
         installation.InstallationDate = Input.InstallationDate;
         installation.CommissionDate = Input.CommissionDate;
@@ -545,6 +547,8 @@ public class EditModel : PageModel
             ?? (installation.InverterWarrantyYears > 0
                 ? Installation.CalculateWarrantyEnd(installation.InstallationDate, installation.InverterWarrantyYears)
                 : null);
+
+        await ApplyServiceScopeChangeAsync(installation, previousWarrantyEnd, hadWarrantyService);
 
         installation.UpdatedAt = DateTime.UtcNow;
 
@@ -609,7 +613,11 @@ public class EditModel : PageModel
             foreach (var a in openCleaningAlerts)
             {
                 a.ResolvedAt = DateTime.UtcNow;
-                a.IsNotified = true;   // nothing left to tell anyone
+                if (!a.IsNotified)
+                {
+                    a.IsNotified = true;   // nothing left to tell anyone
+                    a.NotificationSuppressed = true;
+                }
             }
 
             // Only when cleaning was actually switched off — not when the last
@@ -641,6 +649,61 @@ public class EditModel : PageModel
             || previousFrequency != installation.CleaningFrequencyMonths)
         {
             installation.NextCleaningDueDate = installation.ComputeNextCleaningDue();
+        }
+    }
+
+    /// <summary>
+    /// Same idea as <see cref="ApplyCleaningScheduleChangeAsync"/> for the
+    /// other switches whose alerts were left behind until a background job
+    /// happened to notice — or never, when no job looked.
+    ///
+    /// Monitoring off: nothing will poll the site again, so a site saved while
+    /// Offline stayed red on the map and in the dashboard's offline list, and
+    /// its offline alert stayed open. Warranty service off, or the end date
+    /// corrected: the open "ประกันใกล้หมดอายุ" alert still quoted the old date.
+    /// It is closed here; if the site still qualifies the health monitor
+    /// raises a fresh one with the right date on its next run.
+    /// </summary>
+    private async Task ApplyServiceScopeChangeAsync(
+        Installation installation, DateTime previousWarrantyEnd, bool hadWarrantyService)
+    {
+        var now = DateTime.UtcNow;
+
+        if (!installation.IncludesMonitoring)
+        {
+            if (installation.Status == InstallationStatus.Offline)
+                installation.Status = InstallationStatus.Active;
+
+            var connectivity = await _context.SystemAlerts
+                .Where(a => a.InstallationId == installation.Id
+                            && a.ResolvedAt == null
+                            && (a.AlertType == AlertType.Offline || a.AlertType == AlertType.Error))
+                .ToListAsync();
+            foreach (var a in connectivity)
+            {
+                a.ResolvedAt = now;
+                a.IsNotified = true;
+                // Nothing came back online — we just stopped watching — so no
+                // "✅ กลับมาทำงานปกติแล้ว" for it.
+                a.NotificationSuppressed = true;
+            }
+        }
+
+        var warrantyChanged = installation.WarrantyExpiryDate.Date != previousWarrantyEnd
+                              || installation.IncludesWarrantyService != hadWarrantyService;
+        if (warrantyChanged)
+        {
+            var warrantyAlerts = await _context.SystemAlerts
+                .Where(a => a.InstallationId == installation.Id
+                            && a.ResolvedAt == null
+                            && a.AlertType == AlertType.WarrantyExpiring
+                            && a.Title.StartsWith(AlertTitles.WarrantyExpiring))
+                .ToListAsync();
+            foreach (var a in warrantyAlerts)
+            {
+                a.ResolvedAt = now;
+                if (!a.IsNotified) { a.IsNotified = true; a.NotificationSuppressed = true; }
+            }
         }
     }
 

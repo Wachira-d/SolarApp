@@ -1694,7 +1694,7 @@ BEGIN {sql}; END");
                 PlantId = inst.PlantId,
                 ApiBaseUrl = inst.CloudApiBaseUrl,
             };
-            var today = DateTime.UtcNow.Date;
+            var today = SolarApp.Services.SiteTime.Today;
             var monthStart = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd");
             var probes = await h.ProbeHistoricalEndpointsAsync(creds, monthStart, today.Year);
             return Results.Json(new
@@ -2032,7 +2032,7 @@ BEGIN {sql}; END");
                 return Results.Json(new { success = false, message = "No PlantId — set it first" });
 
             var requestedDays = Math.Clamp(days ?? 365, 1, 365 * 3);
-            var toDate = DateTime.UtcNow.Date;
+            var toDate = SolarApp.Services.SiteTime.Today;
             var fromDate = toDate.AddDays(-requestedDays);
 
             var creds = new Services.InverterApi.Models.ApiCredentials
@@ -2264,7 +2264,7 @@ BEGIN {sql}; END");
 
             var msg = $"🧪 ทดสอบการแจ้งเตือนจากระบบ SolarApp\n\n" +
                       $"📍 ไซต์: {install.SiteName}\n" +
-                      $"🕐 เวลา: {DateTime.UtcNow.ToLocalTime():dd/MM/yyyy HH:mm}\n\n" +
+                      $"🕐 เวลา: {SolarApp.Services.SiteTime.Now:dd/MM/yyyy HH:mm}\n\n" +
                       $"ถ้าคุณได้รับข้อความนี้ = การตั้งค่าถูกต้อง ✅";
             try
             {
@@ -2407,7 +2407,7 @@ BEGIN {sql}; END");
                 });
 
                 // 2. Upsert today's daily aggregate (used by Dashboard/Reports charts)
-                var today = DateTime.UtcNow.Date;
+                var today = SolarApp.Services.SiteTime.Today;
                 var todayRecord = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
                     .FirstOrDefaultAsync(db.EnergyData,
                         e => e.InstallationId == installation.Id

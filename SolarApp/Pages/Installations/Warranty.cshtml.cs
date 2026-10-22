@@ -35,7 +35,7 @@ public class WarrantyModel : PageModel
         public int? EquipmentId { get; set; }
         public WarrantyType WarrantyType { get; set; }
         public string ProviderName { get; set; } = string.Empty;
-        public DateTime WarrantyStartDate { get; set; } = DateTime.Today;
+        public DateTime WarrantyStartDate { get; set; } = SolarApp.Services.SiteTime.Today;
         public int WarrantyYears { get; set; } = 10;
         public string? TermsDescription { get; set; }
     }

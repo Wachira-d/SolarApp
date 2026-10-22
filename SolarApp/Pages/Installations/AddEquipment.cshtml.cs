@@ -56,7 +56,7 @@ public class AddEquipmentModel : PageModel
         public int WarrantyYears { get; set; } = 10;
 
         [Required]
-        public DateTime InstalledDate { get; set; } = DateTime.Today;
+        public DateTime InstalledDate { get; set; } = SolarApp.Services.SiteTime.Today;
 
         public string? Notes { get; set; }
     }

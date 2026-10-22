@@ -73,7 +73,7 @@
                             <td><span class="badge @statusClass">@statusLabel</span></td>
                             <td>@t.ReportedByUser.FullName</td>
                             <td>@(t.AssignedToUser?.FullName ?? "-")</td>
-                            <td>@t.CreatedAt.ToString("dd/MM/yyyy")</td>
+                            <td>@SolarApp.Services.SiteTime.ToSiteTime(t.CreatedAt).ToString("dd/MM/yyyy")</td>
                             <td class="text-end">
                                 <a asp-page="Edit" asp-route-id="@t.Id" class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-pencil"></i> แก้ไข

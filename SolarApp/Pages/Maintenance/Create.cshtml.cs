@@ -41,7 +41,7 @@ public class CreateModel : PageModel
 
     [BindProperty]
     [Required]
-    public DateTime ScheduledDate { get; set; } = DateTime.Today;
+    public DateTime ScheduledDate { get; set; } = SolarApp.Services.SiteTime.Today;
 
     [BindProperty]
     public decimal? Cost { get; set; }

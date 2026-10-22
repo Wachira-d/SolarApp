@@ -91,7 +91,7 @@ public class EditModel : PageModel
             ModelState.AddModelError(string.Empty, $"Cannot edit a {wo.Status} work order.");
         }
 
-        if (Input.ScheduledDate.Date > DateTime.UtcNow.Date.AddYears(5))
+        if (Input.ScheduledDate.Date > SolarApp.Services.SiteTime.Today.AddYears(5))
             ModelState.AddModelError("Input.ScheduledDate", "Scheduled date cannot be more than 5 years in the future.");
 
         if (!ModelState.IsValid)

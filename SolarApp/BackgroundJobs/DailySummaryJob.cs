@@ -34,7 +34,10 @@ public class DailySummaryJob
     [DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task ExecuteAsync()
     {
-        var todayStart = DateTime.UtcNow.Date;
+        // The site's day as a UTC window — alert and work-order timestamps are
+        // UTC. UtcNow.Date began "today" at 07:00 Thailand time, so the 18:00
+        // digest silently left out everything from midnight to 07:00.
+        var todayStart = SolarApp.Services.SiteTime.TodayStartUtc;
         var todayEnd = todayStart.AddDays(1);
 
         // Only count sites we actually MONITOR.  Cleaning-only / partner-
@@ -138,12 +141,14 @@ public class DailySummaryJob
             .Select(i => i.Id)
             .ToListAsync();
         var pendingWo = await _context.WorkOrders
-            .CountAsync(wo => wo.Status != WorkOrderStatus.Completed
-                              && wo.Status != WorkOrderStatus.Cancelled
+            // Still to be done: anything before Completed. Verified, Invoiced
+            // and Closed are past the work itself and were counted as pending.
+            .CountAsync(wo => wo.Status < WorkOrderStatus.Completed
                               && (wo.InstallationId == null || allOwnedIds.Contains(wo.InstallationId.Value)));
 
         var completedWoToday = await _context.WorkOrders
-            .CountAsync(wo => wo.Status == WorkOrderStatus.Completed
+            .CountAsync(wo => wo.Status >= WorkOrderStatus.Completed
+                              && wo.Status != WorkOrderStatus.Cancelled
                               && wo.UpdatedAt >= todayStart && wo.UpdatedAt < todayEnd
                               && (wo.InstallationId == null || allOwnedIds.Contains(wo.InstallationId.Value)));
 
@@ -241,7 +246,7 @@ public class DailySummaryJob
                 ? $"\n🛡️ ประกันใกล้หมด: {warrantyExpiringCount}"
                 : "";
             var digest =
-                $"📊 Daily Summary {DateTime.UtcNow:dd/MM/yyyy}\n" +
+                $"📊 Daily Summary {SolarApp.Services.SiteTime.Today:dd/MM/yyyy}\n" +
                 $"Online/Monitored: {onlineSites}/{totalSites} ไซต์\n" +
                 $"Offline: {offlineSites}\n" +
                 $"Energy Today: {todayEnergy:N1} kWh\n" +

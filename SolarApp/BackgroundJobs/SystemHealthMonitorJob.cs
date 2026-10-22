@@ -202,11 +202,11 @@ public class SystemHealthMonitorJob
                     ? $"[{installation.InverterBrand}] {installation.SiteName}: " +
                       $"Cannot reach cloud API for {durationStr}. " +
                       "The inverter may still be working — this is a data connection issue, not necessarily an inverter problem. " +
-                      $"Last successful contact: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}."
+                      $"Last successful contact: {Services.SiteTime.ToSiteTime(installation.LastOnlineAt):dd/MM/yyyy HH:mm}."
                     : $"[{installation.InverterBrand}] {installation.SiteName}: " +
                       $"Inverter reports offline for {durationStr}. " +
                       "API connection is working — the inverter itself is not reporting data. " +
-                      $"Last online: {installation.LastOnlineAt:dd/MM/yyyy HH:mm}. " +
+                      $"Last online: {Services.SiteTime.ToSiteTime(installation.LastOnlineAt):dd/MM/yyyy HH:mm}. " +
                       (isNighttime
                         ? "It's currently nighttime at the site — this is normal when solar production stops. " +
                           "Will re-check at sunrise; a separate alert will fire if still offline then."
@@ -344,7 +344,7 @@ public class SystemHealthMonitorJob
                                && l.ErrorMessage.Contains("[ONLINE]"));
 
             // De-dup: only one alert per installation per day for each category
-            var sinceToday = DateTime.UtcNow.Date;
+            var sinceToday = Services.SiteTime.TodayStartUtc;
 
             if (!everOnlineRecently)
             {
