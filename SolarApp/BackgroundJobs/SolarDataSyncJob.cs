@@ -777,20 +777,39 @@ public class SolarDataSyncJob
                         var titles = alarmKeys.Select(k => k.Title).Distinct().ToList();
                         var earliest = alarmKeys.Min(k => k.OccurredAt);
 
-                        var existingKeys = await _context.SystemAlerts
+                        // Tracked (not projected) so an alarm we already hold can
+                        // be closed when the vendor now reports it cleared.
+                        var existingRows = await _context.SystemAlerts
                             .Where(x => x.InstallationId == installation.Id
+                                && x.AlertType == AlertType.Error
                                 && x.OccurredAt >= earliest
                                 && titles.Contains(x.Title))
-                            .Select(x => new { x.Title, x.OccurredAt })
                             .ToListAsync();
 
-                        var existingSet = new HashSet<(string, DateTime)>(
-                            existingKeys.Select(k => (k.Title, k.OccurredAt)));
+                        var existingByKey = new Dictionary<(string, DateTime), SystemAlert>();
+                        foreach (var row in existingRows)
+                            existingByKey.TryAdd((row.Title, row.OccurredAt), row);
+                        var existingSet = new HashSet<(string, DateTime)>(existingByKey.Keys);
 
                         foreach (var a in alarmsForThisInstallation)
                         {
                             var alarmTitle = a.DisplayTitle;
-                            if (existingSet.Contains((alarmTitle, a.OccurredAt))) continue;
+                            if (existingSet.Contains((alarmTitle, a.OccurredAt)))
+                            {
+                                // The dedupe used to stop here, so an alarm stored
+                                // while active was never closed when the vendor
+                                // cleared it: Critical/High ones escalated to the
+                                // LINE group forever, and for 24 hours each one
+                                // also counted as a "confirming alarm" that made a
+                                // Station Faulty alert Critical.
+                                if (a.ClearedAt.HasValue
+                                    && existingByKey.TryGetValue((alarmTitle, a.OccurredAt), out var held)
+                                    && held.ResolvedAt == null)
+                                {
+                                    held.ResolvedAt = a.ClearedAt;
+                                }
+                                continue;
+                            }
 
                             _context.SystemAlerts.Add(new SystemAlert
                             {
@@ -807,7 +826,11 @@ public class SolarDataSyncJob
                                 Message = a.DisplayMessage,
                                 OccurredAt = a.OccurredAt,
                                 ResolvedAt = a.ClearedAt,
-                                IsNotified = false
+                                // Already cleared by the vendor when we first saw it:
+                                // history, not news. Queuing it sent an alert and
+                                // then a recovery for something that was over.
+                                IsNotified = a.ClearedAt.HasValue,
+                                NotificationSuppressed = a.ClearedAt.HasValue
                             });
                             // Prevent dup-add within same batch (same alarm appearing twice in source)
                             existingSet.Add((alarmTitle, a.OccurredAt));
@@ -929,7 +952,7 @@ public class SolarDataSyncJob
         });
     }
 
-    private const string ApiFailureTitlePrefix = "เชื่อมต่อคลาวด์ไม่สำเร็จ: ";
+    private const string ApiFailureTitlePrefix = AlertTitles.ApiFailure;
 
     private static Func<SystemAlert, bool> IsOpenApiFailure(int installationId) =>
         a => a.InstallationId == installationId

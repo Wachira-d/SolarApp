@@ -23,32 +23,77 @@ public class AlertRulesEngine : IAlertRulesEngine
 
     public async Task<int> EvaluateAllAsync(CancellationToken cancellationToken = default)
     {
+        var now = DateTime.UtcNow;
         var rules = await _context.AlertRules.Where(r => r.IsEnabled)
             .ToListAsync(cancellationToken);
-        if (!rules.Any()) return 0;
+        var enabledIds = rules.Select(r => r.Id).ToHashSet();
 
-        var now = DateTime.UtcNow;
+        // Adopt alerts raised before AlertRuleId existed, by the only link they
+        // have — Title == rule name — so the lifecycle below covers them too.
+        var allRules = await _context.AlertRules.AsNoTracking()
+            .Select(r => new { r.Id, r.Name })
+            .ToListAsync(cancellationToken);
+        if (allRules.Count > 0)
+        {
+            var idByName = allRules
+                .GroupBy(r => r.Name)
+                .Where(g => g.Count() == 1)            // ambiguous names: leave alone
+                .ToDictionary(g => g.Key, g => g.First().Id);
+            var names = idByName.Keys.ToList();
+            var legacy = await _context.SystemAlerts
+                .Where(a => a.AlertRuleId == null && a.ResolvedAt == null && names.Contains(a.Title))
+                .ToListAsync(cancellationToken);
+            foreach (var a in legacy) a.AlertRuleId = idByName[a.Title];
+            // The queries below run against the database, so the adoption has
+            // to land first or this run would miss them and raise duplicates.
+            if (legacy.Count > 0) await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        // A disabled or deleted rule's alerts are closed. They used to stay
+        // open for good, and High/Critical ones kept escalating to LINE.
+        var orphaned = await _context.SystemAlerts
+            .Where(a => a.AlertRuleId != null && a.ResolvedAt == null
+                        && !enabledIds.Contains(a.AlertRuleId.Value))
+            .ToListAsync(cancellationToken);
+        foreach (var a in orphaned)
+        {
+            a.ResolvedAt = now;
+            if (!a.IsNotified) { a.IsNotified = true; a.NotificationSuppressed = true; }
+        }
+
+        if (rules.Count == 0)
+        {
+            if (orphaned.Count > 0) await _context.SaveChangesAsync(cancellationToken);
+            return 0;
+        }
+
+        // Monitored sites only. Every metric here is read from synced data, so
+        // on a site we don't poll they all read as zero / never online, and an
+        // OfflineMinutes or DailyEnergyKwh rule fired on every such site forever.
         var allInstallations = await _context.Installations
-            .Where(i => i.Status != InstallationStatus.Inactive)
+            .Where(i => i.Status != InstallationStatus.Inactive && i.IncludesMonitoring)
             .ToListAsync(cancellationToken);
 
-        // Pre-load recent alerts per (rule.Title, installationId) to check cooldowns
-        // without N+1 queries. We bucket by rule title since that's what we store.
-        var ruleTitles = rules.Select(r => r.Name).Distinct().ToList();
-        var maxCooldown = rules.Max(r => r.CooldownMinutes);
-        var cooldownStart = now.AddMinutes(-maxCooldown);
-        var recentAlertsRaw = await _context.SystemAlerts
-            .Where(a => ruleTitles.Contains(a.Title)
-                        && a.ResolvedAt == null
-                        && a.OccurredAt > cooldownStart)
-            .Select(a => new { a.InstallationId, a.Title, a.OccurredAt })
+        var openAlerts = await _context.SystemAlerts
+            .Where(a => a.AlertRuleId != null && a.ResolvedAt == null)
             .ToListAsync(cancellationToken);
-        // Key: (title + installationId) -> most recent OccurredAt
-        var lastAlertTime = recentAlertsRaw
-            .GroupBy(a => (a.Title, a.InstallationId))
+        var openByKey = openAlerts
+            .GroupBy(a => (a.AlertRuleId!.Value, a.InstallationId))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Last raise per (rule, site), open or closed — the cooldown is a
+        // flapping guard between a close and the next raise.
+        var maxCooldown = rules.Max(r => r.CooldownMinutes);
+        var cooldownStart = now.AddMinutes(-Math.Max(1, maxCooldown));
+        var lastRaised = (await _context.SystemAlerts
+                .Where(a => a.AlertRuleId != null && a.OccurredAt > cooldownStart)
+                .Select(a => new { RuleId = a.AlertRuleId!.Value, a.InstallationId, a.OccurredAt })
+                .ToListAsync(cancellationToken))
+            .GroupBy(a => (a.RuleId, a.InstallationId))
             .ToDictionary(g => g.Key, g => g.Max(x => x.OccurredAt));
 
-        int fired = 0;
+        int fired = 0, cleared = 0;
+        var evaluated = new HashSet<(int, int)>();
         foreach (var rule in rules)
         {
             var targets = allInstallations.Where(i =>
@@ -60,18 +105,34 @@ public class AlertRulesEngine : IAlertRulesEngine
             {
                 try
                 {
-                    // Per-rule-per-installation cooldown (fixes original bug where
-                    // rule.LastFiredAt was global across all installations)
-                    if (lastAlertTime.TryGetValue((rule.Name, inst.Id), out var lastTime)
-                        && now - lastTime < TimeSpan.FromMinutes(rule.CooldownMinutes))
-                        continue;
+                    var key = (rule.Id, inst.Id);
+                    evaluated.Add(key);
+                    openByKey.TryGetValue(key, out var open);
 
                     var (shouldFire, observedValue, detail) = await EvaluateAsync(rule, inst, now, cancellationToken);
-                    if (!shouldFire) continue;
+
+                    if (!shouldFire)
+                    {
+                        // The condition has cleared: close what this rule raised
+                        // here. Before, nothing did, and closing one by hand only
+                        // made it fire again two minutes later.
+                        if (open != null)
+                            foreach (var a in open) { a.ResolvedAt = now; cleared++; }
+                        continue;
+                    }
+
+                    // Still true and already raised — one open alert, not one per
+                    // cooldown period.
+                    if (open is { Count: > 0 }) continue;
+
+                    if (lastRaised.TryGetValue(key, out var lastTime)
+                        && now - lastTime < TimeSpan.FromMinutes(rule.CooldownMinutes))
+                        continue;
 
                     _context.SystemAlerts.Add(new SystemAlert
                     {
                         InstallationId = inst.Id,
+                        AlertRuleId = rule.Id,
                         AlertType = rule.AlertType,
                         Severity = rule.Severity,
                         Title = rule.Name,
@@ -79,7 +140,7 @@ public class AlertRulesEngine : IAlertRulesEngine
                         OccurredAt = now,
                         IsNotified = false
                     });
-                    lastAlertTime[(rule.Name, inst.Id)] = now;
+                    lastRaised[key] = now;
                     rule.LastFiredAt = now; // still tracked for UI display
                     fired++;
                 }
@@ -90,10 +151,26 @@ public class AlertRulesEngine : IAlertRulesEngine
             }
         }
 
-        if (fired > 0)
-            await _context.SaveChangesAsync(cancellationToken);
+        // Open alerts on a site the rule no longer covers — deactivated,
+        // monitoring switched off, deleted, or the rule re-scoped to another
+        // site or brand. Nothing above revisits those pairs, so without this
+        // they would stay open (and escalate) forever.
+        foreach (var (key, list) in openByKey)
+        {
+            if (evaluated.Contains(key) || !enabledIds.Contains(key.Item1)) continue;
+            foreach (var a in list)
+            {
+                a.ResolvedAt = now;
+                if (!a.IsNotified) { a.IsNotified = true; a.NotificationSuppressed = true; }
+                cleared++;
+            }
+        }
 
-        _logger.LogInformation("Alert rules engine: evaluated {RuleCount} rule(s), fired {Fired} alert(s)", rules.Count, fired);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Alert rules engine: evaluated {RuleCount} rule(s), fired {Fired}, cleared {Cleared}, closed {Orphaned} from disabled/deleted rules",
+            rules.Count, fired, cleared, orphaned.Count);
         return fired;
     }
 

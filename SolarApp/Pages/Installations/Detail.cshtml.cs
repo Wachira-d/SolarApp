@@ -164,7 +164,7 @@ public class DetailModel : PageModel
                 }
             }
             var customerLineId = CustomerAlertMessageBuilder.PickRecipient(installation);
-            var customerAllowed = CustomerAlertMessageBuilder.ShouldNotifyCustomer(installation, alert.AlertType)
+            var customerAllowed = CustomerAlertMessageBuilder.ShouldNotifyCustomer(installation, alert)
                                   && installation.NotifyOnRecovery;
             if (!string.IsNullOrWhiteSpace(customerLineId) && customerAllowed)
             {

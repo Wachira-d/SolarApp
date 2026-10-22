@@ -74,8 +74,14 @@ public class SystemHealthMonitorJob
         // cloud contact" marker; if stale, the cloud is unreachable) ───
         // Skip non-monitored sites: we have no cloud account for them, so a
         // stale LastOnlineAt is expected and must not raise alerts.
+        //
+        // Offline sites are included: this loop marks a site Offline before it
+        // decides whether to alert, and used to select only Active ones — so a
+        // site that didn't clear the failure gate on its first pass, or was
+        // suppressed overnight "until the morning check", was never looked at
+        // again and never alerted at all.
         var offlineInstallations = await _context.Installations
-            .Where(i => i.Status == InstallationStatus.Active
+            .Where(i => (i.Status == InstallationStatus.Active || i.Status == InstallationStatus.Offline)
                 && i.IncludesMonitoring
                 && i.LastOnlineAt != null
                 && i.LastOnlineAt < threshold)
@@ -92,10 +98,16 @@ public class SystemHealthMonitorJob
             // Gate alert by consecutive API failures in recent window (noise reduction).
             // A single failed call shouldn't page on-call — wait for sustained failure.
             // Exclude RATE-LIMIT-DEFERRED entries — those are our scheduling, not a cloud outage.
+            //
+            // Counted since the last successful contact, i.e. across the whole
+            // outage. The window used to be the last OfflineThresholdMinutes
+            // (15), and a site syncing every 15 minutes makes at most one call
+            // in that span — below the minimum of two, every time.
+            var outageStart = installation.LastOnlineAt!.Value;
             var recentFailures = await _context.InverterApiLogs
                 .Where(l => l.InstallationId == installation.Id
                             && !l.IsSuccess
-                            && l.RequestTime >= threshold
+                            && l.RequestTime > outageStart
                             && (l.ErrorMessage == null
                                 || (!l.ErrorMessage.Contains("[RATE LIMIT-DEFERRED]")
                                     && !l.ErrorMessage.Contains("[RATE LIMITED]"))))
@@ -120,7 +132,8 @@ public class SystemHealthMonitorJob
             var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == installation.Id
                     && a.AlertType == AlertType.Offline
-                    && a.ResolvedAt == null);
+                    && a.ResolvedAt == null
+                    && (a.Title.StartsWith(ApiLostTitlePrefix) || a.Title.StartsWith(DeviceOfflineTitlePrefix)));
 
             if (existingAlert) continue;
 
@@ -183,8 +196,8 @@ public class SystemHealthMonitorJob
                 AlertType = AlertType.Offline,
                 Severity = severity,
                 Title = isApiIssue
-                    ? $"API Connection Lost: {installation.SiteName}"
-                    : $"Device Offline: {installation.SiteName}{nightNote}",
+                    ? $"{ApiLostTitlePrefix}{installation.SiteName}"
+                    : $"{DeviceOfflineTitlePrefix}{installation.SiteName}{nightNote}",
                 Message = isApiIssue
                     ? $"[{installation.InverterBrand}] {installation.SiteName}: " +
                       $"Cannot reach cloud API for {durationStr}. " +
@@ -207,18 +220,46 @@ public class SystemHealthMonitorJob
                 installation.Id, installation.SiteName, severity, isNighttime, recentFailures);
         }
 
-        // Auto-resolve offline alerts for installations that came back online
+        // Auto-resolve this loop's offline alerts once the site is back.
+        //
+        // Scoped to its own titles. It used to close EVERY open Offline alert
+        // on an Active site — including "Inverter Silent (Daytime)" and
+        // "Configuration Issue", which Part B raises only for Active sites. So
+        // those were closed in the same run that created them, the notifier
+        // then delivered them anyway, and a "กลับมาทำงานปกติแล้ว หลังจาก
+        // offline 0 นาที" followed: a false alarm and a false all-clear, daily.
         var resolvedAlerts = await _context.SystemAlerts
             .Include(a => a.Installation)
             .Where(a => a.AlertType == AlertType.Offline
                 && a.ResolvedAt == null
-                && a.Installation.Status == InstallationStatus.Active)
+                && a.Installation.Status == InstallationStatus.Active
+                && (a.Title.StartsWith(ApiLostTitlePrefix) || a.Title.StartsWith(DeviceOfflineTitlePrefix)))
             .ToListAsync();
 
         foreach (var alert in resolvedAlerts)
         {
             alert.ResolvedAt = DateTime.UtcNow;
         }
+
+        // Part B's alerts close when the inverter has actually reported again —
+        // an [ONLINE] sync after the alert was raised — not merely because the
+        // site row still says Active, which it always did.
+        var silentAlerts = await _context.SystemAlerts
+            .Where(a => a.AlertType == AlertType.Offline
+                && a.ResolvedAt == null
+                && (a.Title.StartsWith(SilentTitlePrefix) || a.Title.StartsWith(ConfigIssueTitlePrefix)))
+            .ToListAsync();
+        foreach (var alert in silentAlerts)
+        {
+            var reportedSince = await _context.InverterApiLogs.AnyAsync(l =>
+                l.InstallationId == alert.InstallationId
+                && l.IsSuccess
+                && l.RequestTime > alert.OccurredAt
+                && l.ErrorMessage != null && l.ErrorMessage.Contains("[ONLINE]"));
+            if (reportedSince) alert.ResolvedAt = DateTime.UtcNow;
+        }
+
+        await ResolveAlertsForSitesOutOfScopeAsync();
 
         // Auto-resolve LEGACY rate-limit-caused offline alerts. These were
         // created before we treated RATE LIMITED as scheduling (not an outage).
@@ -309,7 +350,7 @@ public class SystemHealthMonitorJob
             {
                 var existingConfigAlert = await _context.SystemAlerts
                     .AnyAsync(a => a.InstallationId == inst.Id
-                        && a.Title.StartsWith("Configuration Issue")
+                        && a.Title.StartsWith(ConfigIssueTitlePrefix)
                         && a.OccurredAt >= sinceToday);
                 if (existingConfigAlert) continue;
 
@@ -318,7 +359,7 @@ public class SystemHealthMonitorJob
                     InstallationId = inst.Id,
                     AlertType = AlertType.Offline,
                     Severity = AlertSeverity.Medium,
-                    Title = $"Configuration Issue: {inst.SiteName}",
+                    Title = $"{ConfigIssueTitlePrefix}{inst.SiteName}",
                     Message = $"[{inst.InverterBrand}] {inst.SiteName}: " +
                         "Cloud API is reachable but we have NEVER seen this site report as online in the last 7 days. " +
                         "This is most likely a configuration problem — NOT an inverter fault. " +
@@ -343,7 +384,7 @@ public class SystemHealthMonitorJob
 
             var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == inst.Id
-                    && a.Title.StartsWith("Inverter Silent (Daytime)")
+                    && a.Title.StartsWith(SilentTitlePrefix)
                     && a.OccurredAt >= sinceToday);
             if (existingAlert) continue;
 
@@ -352,7 +393,7 @@ public class SystemHealthMonitorJob
                 InstallationId = inst.Id,
                 AlertType = AlertType.Offline,
                 Severity = AlertSeverity.High,
-                Title = $"Inverter Silent (Daytime): {inst.SiteName}",
+                Title = $"{SilentTitlePrefix}{inst.SiteName}",
                 Message = $"[{inst.InverterBrand}] {inst.SiteName}: " +
                           $"Cloud API is reachable, but the inverter has not reported production for {offlineHoursThreshold}+ hours " +
                           "during daytime. " +
@@ -449,6 +490,61 @@ public class SystemHealthMonitorJob
         await _context.SaveChangesAsync();
     }
 
+    // Offline alert titles. Each producer resolves and dedupes only its own,
+    // which is what stops one check from silently closing another's alerts.
+    private const string ApiLostTitlePrefix = "API Connection Lost: ";
+    private const string DeviceOfflineTitlePrefix = "Device Offline: ";
+    private const string SilentTitlePrefix = "Inverter Silent (Daytime): ";
+    private const string ConfigIssueTitlePrefix = "Configuration Issue: ";
+
+    /// <summary>
+    /// Closes connectivity alerts on sites we've stopped watching: monitoring
+    /// switched off, site set Inactive, or site deleted.
+    ///
+    /// Those alerts only ever closed on a successful sync, and the sync skips
+    /// exactly these sites — so they stayed open forever, kept the site red on
+    /// the map and counted as offline on the dashboard, and High/Critical ones
+    /// were re-sent to the LINE group by escalation every twelve hours.
+    /// A site that was Offline when monitoring was switched off is put back to
+    /// Active: nothing will ever poll it again to move it.
+    /// </summary>
+    private async Task ResolveAlertsForSitesOutOfScopeAsync()
+    {
+        var outOfScopeIds = await _context.Installations
+            .IgnoreQueryFilters()
+            .Where(i => i.DeletedAt != null
+                        || i.Status == InstallationStatus.Inactive
+                        || !i.IncludesMonitoring)
+            .Select(i => i.Id)
+            .ToListAsync();
+        if (outOfScopeIds.Count == 0) return;
+
+        var stale = await _context.SystemAlerts
+            .Where(a => outOfScopeIds.Contains(a.InstallationId)
+                        && a.ResolvedAt == null
+                        && (a.AlertType == AlertType.Offline || a.AlertType == AlertType.Error))
+            .ToListAsync();
+        foreach (var a in stale)
+        {
+            a.ResolvedAt = DateTime.UtcNow;
+            a.IsNotified = true;
+            // Nobody should get "✅ กลับมาทำงานปกติแล้ว" for a site we simply
+            // stopped monitoring — nothing came back.
+            a.NotificationSuppressed = true;
+        }
+
+        var stuckOffline = await _context.Installations
+            .Where(i => !i.IncludesMonitoring && i.Status == InstallationStatus.Offline)
+            .ToListAsync();
+        foreach (var i in stuckOffline)
+            i.Status = InstallationStatus.Active;
+
+        if (stale.Count + stuckOffline.Count > 0)
+            _logger.LogInformation(
+                "Closed {Alerts} connectivity alert(s) on unmonitored/inactive/deleted sites; {Sites} unmonitored site(s) un-stuck from Offline",
+                stale.Count, stuckOffline.Count);
+    }
+
     /// <summary>Title prefix for this job's cleaning reminders, so it only dedupes and resolves its own.</summary>
     private const string CleaningAlertTitlePrefix = "ครบกำหนดล้างแผง: ";
 
@@ -459,7 +555,7 @@ public class SystemHealthMonitorJob
     /// Distinguishes these from the contract-expiry alerts that share the
     /// WarrantyExpiring type, so each job only resolves its own.
     /// </summary>
-    private const string WarrantyAlertTitlePrefix = "ประกันใกล้หมดอายุ: ";
+    private const string WarrantyAlertTitlePrefix = AlertTitles.WarrantyExpiring;
 
     private async Task CheckWarrantyExpiryAsync()
     {
@@ -478,6 +574,7 @@ public class SystemHealthMonitorJob
         // flagged as incomplete. They're surfaced separately below.
         var installations = await _context.Installations
             .Where(i => i.IncludesWarrantyService
+                && i.Status != InstallationStatus.Inactive
                 && i.WarrantyExpiryDate.Year > 1900
                 && i.WarrantyExpiryDate <= threshold
                 && i.WarrantyExpiryDate >= today)
@@ -488,7 +585,11 @@ public class SystemHealthMonitorJob
             var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == installation.Id
                     && a.AlertType == AlertType.WarrantyExpiring
-                    && a.ResolvedAt == null);
+                    && a.ResolvedAt == null
+                    // Its own alerts only. ContractExpiryJob files under the
+                    // same type, and an open contract alert used to block the
+                    // warranty reminder for up to sixty days.
+                    && a.Title.StartsWith(WarrantyAlertTitlePrefix));
 
             if (!existingAlert)
             {
@@ -531,12 +632,35 @@ public class SystemHealthMonitorJob
 
     private async Task SendPendingNotificationsAsync()
     {
+        // Drain what must never be delivered before picking what to send.
+        //   • Resolved already: the condition cleared before we got to it.
+        //     This step used to send these anyway, in the same run that
+        //     closed them.
+        //   • Site deleted or Inactive: the Installation query filter hides a
+        //     deleted site from the send query below, so its alerts sat
+        //     pending forever — and would all have gone out at once if the
+        //     site were ever restored.
+        var undeliverable = await _context.SystemAlerts
+            .IgnoreQueryFilters()
+            .Where(a => !a.IsNotified
+                        && (a.ResolvedAt != null
+                            || a.Installation.DeletedAt != null
+                            || a.Installation.Status == InstallationStatus.Inactive))
+            .ToListAsync();
+        foreach (var a in undeliverable)
+        {
+            a.IsNotified = true;
+            a.NotificationSuppressed = true;
+        }
+        if (undeliverable.Count > 0)
+            await _context.SaveChangesAsync();
+
         var pendingAlerts = await _context.SystemAlerts
             .Include(a => a.Installation)
                 .ThenInclude(i => i.Customer)
             .Include(a => a.Installation)
                 .ThenInclude(i => i.Partner)
-            .Where(a => !a.IsNotified)
+            .Where(a => !a.IsNotified && a.ResolvedAt == null)
             .ToListAsync();
 
         if (pendingAlerts.Count == 0) return;
@@ -677,7 +801,7 @@ public class SystemHealthMonitorJob
             var customerLineId = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
                 .PickRecipient(alert.Installation);
             var customerNotifyAllowed = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
-                .ShouldNotifyCustomer(alert.Installation, alert.AlertType);
+                .ShouldNotifyCustomer(alert.Installation, alert);
             var inQuietHours = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
                 .IsInCustomerQuietHours(alert.Installation, DateTime.UtcNow, alert.Severity);
             if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed && !inQuietHours
@@ -776,6 +900,9 @@ public class SystemHealthMonitorJob
             .Where(a => a.ResolvedAt != null
                 && a.ResolvedAt >= recentWindow
                 && a.IsNotified
+                // Only for problems someone was actually told about, and not
+                // for sites we stopped watching — "back to normal" is false there.
+                && !a.NotificationSuppressed
                 && (a.AlertType == AlertType.Offline || a.AlertType == AlertType.Error))
             .ToListAsync();
 
@@ -900,7 +1027,7 @@ public class SystemHealthMonitorJob
             // not closure messages).  Quiet hours never block recovery
             // messages — the "all clear" is short and welcome.
             var customerNotifyAllowed = SolarApp.Services.LineApi.CustomerAlertMessageBuilder
-                .ShouldNotifyCustomer(alert.Installation, alert.AlertType)
+                .ShouldNotifyCustomer(alert.Installation, alert)
                 && alert.Installation.NotifyOnRecovery;
             if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed && sent < 100)
             {
@@ -972,6 +1099,13 @@ public class SystemHealthMonitorJob
                 .ThenInclude(i => i.Partner)
             .Where(a => a.ResolvedAt == null
                 && a.IsNotified
+                // Never delivered in the first place — nothing to escalate.
+                && !a.NotificationSuppressed
+                // Predictions are dashboard-only by design: they're created with
+                // IsNotified = true precisely so they never reach LINE, which
+                // also made them look "already sent" to this query, so High-risk
+                // ones were escalated to the group at 6h, 24h and 72h, then daily.
+                && a.AlertType != AlertType.PredictiveDiagnostic
                 && (a.Severity == AlertSeverity.Critical || a.Severity == AlertSeverity.High))
             .ToListAsync();
 

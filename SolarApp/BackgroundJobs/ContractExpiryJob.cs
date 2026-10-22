@@ -36,7 +36,7 @@ public class ContractExpiryJob
     }
 
     private const int WarnWithinDays = 60;
-    private const string AlertTitlePrefix = "สัญญาบริการใกล้หมดอายุ: ";
+    private const string AlertTitlePrefix = AlertTitles.ContractExpiring;
 
     [DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task ExecuteAsync()
@@ -90,6 +90,10 @@ public class ContractExpiryJob
 
             var daysLeft = (int)Math.Floor((end - today).TotalDays);
             if (daysLeft > WarnWithinDays) continue;
+
+            // A deactivated site's contract still rolls and lapses above, but
+            // nobody needs chasing about renewing it.
+            if (contract.Installation.Status == InstallationStatus.Inactive) continue;
 
             // One open alert per contract, not one per day.
             var alreadyOpen = await _context.SystemAlerts.AnyAsync(a =>

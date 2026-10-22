@@ -25,10 +25,30 @@ public static class CustomerAlertMessageBuilder
     public static string Build(SystemAlert alert, Installation installation)
     {
         var site = installation.SiteName;
-        var when = (alert.OccurredAt == default ? DateTime.UtcNow : alert.OccurredAt)
-            .ToLocalTime().ToString("dd/MM/yyyy เวลา HH:mm");
-        var last = installation.LastOnlineAt?.ToLocalTime().ToString("dd/MM/yyyy เวลา HH:mm")
-                   ?? "ยังไม่เคยเชื่อมต่อ";
+        // Site-local, not ToLocalTime(): that converts to the SERVER's zone,
+        // which is only Thailand time if someone set the box up that way.
+        var when = SolarApp.Services.SiteTime
+            .ToSiteTime(alert.OccurredAt == default ? DateTime.UtcNow : alert.OccurredAt)
+            .ToString("dd/MM/yyyy เวลา HH:mm");
+        var last = installation.LastOnlineAt.HasValue
+            ? SolarApp.Services.SiteTime.ToSiteTime(installation.LastOnlineAt.Value).ToString("dd/MM/yyyy เวลา HH:mm")
+            : "ยังไม่เคยเชื่อมต่อ";
+
+        // Our monitoring lost the vendor cloud — the panels are very likely
+        // fine. The generic Error text ("ระบบโซลาร์เซลล์มีปัญหา") told the
+        // customer their system was broken.
+        if (alert.Title.StartsWith(AlertTitles.ApiFailure))
+        {
+            return
+$@"ℹ️ ระบบติดตามข้อมูลขาดการเชื่อมต่อ
+
+📍 ไซต์: {site}
+🕐 ตั้งแต่: {when}
+
+ระบบโซลาร์เซลล์ของท่านอาจยังผลิตไฟได้ตามปกติ
+เพียงแต่เราดึงข้อมูลจากระบบของผู้ผลิตไม่ได้ชั่วคราว
+ทีมงานกำลังแก้ไข — ไม่ต้องดำเนินการใด ๆ ครับ";
+        }
 
         return alert.AlertType switch
         {
@@ -86,11 +106,13 @@ $@"💧 ครบกำหนดล้างแผงโซลาร์เซล
 ตามตารางบำรุงรักษา ไซต์นี้ครบกำหนดล้างแผงแล้ว
 ทีมงานจะติดต่อเพื่อนัดวันเข้าให้บริการครับ",
 
+            // The real date, not "within 90 days": the customer is deciding
+            // whether to renew and the number is the whole point.
             AlertType.WarrantyExpiring =>
 $@"📋 ใกล้หมดประกัน
 
 📍 ไซต์: {site}
-ประกันระบบจะสิ้นสุดภายใน 90 วัน
+ประกันระบบสิ้นสุด {installation.WarrantyExpiryDate:dd/MM/yyyy}{(installation.WarrantyDaysRemaining is int d && d >= 0 ? $" (อีก {d} วัน)" : "")}
 
 หากต้องการต่ออายุประกัน หรือสอบถามรายละเอียด
 กรุณาตอบกลับในแชทนี้ครับ",
@@ -162,6 +184,24 @@ $@"✅ {site} กลับมาทำงานปกติแล้ว (หย�
     /// given installation.  Acts as the single source of truth so callers
     /// don't have to remember the AlertType → NotifyOnXxx mapping.
     /// </summary>
+    /// <summary>
+    /// The per-alert decision. Prefer this over the type-only overload: two
+    /// kinds of alert share a type with something the customer did opt into.
+    ///   • API-failure alerts are AlertType.Error, so they went out under
+    ///     "แจ้งเมื่อไฟดับ" while their own switch — "🔌 API เชื่อมต่อ cloud
+    ///     ไม่ได้", labelled as usually not for customers — did nothing.
+    ///   • Contract-renewal alerts are AlertType.WarrantyExpiring, so a
+    ///     customer with warranty reminders on was told "ใกล้หมดประกัน" when
+    ///     it was the service contract ending. That conversation is
+    ///     commercial; it isn't sent automatically.
+    /// </summary>
+    public static bool ShouldNotifyCustomer(Installation install, SystemAlert alert)
+    {
+        if (alert.Title.StartsWith(AlertTitles.ContractExpiring)) return false;
+        if (alert.Title.StartsWith(AlertTitles.ApiFailure)) return install.NotifyOnApiFailure;
+        return ShouldNotifyCustomer(install, alert.AlertType);
+    }
+
     public static bool ShouldNotifyCustomer(Installation install, AlertType type) => type switch
     {
         AlertType.Offline           => install.NotifyOnGridLoss,

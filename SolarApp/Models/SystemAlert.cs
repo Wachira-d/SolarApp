@@ -23,6 +23,25 @@ public class SystemAlert
     public ApplicationUser? AcknowledgedByUser { get; set; }
 
     public bool IsNotified { get; set; }
+
+    /// <summary>
+    /// Deliberately never delivered: closed before the notifier reached it,
+    /// raised against a site that has since been deleted or deactivated, or
+    /// imported from a vendor already cleared. IsNotified is set on these too
+    /// so nothing retries them, which made them indistinguishable from alerts
+    /// that really went out — and the recovery step then sent a
+    /// "✅ กลับมาทำงานปกติแล้ว" for a problem nobody had been told about.
+    /// </summary>
+    public bool NotificationSuppressed { get; set; }
+
+    /// <summary>
+    /// The alert rule that raised this, when one did. Rule alerts were
+    /// identified only by Title == rule name, so nothing could close them:
+    /// not when the condition cleared, not when the rule was disabled or
+    /// deleted. No foreign key on purpose — deleting a rule must not be
+    /// blocked by, or cascade into, the history it produced.
+    /// </summary>
+    public int? AlertRuleId { get; set; }
     public bool IsResolved => ResolvedAt.HasValue;
 
     /// <summary>

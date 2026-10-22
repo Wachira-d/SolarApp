@@ -744,6 +744,10 @@ public class Startup
 
             // Soft delete (see ISoftDeletable). Nullable with no default, so
             // every existing row reads as "not deleted" without a backfill.
+            (Table: "SystemAlerts", Column: "AlertRuleId",
+             Sql: "ALTER TABLE [SystemAlerts] ADD [AlertRuleId] int NULL"),
+            (Table: "SystemAlerts", Column: "NotificationSuppressed",
+             Sql: "ALTER TABLE [SystemAlerts] ADD [NotificationSuppressed] bit NOT NULL DEFAULT 0"),
             (Table: "Customers", Column: "DeletedAt",
              Sql: "ALTER TABLE [Customers] ADD [DeletedAt] datetime2 NULL"),
             (Table: "Customers", Column: "DeletedByUserId",
@@ -2470,12 +2474,16 @@ BEGIN {sql}; END");
                     // Vendors sometimes omit the alarm name; DisplayTitle is what
                     // gets stored, so it has to be what we dedupe on too.
                     var alarmTitle = a.DisplayTitle;
-                    var exists = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
-                        .AnyAsync(db.SystemAlerts,
+                    var held = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                        .FirstOrDefaultAsync(db.SystemAlerts,
                             x => x.InstallationId == installation.Id
                               && x.Title == alarmTitle
                               && x.OccurredAt == a.OccurredAt);
-                    if (!exists)
+                    // Same rule as the sync job: an alarm we already hold that
+                    // the vendor now reports cleared gets closed, not skipped.
+                    if (held != null && held.ResolvedAt == null && a.ClearedAt.HasValue)
+                        held.ResolvedAt = a.ClearedAt;
+                    if (held == null)
                     {
                         db.SystemAlerts.Add(new Models.SystemAlert
                         {
@@ -2492,7 +2500,8 @@ BEGIN {sql}; END");
                             Message = a.DisplayMessage,
                             OccurredAt = a.OccurredAt,
                             ResolvedAt = a.ClearedAt,
-                            IsNotified = a.ClearedAt.HasValue
+                            IsNotified = a.ClearedAt.HasValue,
+                            NotificationSuppressed = a.ClearedAt.HasValue
                         });
                         addedAlarms++;
                     }

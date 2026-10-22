@@ -50,17 +50,43 @@ public class PredictiveDiagnosticsJob
             return;
         }
 
+        // Close predictions the engine no longer makes. Nothing ever closed
+        // them, so they accumulated on the dashboard indefinitely — after the
+        // panels were cleaned, after the season passed, after the site was
+        // fixed. The engine re-evaluates every site daily, so "not predicted
+        // today" means the condition behind it no longer holds. (Skipped when
+        // the engine threw above — an empty result then means nothing.)
+        var currentKeys = new HashSet<string>(
+            predictions.Select(p => $"{p.InstallationId}|{p.Prediction}"));
+        var openPredictions = await _context.SystemAlerts
+            .Where(a => a.AlertType == AlertType.PredictiveDiagnostic && a.ResolvedAt == null)
+            .ToListAsync();
+        var closed = 0;
+        foreach (var a in openPredictions)
+        {
+            if (currentKeys.Contains($"{a.InstallationId}|{a.Title}")) continue;
+            a.ResolvedAt = DateTime.UtcNow;
+            closed++;
+        }
+        if (closed > 0)
+        {
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Predictive diagnostics: closed {Count} prediction(s) no longer made", closed);
+        }
+
         if (predictions.Count == 0)
         {
             _logger.LogInformation("Predictive diagnostics: no issues detected");
             return;
         }
 
-        // De-dup: don't re-create the same prediction within 7 days
+        // De-dup: skip a prediction that is still open, or was raised in the
+        // last 7 days. The open check is new — a prediction older than a week
+        // that was still open used to get a second identical row beside it.
         var weekAgo = DateTime.UtcNow.AddDays(-7);
         var recentPredictions = await _context.SystemAlerts
             .Where(a => a.AlertType == AlertType.PredictiveDiagnostic
-                && a.OccurredAt >= weekAgo)
+                && (a.OccurredAt >= weekAgo || a.ResolvedAt == null))
             .Select(a => new { a.InstallationId, a.Title })
             .ToListAsync();
 
