@@ -80,8 +80,10 @@ public class IndexModel : PageModel
                 q = q.Where(i => false);
         }
 
-        var now = DateTime.UtcNow;
-        var today = now.Date;
+        // Site-local: with UtcNow a pin due today stayed green until 07:00
+        // Thailand time and its "อีก N วัน" was a day behind until then.
+        var today = SolarApp.Services.SiteTime.Today;
+        var now = today;
 
         // WorkOrders may not exist on first deploy — guard the query
         var workOrdersTableExists = true;
@@ -121,7 +123,13 @@ public class IndexModel : PageModel
                 // clean this site — otherwise a stale NextCleaningDueDate on a
                 // monitoring-only site would paint the pin yellow/red with no
                 // matching alert (same mismatch as the dashboard tile).
-                NextCleaningDueDate = i.IncludesCleaning ? i.NextCleaningDueDate : null,
+                // Same scope as Installation.HasCleaningInScope — inlined because
+                // this is a SQL projection. A used-up contract or an Inactive
+                // site has no next cleaning, whatever date is left on the row.
+                NextCleaningDueDate = i.IncludesCleaning
+                                      && (i.TotalCleaningCount <= 0 || i.CompletedCleaningCount < i.TotalCleaningCount)
+                                      && i.Status != InstallationStatus.Inactive
+                    ? i.NextCleaningDueDate : null,
                 // Earliest scheduled PM record that's still pending — i.e. the
                 // next visit the field crew has on the books for this site.
                 NextPmDate = i.MaintenanceRecords
@@ -151,7 +159,7 @@ public class IndexModel : PageModel
             .Select(i =>
             {
                 var cleaningOverdue = i.NextCleaningDueDate.HasValue
-                    && i.NextCleaningDueDate.Value <= now;
+                    && i.NextCleaningDueDate.Value.Date <= today;
                 var needsMa = i.Status == InstallationStatus.Maintenance
                     || cleaningOverdue
                     || i.OpenMaintenance > 0

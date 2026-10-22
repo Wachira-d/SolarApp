@@ -481,6 +481,11 @@ public class EditModel : PageModel
             installation.BatteryCapacityKwh = null;
             installation.BatteryCount = null;
         }
+        // Cleaning schedule as it stood before this save — the decisions below
+        // depend on what changed, not just on the new values.
+        var cleaningWasInScope = installation.HasCleaningInScope;
+        var previousCleaningFrequency = installation.CleaningFrequencyMonths;
+
         installation.InstallationDate = Input.InstallationDate;
         installation.CommissionDate = Input.CommissionDate;
         installation.InverterWarrantyYears = Input.InverterWarrantyYears;
@@ -503,17 +508,7 @@ public class EditModel : PageModel
         installation.IncludesWarrantyService = Input.IncludesWarrantyService;
         installation.ServiceNotes = string.IsNullOrWhiteSpace(Input.ServiceNotes) ? null : Input.ServiceNotes.Trim();
 
-        // Seed a cleaning due-date the first time a site becomes a cleaning
-        // site with no schedule yet — otherwise the cleaning-due job never
-        // has a date to compare against and silently never reminds.  Rolls
-        // forward to the next future cycle from the install date.
-        if (installation.IncludesCleaning && installation.NextCleaningDueDate == null)
-        {
-            var freq = installation.CleaningFrequencyMonths > 0 ? installation.CleaningFrequencyMonths : 6;
-            var next = installation.InstallationDate.AddMonths(freq);
-            while (next < DateTime.UtcNow) next = next.AddMonths(freq);
-            installation.NextCleaningDueDate = next;
-        }
+        await ApplyCleaningScheduleChangeAsync(installation, cleaningWasInScope, previousCleaningFrequency);
 
         // Cloud connection — clamp interval to the brand-allowed minimum so
         // an operator can't pick "5 min" for a brand that mandates 15.
@@ -578,6 +573,75 @@ public class EditModel : PageModel
 
         await _installationService.UpdateAsync(installation);
         return RedirectToPage("Index");
+    }
+
+    /// <summary>
+    /// Brings the cleaning schedule, its alerts and its bookings into line with
+    /// what was just saved.
+    ///
+    /// Switching cleaning off used to change one boolean and nothing else. The
+    /// overdue date stayed on the row, so the site kept its "ครบกำหนด!" badge on
+    /// three pages that checked the date but not the switch; the open alert
+    /// stayed until the next health-monitor run; and any booked cleaning kept
+    /// showing as overdue work on the jobs page. Switching it back on reused
+    /// that stale date, so the site was instantly years overdue and LINE fired
+    /// at the customer the moment the job next ran.
+    ///
+    /// Invariant after this runs: a site with no cleaning in scope has no next
+    /// due date, no open cleaning alert and no booked cleaning.
+    /// </summary>
+    private async Task ApplyCleaningScheduleChangeAsync(
+        Installation installation, bool wasInScope, int previousFrequency)
+    {
+        var nowInScope = installation.HasCleaningInScope;
+
+        if (!nowInScope)
+        {
+            installation.NextCleaningDueDate = null;
+
+            // Close the reminder now, not up to five minutes from now — and
+            // before it can be picked up and sent by the notifier.
+            var openCleaningAlerts = await _context.SystemAlerts
+                .Where(a => a.InstallationId == installation.Id
+                            && a.AlertType == AlertType.MaintenanceDue
+                            && a.ResolvedAt == null)
+                .ToListAsync();
+            foreach (var a in openCleaningAlerts)
+            {
+                a.ResolvedAt = DateTime.UtcNow;
+                a.IsNotified = true;   // nothing left to tell anyone
+            }
+
+            // Only when cleaning was actually switched off — not when the last
+            // contracted cleaning was simply used up, where a booked visit may
+            // be the renewal conversation in progress.
+            if (wasInScope && !installation.IncludesCleaning)
+            {
+                var booked = await _context.CleaningRecords
+                    .Where(c => c.InstallationId == installation.Id
+                                && c.Status == CleaningStatus.Scheduled)
+                    .ToListAsync();
+                foreach (var c in booked)
+                {
+                    c.Status = CleaningStatus.Cancelled;
+                    c.Notes = string.IsNullOrWhiteSpace(c.Notes)
+                        ? "ยกเลิกอัตโนมัติ: ปิดการล้างแผงในขอบเขตบริการ"
+                        : c.Notes + " · ยกเลิกอัตโนมัติ: ปิดการล้างแผงในขอบเขตบริการ";
+                    c.UpdatedAt = DateTime.UtcNow;
+                }
+            }
+            return;
+        }
+
+        // Newly in scope, never had a date, or the cycle changed: work the date
+        // out again from the cleaning history rather than keeping a value that
+        // was computed for different terms.
+        if (!wasInScope
+            || installation.NextCleaningDueDate == null
+            || previousFrequency != installation.CleaningFrequencyMonths)
+        {
+            installation.NextCleaningDueDate = installation.ComputeNextCleaningDue();
+        }
     }
 
     private void MapToInput(Installation installation)

@@ -182,10 +182,7 @@ public class ImportInstallationsModel : PageModel
             // expired → no reminder) and NextCleaningDueDate stayed null
             // (cleaning alerts never fire).  Next cleaning rolls forward to
             // the first future cycle.
-            var nextCleaning = instDate.AddMonths(cleaningFreqMonths);
-            while (nextCleaning < DateTime.UtcNow) nextCleaning = nextCleaning.AddMonths(cleaningFreqMonths);
-
-            toAdd.Add(new Installation
+            var imported = new Installation
             {
                 SiteCode = siteCode,
                 SiteName = siteName,
@@ -203,10 +200,13 @@ public class ImportInstallationsModel : PageModel
                 InstallationDate = instDate,
                 Status = InstallationStatus.Active,
                 CleaningFrequencyMonths = cleaningFreqMonths,
-                NextCleaningDueDate = nextCleaning,
                 WarrantyYears = warrantyYears,
                 WarrantyExpiryDate = warrantyEnd
-            });
+            };
+            // Shared rule — in scope only, rolled forward from handover since an
+            // import carries no cleaning history.
+            imported.NextCleaningDueDate = imported.ComputeNextCleaningDue();
+            toAdd.Add(imported);
             siteCodeSet.Add(siteCode);
             Results.Add(new ImportResult(row, siteName, DryRun ? "VALID" : "OK", null));
             SuccessCount++;

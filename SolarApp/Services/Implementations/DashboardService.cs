@@ -141,6 +141,7 @@ public class DashboardService : IDashboardService
                 IncludesCleaning = inst.IncludesCleaning,
                 IncludesWarrantyService = inst.IncludesWarrantyService,
                 RemainingCleanings = inst.RemainingCleanings,
+                TotalCleaningCount = inst.TotalCleaningCount,
                 NextCleaningDate = inst.NextCleaningDueDate,
                 HasWarrantyDate = inst.HasWarrantyDate,
                 WarrantyExpiry = inst.WarrantyExpiryDate,
@@ -219,7 +220,7 @@ public class DashboardService : IDashboardService
             // IncludesCleaning; CheckWarrantyExpiryAsync gates on
             // IncludesWarrantyService).  A site past its cleaning date that we
             // don't clean is not "action required" for us, so it's excluded.
-            CleaningDueCount = installations.Count(i => i.IncludesCleaning && i.IsCleaningDue),
+            CleaningDueCount = installations.Count(i => i.IsCleaningDue),
             // Same rule as CheckWarrantyExpiryAsync and
             // GetWarrantyExpiringAsync: recorded end date, inside 90 days,
             // not yet past, and only where we carry the warranty.
@@ -233,7 +234,7 @@ public class DashboardService : IDashboardService
 
             ActiveAlerts = activeAlerts,
             OfflineInstallations = items.Where(i => i.Status == "Offline").ToList(),
-            CleaningDueInstallations = items.Where(i => i.IncludesCleaning && i.IsCleaningDue).ToList(),
+            CleaningDueInstallations = items.Where(i => i.IsCleaningDue).ToList(),
             // >= 0 so a warranty ending today is still on the list — it was
             // the one day it most needed to be, and > 0 dropped it.
             WarrantyExpiringInstallations = items

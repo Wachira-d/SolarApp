@@ -381,28 +381,42 @@ public class SystemHealthMonitorJob
     {
         // Only raise "cleaning due" alerts for sites we actually clean.
         var installations = await _context.Installations
-            .Where(i => i.IncludesCleaning
-                        && i.NextCleaningDueDate != null
-                        && i.NextCleaningDueDate <= DateTime.UtcNow)
+            // The shared rule (Installation.CleaningDueAsOf): in scope, cleanings
+            // left, site not Inactive, due by today in site-local time.
+            .Where(Installation.CleaningDueAsOf(Services.SiteTime.Today))
             .ToListAsync();
 
         foreach (var installation in installations)
         {
+            // Scoped to this job's own titles. An alert rule can also file under
+            // MaintenanceDue, and an open one of those used to block this
+            // reminder for as long as it stayed open.
             var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == installation.Id
                     && a.AlertType == AlertType.MaintenanceDue
-                    && a.ResolvedAt == null);
+                    && a.ResolvedAt == null
+                    && (a.Title.StartsWith(CleaningAlertTitlePrefix)
+                        || a.Title.StartsWith(LegacyCleaningAlertTitlePrefix)));
 
             if (!existingAlert)
             {
+                var overdueDays = (int)(Services.SiteTime.Today - installation.NextCleaningDueDate!.Value.Date).TotalDays;
+                var remaining = installation.TotalCleaningCount > 0
+                    ? $"เหลือ {installation.RemainingCleanings}/{installation.TotalCleaningCount} ครั้งตามสัญญา"
+                    : "ล้างตามรอบ ไม่จำกัดจำนวนครั้ง";
+
                 _context.SystemAlerts.Add(new SystemAlert
                 {
                     InstallationId = installation.Id,
                     AlertType = AlertType.MaintenanceDue,
                     Severity = AlertSeverity.Medium,
-                    Title = $"Panel Cleaning Due: {installation.SiteName}",
-                    Message = $"Panel cleaning is due for '{installation.SiteName}'. " +
-                              $"Remaining: {installation.RemainingCleanings}/{installation.TotalCleaningCount}",
+                    Title = $"{CleaningAlertTitlePrefix}{installation.SiteName}",
+                    // "Remaining: 0/0" read as "contract used up" for every
+                    // every-cycle site; the count only means something when
+                    // there is one.
+                    Message = $"ครบกำหนดล้างแผง {installation.NextCleaningDueDate:dd/MM/yyyy}"
+                              + (overdueDays > 0 ? $" (เลยมา {overdueDays} วัน)" : "")
+                              + $" · {remaining}",
                     IsNotified = false
                 });
             }
@@ -413,16 +427,33 @@ public class SystemHealthMonitorJob
         // stopped being a cleaning site).  Without this the alert stayed open
         // forever AND the dedup guard above then blocked the NEXT cycle from
         // ever alerting again.
+        //
+        // Only this job's own alerts: it used to close every MaintenanceDue
+        // alert, including ones an alert rule had raised.
         var dueIds = installations.Select(i => i.Id).ToHashSet();
         var openCleaning = await _context.SystemAlerts
-            .Where(a => a.AlertType == AlertType.MaintenanceDue && a.ResolvedAt == null)
+            .Where(a => a.AlertType == AlertType.MaintenanceDue
+                        && a.ResolvedAt == null
+                        && (a.Title.StartsWith(CleaningAlertTitlePrefix)
+                            || a.Title.StartsWith(LegacyCleaningAlertTitlePrefix)))
             .ToListAsync();
         foreach (var a in openCleaning)
-            if (!dueIds.Contains(a.InstallationId))
-                a.ResolvedAt = DateTime.UtcNow;
+        {
+            if (dueIds.Contains(a.InstallationId)) continue;
+            a.ResolvedAt = DateTime.UtcNow;
+            // Not due any more, so there is nothing left to send. Without this a
+            // reminder still queued for LINE went out after it was closed.
+            a.IsNotified = true;
+        }
 
         await _context.SaveChangesAsync();
     }
+
+    /// <summary>Title prefix for this job's cleaning reminders, so it only dedupes and resolves its own.</summary>
+    private const string CleaningAlertTitlePrefix = "ครบกำหนดล้างแผง: ";
+
+    /// <summary>Title used before the reminders were in Thai — still open on existing sites.</summary>
+    private const string LegacyCleaningAlertTitlePrefix = "Panel Cleaning Due: ";
 
     /// <summary>
     /// Distinguishes these from the contract-expiry alerts that share the

@@ -109,10 +109,26 @@
                         </div>
                         <div class="d-flex justify-content-between">
                             <span>การล้างแผง:</span>
-                            <span class="@(inst.IsCleaningDue ? "text-warning fw-bold" : "")">
-                                @inst.CompletedCleaningCount / @inst.TotalCleaningCount
-                                @(inst.IsCleaningDue ? " (ครบกำหนด!)" : "")
-                            </span>
+                            @* Every state spelled out. "0 / 0" read the same for
+                               "not in our contract", "every cycle, no fixed
+                               count" and "nothing done yet". *@
+                            @if (!inst.IncludesCleaning)
+                            {
+                                <span class="text-muted">ไม่อยู่ในสัญญา</span>
+                            }
+                            else if (inst.CleaningContractUsedUp)
+                            {
+                                <span class="text-muted">ครบตามสัญญาแล้ว (@inst.CompletedCleaningCount ครั้ง)</span>
+                            }
+                            else
+                            {
+                                <span class="@(inst.IsCleaningDue ? "text-warning fw-bold" : "")">
+                                    @(inst.TotalCleaningCount > 0
+                                        ? $"{inst.CompletedCleaningCount} / {inst.TotalCleaningCount}"
+                                        : $"ล้างแล้ว {inst.CompletedCleaningCount} ครั้ง (ตามรอบ)")
+                                    @(inst.IsCleaningDue ? " (ครบกำหนด!)" : "")
+                                </span>
+                            }
                         </div>
                     </div>
                 </div>

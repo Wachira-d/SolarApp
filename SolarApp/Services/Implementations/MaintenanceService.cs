@@ -56,22 +56,7 @@ public class MaintenanceService : IMaintenanceService
         if (record.MaintenanceType == MaintenanceType.PanelCleaning)
         {
             var installation = record.Installation;
-            installation.CompletedCleaningCount++;
-            installation.LastCleaningDate = completedDate;
-
-            if (installation.CompletedCleaningCount < installation.TotalCleaningCount)
-            {
-                // Use the site's configured cleaning frequency, not a hardcoded
-                // 6 months — every other completion path uses CleaningFrequencyMonths,
-                // so this was the odd one out (a 3-month-cycle site got a 6-month
-                // next-due here).
-                var months = installation.CleaningFrequencyMonths > 0 ? installation.CleaningFrequencyMonths : 6;
-                installation.NextCleaningDueDate = completedDate.AddMonths(months);
-            }
-            else
-            {
-                installation.NextCleaningDueDate = null;
-            }
+            installation.RecordCompletedCleaning(completedDate);
         }
 
         await _context.SaveChangesAsync();

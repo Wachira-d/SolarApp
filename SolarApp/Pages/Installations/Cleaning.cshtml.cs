@@ -82,13 +82,7 @@ public class CleaningModel : PageModel
             record.ActualDate = Input.ActualDate ?? DateTime.UtcNow;
             record.Status = CleaningStatus.Completed;
 
-            installation.CompletedCleaningCount++;
-            installation.LastCleaningDate = record.ActualDate;
-
-            if (installation.CompletedCleaningCount < installation.TotalCleaningCount)
-                installation.NextCleaningDueDate = record.ActualDate.Value.AddMonths(installation.CleaningFrequencyMonths);
-            else
-                installation.NextCleaningDueDate = null;
+            installation.RecordCompletedCleaning(record.ActualDate.Value);
 
             installation.UpdatedAt = DateTime.UtcNow;
         }
@@ -171,13 +165,7 @@ public class CleaningModel : PageModel
         record.UpdatedAt = DateTime.UtcNow;
 
         var inst = record.Installation;
-        inst.CompletedCleaningCount++;
-        inst.LastCleaningDate = record.ActualDate;
-
-        if (inst.CompletedCleaningCount < inst.TotalCleaningCount)
-            inst.NextCleaningDueDate = record.ActualDate.Value.AddMonths(inst.CleaningFrequencyMonths);
-        else
-            inst.NextCleaningDueDate = null;
+        inst.RecordCompletedCleaning(record.ActualDate.Value);
 
         await _context.SaveChangesAsync();
 

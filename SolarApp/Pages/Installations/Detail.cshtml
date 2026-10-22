@@ -252,17 +252,37 @@
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-sm table-borderless mb-0">
-                        <tr><td class="text-muted">รวม</td><td class="text-end">@inst.TotalCleaningCount ครั้ง</td></tr>
+                        @if (!inst.IncludesCleaning)
+                        {
+                            <tr>
+                                <td colspan="2" class="text-muted">
+                                    <i class="bi bi-slash-circle"></i> ไม่อยู่ในสัญญาล้างแผง — ไม่มีรอบนัดและไม่แจ้งเตือน
+                                </td>
+                            </tr>
+                        }
+                        <tr><td class="text-muted">รวมตามสัญญา</td><td class="text-end">@(inst.TotalCleaningCount > 0 ? $"{inst.TotalCleaningCount} ครั้ง" : "ตามรอบ ไม่จำกัด")</td></tr>
                         <tr><td class="text-muted">ทำแล้ว</td><td class="text-end">@inst.CompletedCleaningCount ครั้ง</td></tr>
-                        <tr><td class="text-muted">คงเหลือ</td><td class="text-end fw-bold">@inst.RemainingCleanings ครั้ง</td></tr>
+                        @if (inst.TotalCleaningCount > 0)
+                        {
+                            <tr><td class="text-muted">คงเหลือ</td><td class="text-end fw-bold">@Math.Max(0, inst.RemainingCleanings) ครั้ง</td></tr>
+                        }
                         <tr><td class="text-muted">ล้างล่าสุด</td><td class="text-end">@(inst.LastCleaningDate?.ToString("dd/MM/yyyy") ?? "ยังไม่เคย")</td></tr>
-                        <tr>
-                            <td class="text-muted">ครบกำหนดถัดไป</td>
-                            <td class="text-end @(inst.IsCleaningDue ? "text-warning fw-bold" : "")">
-                                @(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "N/A")
-                                @(inst.IsCleaningDue ? " (DUE!)" : "")
-                            </td>
-                        </tr>
+                        @if (inst.IncludesCleaning)
+                        {
+                            <tr>
+                                <td class="text-muted">ครบกำหนดถัดไป</td>
+                                <td class="text-end @(inst.IsCleaningDue ? "text-warning fw-bold" : "")">
+                                    @if (inst.CleaningContractUsedUp)
+                                    {
+                                        <span class="text-muted">ครบตามสัญญาแล้ว</span>
+                                    }
+                                    else
+                                    {
+                                        <span>@(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "ยังไม่ได้กำหนด")@(inst.IsCleaningDue ? " (ครบกำหนด!)" : "")</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
                     </table>
                 </div>
 

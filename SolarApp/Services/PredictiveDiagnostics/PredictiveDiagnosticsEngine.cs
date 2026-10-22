@@ -437,7 +437,9 @@ public class PredictiveDiagnosticsEngine
         // Monsoon season: May-October → lightning + water damage risk
         // Skip sites < 90 days old — nothing to inspect yet on a fresh install
         var daysSinceInstall = (DateTime.UtcNow - inst.HardwareInServiceDate).TotalDays;
-        if (thMonth is >= 5 and <= 6 && daysSinceInstall >= 90)
+        // Only for sites we clean — this one ends in "ทำความสะอาดแผง", and
+        // recommending a crew visit we're not contracted for is noise at best.
+        if (thMonth is >= 5 and <= 6 && daysSinceInstall >= 90 && inst.HasCleaningInScope)
         {
             // Use install date as fallback if never cleaned (not a 999 sentinel)
             var referenceDate = inst.LastCleaningDate ?? inst.HardwareInServiceDate;

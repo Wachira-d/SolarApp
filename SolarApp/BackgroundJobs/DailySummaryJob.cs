@@ -1,6 +1,7 @@
 using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
+using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.LineApi;
 using SolarApp.Services.Notifications;
@@ -93,9 +94,7 @@ public class DailySummaryJob
         // Same rule as GetInstallationsNeedingCleaningAsync, the dashboard
         // tile, the map pins and CheckMaintenanceDueAsync.
         var cleaningDue = await _context.Installations
-            .Where(i => i.IncludesCleaning
-                        && i.NextCleaningDueDate != null
-                        && i.NextCleaningDueDate <= DateTime.UtcNow)
+            .Where(Installation.CleaningDueAsOf(siteToday))
             .OrderBy(i => i.NextCleaningDueDate)
             .Select(i => i.SiteName)
             .ToListAsync();

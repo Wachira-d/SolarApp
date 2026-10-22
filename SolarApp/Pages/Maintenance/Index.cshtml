@@ -20,7 +20,7 @@
     string OverdueText(DateTime? due)
     {
         if (!due.HasValue) return "";
-        var days = (int)Math.Floor((DateTime.UtcNow.Date - due.Value.Date).TotalDays);
+        var days = (int)Math.Floor((SolarApp.Services.SiteTime.Today - due.Value.Date).TotalDays);
         return days > 0 ? $"เลยกำหนด {days} วัน" : days == 0 ? "ครบกำหนดวันนี้" : "";
     }
 }
@@ -45,7 +45,7 @@
                         @foreach (var inst in Model.CleaningDue)
                         {
                             var overdueDays = inst.NextCleaningDueDate.HasValue
-                                ? (int)Math.Floor((DateTime.UtcNow.Date - inst.NextCleaningDueDate.Value.Date).TotalDays)
+                                ? (int)Math.Floor((SolarApp.Services.SiteTime.Today - inst.NextCleaningDueDate.Value.Date).TotalDays)
                                 : 0;
                             <tr>
                                 <td><strong>@inst.SiteName</strong></td>
@@ -57,7 +57,7 @@
                                         @OverdueText(inst.NextCleaningDueDate)
                                     </small>
                                 </td>
-                                <td class="text-center">@inst.RemainingCleanings / @inst.TotalCleaningCount</td>
+                                <td class="text-center">@(inst.TotalCleaningCount > 0 ? $"{inst.RemainingCleanings} / {inst.TotalCleaningCount}" : "ตามรอบ")</td>
                                 <td class="text-end text-nowrap">
                                     <a asp-page="/Installations/Cleaning" asp-route-id="@inst.Id"
                                        class="btn btn-sm btn-warning">บันทึกการล้าง</a>
@@ -73,53 +73,6 @@
     </div>
 }
 
-@* Same sites the alert job, the dashboard tile and the map all skip. They
-   used to be mixed into the list above, which is why this page said seven and
-   LINE said one with nothing on screen to explain the gap. *@
-@if (Model.CleaningOverdueNotContracted.Any())
-{
-    <div class="card border-0 shadow-sm mb-4">
-        <div class="card-header bg-light d-flex justify-content-between align-items-center">
-            <span class="text-muted">
-                <i class="bi bi-eye-slash"></i> เลยกำหนดล้าง แต่ไม่ได้อยู่ในสัญญาล้างแผงของเรา
-            </span>
-            <span class="badge bg-secondary">@Model.CleaningOverdueNotContracted.Count ไซต์</span>
-        </div>
-        <div class="card-body">
-            <p class="small text-muted">
-                ไซต์เหล่านี้ตั้งค่า <strong>"ล้างแผงตามรอบ" ไว้เป็นปิด</strong> ระบบจึงไม่แจ้งเตือน
-                ไม่นับในสรุปรายวัน LINE และไม่ขึ้นบนแผนที่ —
-                <strong>ถ้าจริง ๆ แล้วเราเป็นคนล้าง ให้เปิดสวิตช์นี้ในหน้าตั้งค่าไซต์</strong>
-                มิฉะนั้นงานจะถูกลืมไปเรื่อย ๆ แบบเงียบ ๆ
-            </p>
-            <div class="table-responsive">
-                <table class="table table-sm table-hover mb-0 align-middle">
-                    <thead class="table-light">
-                        <tr><th>ไซต์งาน</th><th>ลูกค้า</th><th>กำหนดเดิม</th><th>ขอบเขตบริการ</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var inst in Model.CleaningOverdueNotContracted)
-                        {
-                            <tr class="text-muted">
-                                <td>@inst.SiteName</td>
-                                <td><small>@inst.Customer?.FullName</small></td>
-                                <td>
-                                    <small>@inst.NextCleaningDueDate?.ToString("dd/MM/yyyy")</small>
-                                    <br /><small>@OverdueText(inst.NextCleaningDueDate)</small>
-                                </td>
-                                <td><small>@inst.ServiceLevel</small></td>
-                                <td class="text-end">
-                                    <a asp-page="/Installations/Edit" asp-route-id="@inst.Id"
-                                       class="btn btn-sm btn-outline-primary">แก้ไขขอบเขตบริการ</a>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-}
 
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white">

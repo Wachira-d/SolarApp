@@ -22,23 +22,11 @@ public class IndexModel : PageModel
 
     public List<MaintenanceRecord> Records { get; set; } = new();
 
-    /// <summary>Past their cleaning date AND on our cleaning contract — the actionable list.</summary>
-    public List<Installation> CleaningDue { get; set; } = new();
-
     /// <summary>
-    /// Past their cleaning date but flagged IncludesCleaning = false.
-    ///
-    /// This page used to lump these in with the rest, so it reported seven
-    /// sites needing cleaning while LINE reported one. Neither number was
-    /// wrong for its own definition and nothing on screen explained the gap.
-    /// The alert job, the dashboard tile and the map all skip these sites,
-    /// because raising a reminder for work we are not contracted to do sends a
-    /// crew out unpaid. Listing them separately means the operator can tell
-    /// which situation they are in: either the flag is right and these are the
-    /// partner's problem, or it is wrong and they have just found six sites
-    /// that have silently stopped being reminded.
+    /// Sites whose cleaning is due, by the shared rule (Installation.CleaningDueAsOf)
+    /// — the same one the reminder job, LINE summary, dashboard and map use.
     /// </summary>
-    public List<Installation> CleaningOverdueNotContracted { get; set; } = new();
+    public List<Installation> CleaningDue { get; set; } = new();
 
     public async Task OnGetAsync()
     {
@@ -73,25 +61,16 @@ public class IndexModel : PageModel
             .Take(50)
             .ToListAsync();
 
-        // Same rule as InstallationService.GetInstallationsNeedingCleaningAsync,
-        // SystemHealthMonitorJob.CheckMaintenanceDueAsync and the dashboard
-        // tile: due date passed AND we are the ones who clean it.
-        var overdue = await installationQuery
+        // Most overdue first. This used to list every site past its date
+        // whether or not we clean it, then a later version split the
+        // switched-off ones into a box of their own — which meant turning
+        // cleaning off moved a site from one "overdue" list to another rather
+        // than making it go away. Switching cleaning off now clears the due
+        // date, so there is only one list and it means one thing.
+        CleaningDue = await installationQuery
             .Include(i => i.Customer)
-            .Where(i => i.NextCleaningDueDate != null && i.NextCleaningDueDate <= DateTime.UtcNow)
+            .Where(Installation.CleaningDueAsOf(SolarApp.Services.SiteTime.Today))
+            .OrderBy(i => i.NextCleaningDueDate)
             .ToListAsync();
-
-        // Most overdue first. The old list came back in whatever order the
-        // database felt like, so a site eleven months late sat between two
-        // that were a fortnight late.
-        CleaningDue = overdue
-            .Where(i => i.IncludesCleaning)
-            .OrderBy(i => i.NextCleaningDueDate)
-            .ToList();
-
-        CleaningOverdueNotContracted = overdue
-            .Where(i => !i.IncludesCleaning)
-            .OrderBy(i => i.NextCleaningDueDate)
-            .ToList();
     }
 }

@@ -9,15 +9,42 @@
     <div>
         <h4>ล้างแผงโซลาร์: @inst.SiteName</h4>
         <p class="text-muted mb-0">
-            ล้างแล้ว: @inst.CompletedCleaningCount / @inst.TotalCleaningCount ครั้ง |
-            คงเหลือ: @inst.RemainingCleanings ครั้ง |
-            ครบกำหนดครั้งถัดไป: @(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "ไม่ระบุ")
+            @if (inst.TotalCleaningCount > 0)
+            {
+                <span>ล้างแล้ว: @inst.CompletedCleaningCount / @inst.TotalCleaningCount ครั้ง | คงเหลือ: @Math.Max(0, inst.RemainingCleanings) ครั้ง |</span>
+            }
+            else
+            {
+                <span>ล้างแล้ว: @inst.CompletedCleaningCount ครั้ง (ตามรอบ ไม่จำกัด) |</span>
+            }
+            ครบกำหนดครั้งถัดไป: @(inst.NextCleaningDueDate?.ToString("dd/MM/yyyy") ?? "ไม่มี")
         </p>
     </div>
     <a asp-page="Detail" asp-route-id="@inst.Id" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-left"></i> กลับ
     </a>
 </div>
+
+@* Recording a cleaning on a site we don't clean is allowed — a one-off job
+   still needs its photos kept — but it must be obvious that doing so won't
+   start a schedule, or someone will wonder why no reminder ever comes. *@
+@if (!inst.IncludesCleaning)
+{
+    <div class="alert alert-secondary">
+        <i class="bi bi-info-circle"></i>
+        ไซต์นี้<strong>ไม่อยู่ในสัญญาล้างแผง</strong> — บันทึกการล้างได้ (เช่น งานครั้งเดียว)
+        แต่ระบบจะไม่ตั้งรอบนัดถัดไปและไม่แจ้งเตือน
+        เปิดได้ที่ <a asp-page="Edit" asp-route-id="@inst.Id">ขอบเขตบริการ</a>
+    </div>
+}
+else if (inst.CleaningContractUsedUp)
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i>
+        ล้างครบ @inst.TotalCleaningCount ครั้งตามสัญญาแล้ว — ไม่มีรอบนัดถัดไปและไม่แจ้งเตือน
+        ถ้าต่อสัญญา ให้เพิ่มจำนวนครั้งใน <a asp-page="Edit" asp-route-id="@inst.Id">หน้าแก้ไข</a>
+    </div>
+}
 
 <!-- Add New Cleaning -->
 <div class="card border-0 shadow-sm mb-4">

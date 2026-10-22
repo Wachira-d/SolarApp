@@ -174,8 +174,13 @@ public class CreateModel : PageModel
             CreatedByUserId = user?.Id
         };
 
-        if (installation.TotalCleaningCount > 0)
-            installation.NextCleaningDueDate = installation.InstallationDate.AddMonths(installation.CleaningFrequencyMonths);
+        // Same rule as Edit and every completion path. This used to seed a
+        // date only when a cleaning count was entered — ignoring whether
+        // cleaning was in scope at all, so a monitoring-only site with a count
+        // got a reminder, and an every-cycle site (count 0) got none — and
+        // without rolling forward, so a site entered with a 2022 handover date
+        // arrived years overdue.
+        installation.NextCleaningDueDate = installation.ComputeNextCleaningDue();
 
         await _installationService.CreateAsync(installation);
         return RedirectToPage("Index");

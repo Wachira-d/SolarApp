@@ -248,7 +248,8 @@
                         </div>
                         <div class="col-md-3">
                             <label asp-for="Input.TotalCleaningCount" class="form-label">จำนวนครั้งล้างแผงในสัญญา</label>
-                            <input asp-for="Input.TotalCleaningCount" class="form-control" />
+                            <input asp-for="Input.TotalCleaningCount" class="form-control" min="0" />
+                            <small class="text-muted">0 = ล้างตามรอบ ไม่จำกัดจำนวนครั้ง</small>
                         </div>
                     </div>
                     @* The inverter carries its own warranty, usually longer than

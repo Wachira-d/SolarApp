@@ -157,7 +157,97 @@ public class Installation : ISoftDeletable
         ? (int)(WarrantyExpiryDate.Date - Services.SiteTime.Today).TotalDays
         : null;
 
-    public bool IsCleaningDue => NextCleaningDueDate.HasValue && NextCleaningDueDate.Value <= DateTime.UtcNow;
+    // ── Cleaning: one definition of "due", used everywhere ─────────────────
+    //
+    // "Due" used to be just NextCleaningDueDate <= now. Every caller was then
+    // expected to remember to also check IncludesCleaning, and several didn't
+    // — so a site whose cleaning had been switched off kept its "ครบกำหนด!"
+    // badge on the dashboard table, the site card and the detail page,
+    // indefinitely. The rule lives here now, and the query form below is the
+    // same rule for the database, so the two cannot drift.
+
+    /// <summary>
+    /// The contract had a fixed number of cleanings and they've all been done.
+    /// A total of 0 means "every cycle, no fixed count" — the meaning Edit and
+    /// CSV import already gave it — so it never runs out.
+    /// </summary>
+    public bool CleaningContractUsedUp =>
+        TotalCleaningCount > 0 && CompletedCleaningCount >= TotalCleaningCount;
+
+    /// <summary>
+    /// We clean this site, still have cleanings left to do, and the site is
+    /// live. Inactive is included because the reminder job used to keep
+    /// raising cleaning alerts — and sending LINE — for deactivated sites.
+    /// </summary>
+    public bool HasCleaningInScope =>
+        IncludesCleaning && !CleaningContractUsedUp && Status != InstallationStatus.Inactive;
+
+    /// <summary>
+    /// Cleaning is in scope and its date has arrived, on site-local dates
+    /// (UtcNow flipped the answer at 07:00 Thailand time).
+    /// </summary>
+    public bool IsCleaningDue =>
+        HasCleaningInScope
+        && NextCleaningDueDate.HasValue
+        && NextCleaningDueDate.Value.Date <= Services.SiteTime.Today;
+
+    /// <summary>
+    /// <see cref="IsCleaningDue"/> as a database filter — computed properties
+    /// can't be translated to SQL, and a hand-copied condition in each query is
+    /// exactly how the pages ended up disagreeing.
+    /// </summary>
+    public static System.Linq.Expressions.Expression<Func<Installation, bool>> CleaningDueAsOf(DateTime siteToday)
+    {
+        var cutoff = siteToday.Date.AddDays(1);
+        return i => i.IncludesCleaning
+                    && (i.TotalCleaningCount <= 0 || i.CompletedCleaningCount < i.TotalCleaningCount)
+                    && i.Status != InstallationStatus.Inactive
+                    && i.NextCleaningDueDate != null
+                    && i.NextCleaningDueDate < cutoff;
+    }
+
+    /// <summary>
+    /// Records one completed cleaning and moves the schedule on.
+    ///
+    /// Five pages and services each did this by hand, all with
+    /// "next = date + freq only if Completed &lt; Total, else null". For a
+    /// contract with no fixed count (Total = 0, "every cycle") that condition
+    /// is never true, so recording the very first cleaning erased the site's
+    /// schedule — which then reappeared the next time anyone saved the site
+    /// for an unrelated reason. A backdated entry also wound LastCleaningDate
+    /// backwards; the latest cleaning on record now wins.
+    /// </summary>
+    public void RecordCompletedCleaning(DateTime performedOn)
+    {
+        CompletedCleaningCount++;
+        if (!LastCleaningDate.HasValue || performedOn > LastCleaningDate.Value)
+            LastCleaningDate = performedOn;
+        NextCleaningDueDate = ComputeNextCleaningDue();
+        UpdatedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// The next due date this site should have right now, or null when it has
+    /// no cleaning schedule (switched off, or the contract's cleanings are used
+    /// up). Counted from the last cleaning when there is one — if that plus a
+    /// cycle is already past, the site genuinely is overdue and should say so.
+    /// With no cleaning on record it counts from handover and rolls forward to
+    /// the next cycle, because we have no history to call it overdue against.
+    /// </summary>
+    public DateTime? ComputeNextCleaningDue()
+    {
+        if (!HasCleaningInScope) return null;
+
+        var freq = CleaningFrequencyMonths > 0 ? CleaningFrequencyMonths : 6;
+
+        if (LastCleaningDate.HasValue)
+            return LastCleaningDate.Value.Date.AddMonths(freq);
+
+        var today = Services.SiteTime.Today;
+        var next = InstallationDate.Date.AddMonths(freq);
+        while (next < today) next = next.AddMonths(freq);
+        return next;
+    }
 
     // Status
     public InstallationStatus Status { get; set; } = InstallationStatus.Active;

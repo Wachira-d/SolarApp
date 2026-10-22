@@ -85,6 +85,8 @@ public class InstallationStatusItem
     public bool IncludesCleaning { get; set; }
     public bool IncludesWarrantyService { get; set; }
     public int RemainingCleanings { get; set; }
+    /// <summary>0 = every cycle with no fixed count, so "เหลือ 0 ครั้ง" would be wrong.</summary>
+    public int TotalCleaningCount { get; set; }
     public DateTime? NextCleaningDate { get; set; }
     public DateTime WarrantyExpiry { get; set; }
 

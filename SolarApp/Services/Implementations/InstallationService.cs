@@ -189,13 +189,7 @@ public class InstallationService : IInstallationService
         var installation = await _context.Installations.FindAsync(installationId);
         if (installation == null) return;
 
-        installation.CompletedCleaningCount++;
-        installation.LastCleaningDate = cleaningDate;
-
-        if (installation.CompletedCleaningCount < installation.TotalCleaningCount)
-            installation.NextCleaningDueDate = cleaningDate.AddMonths(installation.CleaningFrequencyMonths);
-        else
-            installation.NextCleaningDueDate = null;
+        installation.RecordCompletedCleaning(cleaningDate);
 
         // Create cleaning record
         _context.CleaningRecords.Add(new CleaningRecord
@@ -216,9 +210,7 @@ public class InstallationService : IInstallationService
         // we don't visit must not generate cleaning reminders.
         return await _context.Installations
             .Include(i => i.Customer)
-            .Where(i => i.IncludesCleaning
-                        && i.NextCleaningDueDate != null
-                        && i.NextCleaningDueDate <= DateTime.UtcNow)
+            .Where(Installation.CleaningDueAsOf(SolarApp.Services.SiteTime.Today))
             .ToListAsync();
     }
 

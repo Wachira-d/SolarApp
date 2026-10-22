@@ -433,13 +433,21 @@ else
                                 }
                             </td>
                             <td>
-                                @if (inst.IsCleaningDue)
+                                @if (!inst.IncludesCleaning)
+                                {
+                                    <small class="text-muted">—</small>
+                                }
+                                else if (inst.IsCleaningDue)
                                 {
                                     <span class="badge bg-warning text-dark" title="@inst.NextCleaningDate?.ToString("dd/MM/yyyy")">ครบกำหนด!</span>
                                 }
+                                else if (inst.TotalCleaningCount <= 0)
+                                {
+                                    <small class="text-muted">ตามรอบ</small>
+                                }
                                 else
                                 {
-                                    <small class="text-muted">เหลือ @inst.RemainingCleanings ครั้ง</small>
+                                    <small class="text-muted">เหลือ @Math.Max(0, inst.RemainingCleanings) ครั้ง</small>
                                 }
                             </td>
                             <td>

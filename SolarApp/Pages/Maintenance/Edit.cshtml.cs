@@ -131,12 +131,7 @@ public class EditModel : PageModel
             if (record.MaintenanceType == MaintenanceType.PanelCleaning)
             {
                 var inst = record.Installation;
-                inst.CompletedCleaningCount++;
-                inst.LastCleaningDate = record.CompletedDate;
-                if (inst.CompletedCleaningCount < inst.TotalCleaningCount)
-                    inst.NextCleaningDueDate = record.CompletedDate.Value.AddMonths(inst.CleaningFrequencyMonths);
-                else
-                    inst.NextCleaningDueDate = null;
+                inst.RecordCompletedCleaning(record.CompletedDate.Value);
             }
         }
 
