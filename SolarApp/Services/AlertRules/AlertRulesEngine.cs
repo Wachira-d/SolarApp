@@ -27,6 +27,7 @@ public class AlertRulesEngine : IAlertRulesEngine
         var rules = await _context.AlertRules.Where(r => r.IsEnabled)
             .ToListAsync(cancellationToken);
         var enabledIds = rules.Select(r => r.Id).ToHashSet();
+        var enabledIdList = enabledIds.ToList();   // List for the SQL IN (...)
 
         // Adopt alerts raised before AlertRuleId existed, by the only link they
         // have — Title == rule name — so the lifecycle below covers them too.
@@ -53,7 +54,7 @@ public class AlertRulesEngine : IAlertRulesEngine
         // open for good, and High/Critical ones kept escalating to LINE.
         var orphaned = await _context.SystemAlerts
             .Where(a => a.AlertRuleId != null && a.ResolvedAt == null
-                        && !enabledIds.Contains(a.AlertRuleId.Value))
+                        && !enabledIdList.Contains(a.AlertRuleId.Value))
             .ToListAsync(cancellationToken);
         foreach (var a in orphaned)
         {

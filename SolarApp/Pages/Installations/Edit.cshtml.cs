@@ -610,7 +610,11 @@ public class EditModel : PageModel
             var openCleaningAlerts = await _context.SystemAlerts
                 .Where(a => a.InstallationId == installation.Id
                             && a.AlertType == AlertType.MaintenanceDue
-                            && a.ResolvedAt == null)
+                            && a.ResolvedAt == null
+                            // The cleaning reminders only — a custom alert rule
+                            // can also use MaintenanceDue and has its own lifecycle.
+                            && (a.Title.StartsWith(AlertTitles.CleaningDue)
+                                || a.Title.StartsWith(AlertTitles.LegacyCleaningDue)))
                 .ToListAsync();
             foreach (var a in openCleaningAlerts)
             {

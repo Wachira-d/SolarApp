@@ -180,11 +180,6 @@ $@"✅ {site} กลับมาทำงานปกติแล้ว (หย�
     }
 
     /// <summary>
-    /// Whether this alert type is configured to notify the customer for the
-    /// given installation.  Acts as the single source of truth so callers
-    /// don't have to remember the AlertType → NotifyOnXxx mapping.
-    /// </summary>
-    /// <summary>
     /// The per-alert decision. Prefer this over the type-only overload: two
     /// kinds of alert share a type with something the customer did opt into.
     ///   • API-failure alerts are AlertType.Error, so they went out under
@@ -202,6 +197,11 @@ $@"✅ {site} กลับมาทำงานปกติแล้ว (หย�
         return ShouldNotifyCustomer(install, alert.AlertType);
     }
 
+    /// <summary>
+    /// Whether this alert type is configured to notify the customer for the
+    /// given installation.  Acts as the single source of truth so callers
+    /// don't have to remember the AlertType → NotifyOnXxx mapping.
+    /// </summary>
     public static bool ShouldNotifyCustomer(Installation install, AlertType type) => type switch
     {
         AlertType.Offline           => install.NotifyOnGridLoss,

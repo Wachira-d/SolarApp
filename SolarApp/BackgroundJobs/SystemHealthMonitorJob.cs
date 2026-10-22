@@ -343,7 +343,10 @@ public class SystemHealthMonitorJob
                                && l.ErrorMessage != null
                                && l.ErrorMessage.Contains("[ONLINE]"));
 
-            // De-dup: only one alert per installation per day for each category
+            // De-dup: one alert per installation per category while it is still
+            // open, and at most one a day. These now stay open until the site
+            // reports [ONLINE] again, so "today only" raised a fresh copy —
+            // and a fresh LINE message — every day of a multi-day outage.
             var sinceToday = Services.SiteTime.TodayStartUtc;
 
             if (!everOnlineRecently)
@@ -351,7 +354,7 @@ public class SystemHealthMonitorJob
                 var existingConfigAlert = await _context.SystemAlerts
                     .AnyAsync(a => a.InstallationId == inst.Id
                         && a.Title.StartsWith(ConfigIssueTitlePrefix)
-                        && a.OccurredAt >= sinceToday);
+                        && (a.ResolvedAt == null || a.OccurredAt >= sinceToday));
                 if (existingConfigAlert) continue;
 
                 _context.SystemAlerts.Add(new SystemAlert
@@ -385,7 +388,7 @@ public class SystemHealthMonitorJob
             var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == inst.Id
                     && a.Title.StartsWith(SilentTitlePrefix)
-                    && a.OccurredAt >= sinceToday);
+                    && (a.ResolvedAt == null || a.OccurredAt >= sinceToday));
             if (existingAlert) continue;
 
             _context.SystemAlerts.Add(new SystemAlert
@@ -546,10 +549,10 @@ public class SystemHealthMonitorJob
     }
 
     /// <summary>Title prefix for this job's cleaning reminders, so it only dedupes and resolves its own.</summary>
-    private const string CleaningAlertTitlePrefix = "ครบกำหนดล้างแผง: ";
+    private const string CleaningAlertTitlePrefix = AlertTitles.CleaningDue;
 
     /// <summary>Title used before the reminders were in Thai — still open on existing sites.</summary>
-    private const string LegacyCleaningAlertTitlePrefix = "Panel Cleaning Due: ";
+    private const string LegacyCleaningAlertTitlePrefix = AlertTitles.LegacyCleaningDue;
 
     /// <summary>
     /// Distinguishes these from the contract-expiry alerts that share the

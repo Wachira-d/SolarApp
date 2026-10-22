@@ -17,4 +17,7 @@ public static class AlertTitles
     public const string ApiFailure = "เชื่อมต่อคลาวด์ไม่สำเร็จ: ";
     public const string ContractExpiring = "สัญญาบริการใกล้หมดอายุ: ";
     public const string WarrantyExpiring = "ประกันใกล้หมดอายุ: ";
+    public const string CleaningDue = "ครบกำหนดล้างแผง: ";
+    /// <summary>Cleaning reminders raised before the titles were in Thai.</summary>
+    public const string LegacyCleaningDue = "Panel Cleaning Due: ";
 }

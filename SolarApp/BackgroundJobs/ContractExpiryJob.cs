@@ -133,6 +133,7 @@ public class ContractExpiryJob
         // cleaning-due check had to be fixed for.
         var stillWarned = contracts
             .Where(c => c.EndDate.HasValue
+                        && c.Installation.Status != InstallationStatus.Inactive
                         && c.EndDate.Value.Date >= today
                         && (c.EndDate.Value.Date - today).TotalDays <= WarnWithinDays)
             .Select(c => c.InstallationId)
