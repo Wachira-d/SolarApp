@@ -164,7 +164,10 @@ public class CreateModel : PageModel
             FeedInTariffRate = Input.FeedInTariffRate,
             ContractValue = Input.ContractValue,
             Notes = Input.Notes,
-            ServiceLevel = Input.ServiceLevel,
+            // Follows the switches, not the radio — see Installation.DeriveServiceLevel.
+            ServiceLevel = Installation.DeriveServiceLevel(
+                Input.IncludesMonitoring, Input.IncludesCleaning, Input.IncludesPreventiveMaintenance,
+                Input.IncludesCorrectiveMaintenance, Input.IncludesWarrantyService),
             IncludesMonitoring = Input.IncludesMonitoring,
             IncludesCleaning = Input.IncludesCleaning,
             IncludesPreventiveMaintenance = Input.IncludesPreventiveMaintenance,

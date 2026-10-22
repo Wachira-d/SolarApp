@@ -62,6 +62,11 @@ public class MonthlyReportJob
         var monthEnd = monthStart.AddMonths(1).AddDays(-1);
         var prevStart = monthStart.AddMonths(-1);
 
+        // UTC bounds of the same month, for UTC timestamps (alerts, work-order
+        // completion times).
+        var monthStartUtc = Services.SiteTime.ToUtc(monthStart);
+        var monthEndUtcExclusive = Services.SiteTime.ToUtc(monthEnd.AddDays(1));
+
         var periodLabel = $"{ThaiMonths[monthStart.Month - 1]} {monthStart.Year + 543}";
 
         var customers = await _context.Customers
@@ -79,7 +84,14 @@ public class MonthlyReportJob
         {
             try
             {
-                var siteIds = customer.Installations.Select(i => i.Id).ToList();
+                // Sites we monitor and still look after. Production, savings and
+                // "healthy days" all come from synced data, so an unmonitored or
+                // deactivated site only contributed zeros — or, for health,
+                // nothing at all, reading as "ran every day".
+                var reportSites = customer.Installations
+                    .Where(i => i.IncludesMonitoring && i.Status != InstallationStatus.Inactive)
+                    .ToList();
+                var siteIds = reportSites.Select(i => i.Id).ToList();
                 if (siteIds.Count == 0) continue;
 
                 var daily = await _context.EnergyData.AsNoTracking()
@@ -131,7 +143,7 @@ public class MonthlyReportJob
                     .Select(g => new { InstallationId = g.Key, Kwh = g.Sum(x => (decimal?)x.EnergyGenerationKwh) ?? 0m })
                     .ToDictionaryAsync(x => x.InstallationId, x => x.Kwh);
 
-                var savings = customer.Installations.Sum(inst =>
+                var savings = reportSites.Sum(inst =>
                 {
                     var instKwh = kwhPerSite.TryGetValue(inst.Id, out var k) ? k : 0m;
                     var rate = inst.ElectricityRatePerKwh > 0 ? inst.ElectricityRatePerKwh : 4.0m;
@@ -141,13 +153,18 @@ public class MonthlyReportJob
                 // "Healthy days" counts days with no offline alert raised
                 // against any of their sites. It is the closest honest answer
                 // to "did the thing I pay you for keep working".
-                var offlineDays = await _context.SystemAlerts.AsNoTracking()
-                    .Where(a => siteIds.Contains(a.InstallationId)
-                                && a.AlertType == AlertType.Offline
-                                && a.OccurredAt >= monthStart && a.OccurredAt < monthEnd.AddDays(1))
-                    .Select(a => a.OccurredAt.Date)
+                // OccurredAt is UTC and the month is the site's, so the window
+                // is converted and each alert is bucketed by its Thai date —
+                // an alert at 03:00 Thai time is that day's, not the day before.
+                var offlineDays = (await _context.SystemAlerts.AsNoTracking()
+                        .Where(a => siteIds.Contains(a.InstallationId)
+                                    && a.AlertType == AlertType.Offline
+                                    && a.OccurredAt >= monthStartUtc && a.OccurredAt < monthEndUtcExclusive)
+                        .Select(a => a.OccurredAt)
+                        .ToListAsync())
+                    .Select(t => Services.SiteTime.ToSiteTime(t).Date)
                     .Distinct()
-                    .CountAsync();
+                    .Count();
 
                 var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
 
@@ -160,7 +177,6 @@ public class MonthlyReportJob
                 // Counted on the day the crew finished, not the day it was
                 // booked — a job scheduled in June and done in July belongs in
                 // July's report, which is the one the customer is reading.
-                var monthEndExclusive = monthEnd.AddDays(1);
                 var workOrders = await _context.WorkOrders.AsNoTracking()
                     .CountAsync(w => w.InstallationId != null
                                      && siteIds.Contains(w.InstallationId.Value)
@@ -169,8 +185,8 @@ public class MonthlyReportJob
                                          || w.Status == WorkOrderStatus.Invoiced
                                          || w.Status == WorkOrderStatus.Closed)
                                      && w.ActualEndTime != null
-                                     && w.ActualEndTime >= monthStart
-                                     && w.ActualEndTime < monthEndExclusive);
+                                     && w.ActualEndTime >= monthStartUtc
+                                     && w.ActualEndTime < monthEndUtcExclusive);
 
                 var co2 = totalKwh * Co2KgPerKwh;
 

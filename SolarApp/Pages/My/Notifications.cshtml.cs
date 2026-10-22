@@ -10,10 +10,15 @@ namespace SolarApp.Pages.My;
 
 /// <summary>
 /// Customer self-service for notification preferences.  Lets the customer
-/// flip the per-installation NotifyOn* toggles, set their own LINE
-/// group/user id, and configure quiet hours without going through an
-/// operator.  Operators retain the same fields on Edit Installation —
-/// this is a customer-facing window into the same columns.
+/// flip the per-installation NotifyOn* toggles and configure quiet hours
+/// without going through an operator.  Operators retain the same fields on
+/// Edit Installation — this is a customer-facing window into the same columns.
+///
+/// The LINE destination is shown but not editable here: it was a free-text
+/// box, so a customer could point alerts at any group id — or wipe the group
+/// the operator had set up by saving it empty. Toggles for services the
+/// contract doesn't cover are hidden and left as they are; they did nothing,
+/// and showing them implied we'd tell the customer about cleaning we don't do.
 /// </summary>
 [Authorize]
 public class NotificationsModel : PageModel
@@ -41,6 +46,9 @@ public class NotificationsModel : PageModel
         public bool NotifyOnCleaningDue { get; set; }
         public bool NotifyOnWarrantyExpiry { get; set; }
         public bool NotifyOnRecovery { get; set; }
+        public bool HasMonitoring { get; set; }
+        public bool HasCleaning { get; set; }
+        public bool HasWarranty { get; set; }
         public TimeOnly? QuietHoursStart { get; set; }
         public TimeOnly? QuietHoursEnd { get; set; }
     }
@@ -71,12 +79,18 @@ public class NotificationsModel : PageModel
             var install = await _context.Installations.FirstOrDefaultAsync(i => i.Id == vm.Id);
             if (install == null) continue;
 
-            install.LineGroupId = string.IsNullOrWhiteSpace(vm.LineGroupId) ? null : vm.LineGroupId.Trim();
-            install.NotifyOnGridLoss = vm.NotifyOnGridLoss;
-            install.NotifyOnLowProduction = vm.NotifyOnLowProduction;
-            install.NotifyOnCleaningDue = vm.NotifyOnCleaningDue;
-            install.NotifyOnWarrantyExpiry = vm.NotifyOnWarrantyExpiry;
-            install.NotifyOnRecovery = vm.NotifyOnRecovery;
+            // Only the toggles the page showed — a hidden one posts nothing,
+            // which would otherwise read as "off".
+            if (install.IncludesMonitoring)
+            {
+                install.NotifyOnGridLoss = vm.NotifyOnGridLoss;
+                install.NotifyOnLowProduction = vm.NotifyOnLowProduction;
+                install.NotifyOnRecovery = vm.NotifyOnRecovery;
+            }
+            if (install.HasCleaningInScope)
+                install.NotifyOnCleaningDue = vm.NotifyOnCleaningDue;
+            if (install.IncludesWarrantyService)
+                install.NotifyOnWarrantyExpiry = vm.NotifyOnWarrantyExpiry;
             install.QuietHoursStart = vm.QuietHoursStart;
             install.QuietHoursEnd = vm.QuietHoursEnd;
             install.UpdatedAt = DateTime.UtcNow;
@@ -102,6 +116,12 @@ public class NotificationsModel : PageModel
                 NotifyOnCleaningDue = i.NotifyOnCleaningDue,
                 NotifyOnWarrantyExpiry = i.NotifyOnWarrantyExpiry,
                 NotifyOnRecovery = i.NotifyOnRecovery,
+                HasMonitoring = i.IncludesMonitoring,
+                // Same rule as Installation.HasCleaningInScope, inline for SQL.
+                HasCleaning = i.IncludesCleaning
+                              && (i.TotalCleaningCount <= 0 || i.CompletedCleaningCount < i.TotalCleaningCount)
+                              && i.Status != SolarApp.Models.Enums.InstallationStatus.Inactive,
+                HasWarranty = i.IncludesWarrantyService,
                 QuietHoursStart = i.QuietHoursStart,
                 QuietHoursEnd = i.QuietHoursEnd,
             })

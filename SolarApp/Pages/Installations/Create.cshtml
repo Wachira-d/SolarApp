@@ -361,30 +361,35 @@
                             <div class="form-check">
                                 <input asp-for="Input.IncludesMonitoring" class="form-check-input service-flag" />
                                 <label asp-for="Input.IncludesMonitoring" class="form-check-label">มอนิเตอร์ระบบ</label>
+                                <div class="form-text small mt-0">ดึงข้อมูลจาก cloud · แจ้งเตือนออฟไลน์/ผลิตต่ำ</div>
                             </div>
                         </div>
                         <div class="col-md-4 col-6">
                             <div class="form-check">
                                 <input asp-for="Input.IncludesCleaning" class="form-check-input service-flag" />
                                 <label asp-for="Input.IncludesCleaning" class="form-check-label">ล้างแผงตามรอบ</label>
+                                <div class="form-text small mt-0">นัดล้าง · แจ้งเตือนครบกำหนดล้าง</div>
                             </div>
                         </div>
                         <div class="col-md-4 col-6">
                             <div class="form-check">
                                 <input asp-for="Input.IncludesPreventiveMaintenance" class="form-check-input service-flag" />
                                 <label asp-for="Input.IncludesPreventiveMaintenance" class="form-check-label">บำรุงรักษาเชิงป้องกัน</label>
+                                <div class="form-text small mt-0">ระบุในสัญญา (ยังไม่มีแจ้งเตือนอัตโนมัติ)</div>
                             </div>
                         </div>
                         <div class="col-md-4 col-6">
                             <div class="form-check">
                                 <input asp-for="Input.IncludesCorrectiveMaintenance" class="form-check-input service-flag" />
                                 <label asp-for="Input.IncludesCorrectiveMaintenance" class="form-check-label">ซ่อมแก้ไขเมื่อเสีย</label>
+                                <div class="form-text small mt-0">ระบุในสัญญา (ยังไม่มีแจ้งเตือนอัตโนมัติ)</div>
                             </div>
                         </div>
                         <div class="col-md-4 col-6">
                             <div class="form-check">
                                 <input asp-for="Input.IncludesWarrantyService" class="form-check-input service-flag" />
                                 <label asp-for="Input.IncludesWarrantyService" class="form-check-label">ดูแลงานประกัน</label>
+                                <div class="form-text small mt-0">แจ้งเตือนประกันใกล้หมด (90 วัน)</div>
                             </div>
                         </div>
                     </div>
@@ -513,8 +518,17 @@
         });
         document.querySelectorAll('.service-flag').forEach(cb => {
             cb.addEventListener('change', () => {
-                const customRadio = document.getElementById('svc-Custom');
-                if (customRadio) customRadio.checked = true;
+                // Select the preset the switches now describe, or Custom when
+                // none matches — the server derives it the same way on save.
+                const cur = {};
+                Object.entries(flagMap).forEach(([k, name]) => {
+                    cur[k] = !!document.querySelector(`[name="${name}"]`)?.checked;
+                });
+                const match = Object.entries(SERVICE_LEVEL_PRESETS).find(([, p]) =>
+                    Object.keys(flagMap).every(k => p[k] === cur[k]));
+                const radio = document.querySelector(
+                    `input[name="Input.ServiceLevel"][value="${match ? match[0] : 99}"]`);
+                if (radio) radio.checked = true;
             });
         });
 

@@ -284,6 +284,24 @@ public class Installation : ISoftDeletable
     /// <summary>Warranty claim handling on behalf of the customer.</summary>
     public bool IncludesWarrantyService { get; set; } = true;
 
+    /// <summary>
+    /// The preset that the five Includes* switches actually describe, or
+    /// Custom when they match none. ServiceLevel was saved as whatever radio
+    /// was ticked, so "Full O&amp;M" with cleaning switched off still filtered
+    /// and displayed as Full O&amp;M. The switches are what every job obeys, so
+    /// the label follows them. Mirrors SERVICE_LEVEL_PRESETS in the edit form.
+    /// </summary>
+    public static ServiceLevel DeriveServiceLevel(bool monitoring, bool cleaning,
+        bool preventive, bool corrective, bool warranty) =>
+        (monitoring, cleaning, preventive, corrective, warranty) switch
+        {
+            (true,  true,  true,  true,  true)  => ServiceLevel.FullOM,
+            (true,  false, false, false, false) => ServiceLevel.MonitoringOnly,
+            (false, true,  false, false, false) => ServiceLevel.CleaningOnly,
+            (false, true,  true,  false, false) => ServiceLevel.PreventiveOnly,
+            _ => ServiceLevel.Custom,
+        };
+
     /// <summary>Free-form notes for unusual contract terms (e.g. "PM 2 ครั้ง/ปี เท่านั้น").</summary>
     public string? ServiceNotes { get; set; }
 

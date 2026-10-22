@@ -502,12 +502,14 @@ public class EditModel : PageModel
         // are the runtime source of truth (the Edit form's JS toggles them
         // when the preset radio changes, but the operator can also override
         // them directly for Custom contracts).
-        installation.ServiceLevel = Input.ServiceLevel;
         installation.IncludesMonitoring = Input.IncludesMonitoring;
         installation.IncludesCleaning = Input.IncludesCleaning;
         installation.IncludesPreventiveMaintenance = Input.IncludesPreventiveMaintenance;
         installation.IncludesCorrectiveMaintenance = Input.IncludesCorrectiveMaintenance;
         installation.IncludesWarrantyService = Input.IncludesWarrantyService;
+        installation.ServiceLevel = Installation.DeriveServiceLevel(
+            Input.IncludesMonitoring, Input.IncludesCleaning, Input.IncludesPreventiveMaintenance,
+            Input.IncludesCorrectiveMaintenance, Input.IncludesWarrantyService);
         installation.ServiceNotes = string.IsNullOrWhiteSpace(Input.ServiceNotes) ? null : Input.ServiceNotes.Trim();
 
         await ApplyCleaningScheduleChangeAsync(installation, cleaningWasInScope, previousCleaningFrequency);

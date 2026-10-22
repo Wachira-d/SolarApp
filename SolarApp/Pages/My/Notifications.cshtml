@@ -38,13 +38,16 @@
             <input type="hidden" name="items[@i].Id" value="@item.Id" />
 
             <div class="mb-3">
-                <label class="text-muted small d-block mb-1">LINE Group / User ID (ไม่บังคับ)</label>
-                <input type="text" class="form-control form-control-sm" name="items[@i].LineGroupId"
-                       value="@item.LineGroupId" placeholder="C1234... หรือ U1234..." />
-                <small class="text-muted">ถ้าเว้นว่าง — จะใช้ LineUserId ของลูกค้า</small>
+                <label class="text-muted small d-block mb-1">ส่งแจ้งเตือนไปที่ LINE</label>
+                <div class="small">
+                    @(string.IsNullOrWhiteSpace(item.LineGroupId) ? "LINE ส่วนตัวของคุณ (ที่เชื่อมไว้กับบัญชี)" : "กลุ่ม LINE ของไซต์นี้")
+                </div>
+                <small class="text-muted">ต้องการเปลี่ยนปลายทาง กรุณาติดต่อผู้ดูแลระบบ</small>
             </div>
 
             <div class="row g-2 mb-2">
+                @if (item.HasMonitoring)
+                {
                 <div class="col-12">
                     <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
                         <input type="hidden" name="items[@i].NotifyOnGridLoss" value="false" />
@@ -56,6 +59,9 @@
                         </div>
                     </label>
                 </div>
+                }
+                @if (item.HasMonitoring)
+                {
                 <div class="col-12">
                     <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
                         <input type="hidden" name="items[@i].NotifyOnLowProduction" value="false" />
@@ -67,6 +73,9 @@
                         </div>
                     </label>
                 </div>
+                }
+                @if (item.HasCleaning)
+                {
                 <div class="col-12">
                     <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
                         <input type="hidden" name="items[@i].NotifyOnCleaningDue" value="false" />
@@ -75,6 +84,9 @@
                         <div style="flex:1">💧 ครบรอบล้างแผง</div>
                     </label>
                 </div>
+                }
+                @if (item.HasWarranty)
+                {
                 <div class="col-12">
                     <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
                         <input type="hidden" name="items[@i].NotifyOnWarrantyExpiry" value="false" />
@@ -83,6 +95,9 @@
                         <div style="flex:1">📋 ใกล้หมดประกัน</div>
                     </label>
                 </div>
+                }
+                @if (item.HasMonitoring)
+                {
                 <div class="col-12">
                     <label class="form-check form-switch d-flex align-items-center" style="gap: 8px">
                         <input type="hidden" name="items[@i].NotifyOnRecovery" value="false" />
@@ -94,6 +109,7 @@
                         </div>
                     </label>
                 </div>
+                }
             </div>
 
             <hr />

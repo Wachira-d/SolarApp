@@ -825,6 +825,39 @@ BEGIN
             SYSUTCDATETIME());
 END"));
 
+        // Stage 1c: ServiceLevel follows the five service switches (see
+        // Installation.DeriveServiceLevel). Rows saved before that kept the
+        // radio's value even with switches turned off, so the dashboard's
+        // project-type filter put them in the wrong bucket. Deterministic —
+        // it only restates what the switches already say — so it is safe to
+        // run on every start.
+        stages.Add(("AlignServiceLevel", @"
+IF EXISTS (SELECT 1 FROM sys.columns
+    WHERE Name = N'IncludesWarrantyService' AND Object_ID = Object_ID(N'[Installations]'))
+BEGIN
+    UPDATE [Installations]
+    SET [ServiceLevel] = CASE
+        WHEN [IncludesMonitoring] = 1 AND [IncludesCleaning] = 1 AND [IncludesPreventiveMaintenance] = 1
+             AND [IncludesCorrectiveMaintenance] = 1 AND [IncludesWarrantyService] = 1 THEN 0   -- FullOM
+        WHEN [IncludesMonitoring] = 1 AND [IncludesCleaning] = 0 AND [IncludesPreventiveMaintenance] = 0
+             AND [IncludesCorrectiveMaintenance] = 0 AND [IncludesWarrantyService] = 0 THEN 1   -- MonitoringOnly
+        WHEN [IncludesMonitoring] = 0 AND [IncludesCleaning] = 1 AND [IncludesPreventiveMaintenance] = 0
+             AND [IncludesCorrectiveMaintenance] = 0 AND [IncludesWarrantyService] = 0 THEN 2   -- CleaningOnly
+        WHEN [IncludesMonitoring] = 0 AND [IncludesCleaning] = 1 AND [IncludesPreventiveMaintenance] = 1
+             AND [IncludesCorrectiveMaintenance] = 0 AND [IncludesWarrantyService] = 0 THEN 3   -- PreventiveOnly
+        ELSE 99 END                                                                              -- Custom
+    WHERE [ServiceLevel] <> CASE
+        WHEN [IncludesMonitoring] = 1 AND [IncludesCleaning] = 1 AND [IncludesPreventiveMaintenance] = 1
+             AND [IncludesCorrectiveMaintenance] = 1 AND [IncludesWarrantyService] = 1 THEN 0
+        WHEN [IncludesMonitoring] = 1 AND [IncludesCleaning] = 0 AND [IncludesPreventiveMaintenance] = 0
+             AND [IncludesCorrectiveMaintenance] = 0 AND [IncludesWarrantyService] = 0 THEN 1
+        WHEN [IncludesMonitoring] = 0 AND [IncludesCleaning] = 1 AND [IncludesPreventiveMaintenance] = 0
+             AND [IncludesCorrectiveMaintenance] = 0 AND [IncludesWarrantyService] = 0 THEN 2
+        WHEN [IncludesMonitoring] = 0 AND [IncludesCleaning] = 1 AND [IncludesPreventiveMaintenance] = 1
+             AND [IncludesCorrectiveMaintenance] = 0 AND [IncludesWarrantyService] = 0 THEN 3
+        ELSE 99 END;
+END"));
+
         // Stage 2: each table CREATE in its own stage. Failures in one don't block others.
         stages.Add(("CreateTable:AlertRules", @"
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'AlertRules')
