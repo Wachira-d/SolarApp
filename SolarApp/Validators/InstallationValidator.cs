@@ -43,7 +43,7 @@ public class InstallationValidator : AbstractValidator<CreateModel.InstallationI
         // every countdown on the site negative.
         RuleFor(x => x.WarrantyExpiryDate)
             .GreaterThan(x => x.InstallationDate)
-            .When(x => x.WarrantyExpiryDate.Year > 1900)
+            .When(x => x.WarrantyExpiryDate.HasValue && x.WarrantyExpiryDate.Value.Year > 1900)
             .WithMessage("วันสิ้นสุดรับประกันต้องอยู่หลังวันที่ส่งมอบงาน");
 
         RuleFor(x => x.ElectricityRatePerKwh)
