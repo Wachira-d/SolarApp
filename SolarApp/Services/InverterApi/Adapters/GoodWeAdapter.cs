@@ -941,39 +941,102 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             }
         }
 
-        // Some SEMS versions leave the detail's inverter list empty; the
-        // per-station inverter endpoint carries the same rows.
+        // SEMS+ plant detail (the v3 call that answers for shared / SEMS+
+        // stations) carries info and kpi but no inverter rows. Inverters may
+        // sit elsewhere in that payload, or behind a device endpoint whose
+        // name differs by SEMS version — so: search the detail first, then
+        // each candidate endpoint, taking any object that carries a serial.
+        var probe = new List<string>();
+        if (devices.Count == 0 && detail != null)
+        {
+            devices.AddRange(FindInverters(detail.Value.Data));
+            if (devices.Count > 0) probe.Add("detail: found nested");
+        }
         if (devices.Count == 0)
         {
-            foreach (var path in new[] { "v2/PowerStation/GetInverterAllPoint", "v1/PowerStation/GetInverterAllPoint" })
+            var candidates = new (string Path, object Body)[]
             {
-                var json = await PostAsync(session, path, new { powerStationId = stationId });
-                if (json == null || !json.Value.TryGetProperty("data", out var d) || d.ValueKind != JsonValueKind.Object) continue;
-                var rows = FirstArray(d, "inverterPoints", "inverters", "inverter", "list");
-                if (rows == null) continue;
-                foreach (var item in rows.Value.EnumerateArray())
-                {
-                    var dev = ParseInverter(item);
-                    if (dev != null) devices.Add(dev);
-                }
-                if (devices.Count > 0) break;
+                ("v2/PowerStation/GetInverterAllPoint", new { powerStationId = stationId }),
+                ("v1/PowerStation/GetInverterAllPoint", new { powerStationId = stationId }),
+                ("v3/PowerStation/GetInverterAllPoint", new { powerStationId = stationId }),
+                ("v3/PowerStation/GetDeviceListByPowerStationId", new { powerStationId = stationId, pageIndex = 1, pageSize = 50 }),
+                ("v2/Device/GetInverterListByPowerStationId", new { powerStationId = stationId }),
+                ("v3/Device/GetDeviceList", new { powerStationId = stationId, stationId, pageIndex = 1, pageSize = 50 }),
+                ("v2/PowerStation/GetMonitorDetailByPowerstationId", new { powerStationId = stationId }),
+            };
+            foreach (var (path, body) in candidates)
+            {
+                var json = await PostAsync(session, path, body);
+                if (json == null) { probe.Add($"{path}: no reply"); continue; }
+                if (json.Value.TryGetProperty("hasError", out var he) && he.ValueKind == JsonValueKind.True)
+                { probe.Add($"{path}: error {GetString(json.Value, "msg")}"); continue; }
+                if (!json.Value.TryGetProperty("data", out var d)) { probe.Add($"{path}: no data"); continue; }
+                var found = FindInverters(d);
+                probe.Add($"{path}: {(found.Count > 0 ? $"{found.Count} found" : DescribeShape(d))}");
+                if (found.Count == 0) continue;
+                devices.AddRange(found);
+                break;
             }
         }
 
         if (devices.Count == 0)
         {
-            SetDiag(detail == null
-                ? $"{why ?? "ดึงรายละเอียดสถานีไม่ได้"} — และ endpoint รายการอินเวอร์เตอร์ก็ไม่ส่งข้อมูลมา"
-                : $"SEMS ส่งข้อมูลสถานี {stationId} มา แต่ไม่มีรายการอินเวอร์เตอร์ (keys: {string.Join(",", detail.Value.Data.EnumerateObject().Select(p => p.Name).Take(20))})");
+            SetDiag((detail == null
+                    ? $"{why ?? "ดึงรายละเอียดสถานีไม่ได้"} — "
+                    : $"SEMS ส่งข้อมูลสถานี {stationId} มา (keys: {string.Join(",", detail.Value.Data.EnumerateObject().Select(p => p.Name))}) แต่ไม่มีรายการอินเวอร์เตอร์ — ")
+                + "ลอง endpoint อุปกรณ์แล้ว: " + string.Join(" | ", probe));
+        }
+        else
+        {
+            _logger.LogInformation("GoodWe {Sid}: {Count} inverter(s) via {Probe}", stationId, devices.Count, string.Join(" | ", probe));
         }
         return devices;
     }
+
+    /// <summary>
+    /// Every object in a payload that carries an inverter serial — wherever
+    /// it sits. SEMS versions put inverter rows under different keys
+    /// ("inverter", "inverterPoints", "list", "devices"…) and at different
+    /// depths; the serial is the one thing they share.
+    /// </summary>
+    private static List<DeviceInfo> FindInverters(JsonElement root)
+    {
+        var found = new List<DeviceInfo>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Walk(JsonElement e, int depth)
+        {
+            if (depth > 6) return;
+            if (e.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var x in e.EnumerateArray()) Walk(x, depth + 1);
+                return;
+            }
+            if (e.ValueKind != JsonValueKind.Object) return;
+            var sn = FirstString(e, "sn", "inverterSn", "inverter_sn", "serialNumber", "deviceSn", "device_sn");
+            if (sn != null && sn.Length >= 8 && seen.Add(sn) && ParseInverter(e) is { } dev)
+            {
+                found.Add(dev);
+                return;
+            }
+            foreach (var p in e.EnumerateObject()) Walk(p.Value, depth + 1);
+        }
+        Walk(root, 0);
+        return found;
+    }
+
+    /// <summary>A short description of a payload's shape for the diagnostic ("object{a,b,c}", "array[3]").</summary>
+    private static string DescribeShape(JsonElement d) => d.ValueKind switch
+    {
+        JsonValueKind.Object => "object{" + string.Join(",", d.EnumerateObject().Select(p => p.Name).Take(12)) + "}",
+        JsonValueKind.Array => $"array[{d.GetArrayLength()}]",
+        _ => d.ValueKind.ToString().ToLowerInvariant()
+    };
 
     private static DeviceInfo? ParseInverter(JsonElement item)
     {
         if (item.ValueKind != JsonValueKind.Object) return null;
         var full = item.TryGetProperty("invert_full", out var f) ? f : default;
-        var sn = FirstString(item, "sn", "inverterSn", "serialNumber") ?? FirstString(full, "sn");
+        var sn = FirstString(item, "sn", "inverterSn", "inverter_sn", "serialNumber", "deviceSn", "device_sn") ?? FirstString(full, "sn");
         if (string.IsNullOrWhiteSpace(sn)) return null;
         var status = (item.TryGetProperty("status", out var s1) ? ToInt(s1) : null)
                      ?? (full.ValueKind == JsonValueKind.Object && full.TryGetProperty("status", out var s2) ? ToInt(s2) : null);
