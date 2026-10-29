@@ -168,14 +168,26 @@ public class AdapterDiagnostics : IAdapterDiagnostics
         // Step 6: Alarms (last 24h)
         if (!string.IsNullOrEmpty(installation.PlantId))
         {
-            await RunStepAsync(report, "6. Alarms (24h)", async () =>
+            // Shows what the sync would store — name, state and Thai time per
+            // alarm — so it can be checked line by line against the vendor's
+            // own alarm list. Names alone hid whether recovery was read.
+            await RunStepAsync(report, "6. Alarms", async () =>
             {
                 var alarms = await adapter.GetAlarmsAsync(credentials,
                     DateTime.UtcNow.AddDays(-1), DateTime.UtcNow);
+                var occurring = alarms.Count(a => !a.ClearedAt.HasValue);
+                var sample = alarms
+                    .OrderBy(a => a.ClearedAt.HasValue)
+                    .ThenByDescending(a => a.OccurredAt)
+                    .Take(5)
+                    .Select(a => $"{a.DisplayTitle} · {(a.ClearedAt.HasValue ? "Recovered" : "Occurring")} · "
+                                 + $"{SolarApp.Services.SiteTime.ToSiteTime(a.OccurredAt):dd/MM/yyyy HH:mm}");
                 return (true,
-                    alarms.Count == 0 ? "No active alarms" : $"{alarms.Count} alarms found",
+                    alarms.Count == 0
+                        ? "ไม่พบ alarm"
+                        : $"{alarms.Count} alarm · ยังเกิดอยู่ (Occurring) {occurring} · หายแล้ว (Recovered) {alarms.Count - occurring}",
                     alarms.Count,
-                    alarms.Count > 0 ? string.Join(" | ", alarms.Take(3).Select(a => a.AlarmName)) : null);
+                    alarms.Count > 0 ? string.Join(" | ", sample) : null);
             });
         }
 
