@@ -171,6 +171,23 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     /// </summary>
     private async Task<List<StationRow>> ListStationRowsAsync(Session session)
     {
+        // One scan per account per 10 minutes. A wrong ID used to re-list the
+        // whole account (up to 4 endpoints x 10 pages) on every call — three
+        // at a time in a batch, every round.
+        lock (_sessionCacheLock)
+        {
+            if (session.AccountKey.Length > 0
+                && _stationListCache.TryGetValue(session.AccountKey, out var hit) && DateTime.UtcNow < hit.ExpiresAt)
+                return hit.Rows;
+        }
+        var rows = await ScanStationRowsAsync(session);
+        if (session.AccountKey.Length > 0 && rows.Count > 0)
+            lock (_sessionCacheLock) _stationListCache[session.AccountKey] = (rows, DateTime.UtcNow.Add(StationListTtl));
+        return rows;
+    }
+
+    private async Task<List<StationRow>> ScanStationRowsAsync(Session session)
+    {
         var results = new List<StationRow>();
         var endpoints = new[]
         {
@@ -345,7 +362,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             return null;
         }
 
-        var cacheKey = session.TokenJson.GetHashCode() + "|" + plantId.Trim().ToLowerInvariant();
+        var cacheKey = session.AccountKey + "|" + plantId.Trim().ToLowerInvariant();
         string stationId;
         lock (_sessionCacheLock)
             stationId = _resolvedStations.TryGetValue(cacheKey, out var known) ? known : plantId.Trim();
@@ -538,13 +555,30 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         if (session == null) return new List<AlarmRecord>();
 
         var stationId = (await GetStationDetailAsync(session, credentials.PlantId))?.StationId ?? credentials.PlantId;
-        var byStation = await QueryWarningsAsync(session, stationId);
-        // Rows that named a station were filtered to it; rows that didn't came
-        // from a per-station query, so they are this station's.
-        return byStation.TryGetValue(Norm(stationId), out var mine) ? mine
-             : byStation.TryGetValue("", out var unnamed) ? unnamed
-             : new List<AlarmRecord>();
+        var byStation = await QueryWarningsAsync(session, stationId)
+            ?? throw new InvalidOperationException("SEMS warning query failed");
+        if (byStation.TryGetValue(Norm(stationId), out var mine)) return mine;
+        if (!byStation.TryGetValue("", out var unnamed) || unnamed.Count == 0) return new List<AlarmRecord>();
+
+        // Rows that name no station are this station's only if SEMS honoured
+        // the filter. If the same rows come back for the whole account and
+        // the account has other stations, the filter was ignored and they
+        // could be anyone's — the way another site's fault landed on a
+        // healthy one. Drop them rather than guess.
+        var account = await QueryWarningsAsync(session, null);
+        var stations = await ListStationRowsAsync(session);
+        if (account != null && stations.Count > 1
+            && account.TryGetValue("", out var accountUnnamed)
+            && SameAlarms(unnamed, accountUnnamed))
+        {
+            _logger.LogWarning("GoodWe: warning query for {Sid} returned the account's unattributed alarms — ignored", stationId);
+            return new List<AlarmRecord>();
+        }
+        return unnamed;
     }
+
+    private static bool SameAlarms(List<AlarmRecord> a, List<AlarmRecord> b) =>
+        a.Count == b.Count && a.Select(x => x.AlarmId).ToHashSet().SetEquals(b.Select(x => x.AlarmId));
 
     /// <summary>
     /// Warnings for every station on the account in one query, keyed by
@@ -556,7 +590,8 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     {
         var session = await LoginAsync(credentials);
         if (session == null) return new Dictionary<string, List<AlarmRecord>>();
-        var all = await QueryWarningsAsync(session, null);
+        var all = await QueryWarningsAsync(session, null)
+            ?? throw new InvalidOperationException("SEMS warning query failed");
         all.Remove("");
         return all;
     }
@@ -569,8 +604,10 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     /// naming a different station are discarded (in case the filter is
     /// ignored); rows naming none are kept under "".
     /// </summary>
-    private async Task<Dictionary<string, List<AlarmRecord>>> QueryWarningsAsync(Session session, string? stationId)
+    private async Task<Dictionary<string, List<AlarmRecord>>?> QueryWarningsAsync(Session session, string? stationId)
     {
+        // Null = the query failed. An empty result would be logged as a
+        // successful fetch and block the retry for an hour.
         var result = new Dictionary<string, List<AlarmRecord>>();
         var json = await PostAsync(session, "v2/Warning/PowerstationWarningsQuery",
             new
@@ -584,7 +621,8 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                 adcode = "",
                 condition = ""
             });
-        if (json == null) return result;
+        if (json == null) return null;
+        if (json.Value.TryGetProperty("hasError", out var he) && he.ValueKind == JsonValueKind.True) return null;
         var wantedNorm = stationId == null ? null : Norm(stationId);
         var alarms = new List<(string Station, AlarmRecord Alarm)>();
 
@@ -593,6 +631,8 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             || !data.TryGetProperty("list", out var list)
             || list.ValueKind != JsonValueKind.Array)
             return result;
+
+        var dayFirst = DetectDayFirst(list);
 
         // SEMS groups warnings by station: data.list[] is one entry per
         // station with its warnings in a nested array. The old parser read
@@ -623,7 +663,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             {
                 try
                 {
-                    var alarm = ParseWarning(item);
+                    var alarm = ParseWarning(item, dayFirst);
                     if (alarm == null)
                     {
                         skipped++;
@@ -726,23 +766,32 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         Dictionary<string, List<AlarmRecord>>? alarms = null;
         if (includeAlarms)
         {
-            alarms = new Dictionary<string, List<AlarmRecord>>(StringComparer.OrdinalIgnoreCase);
             var account = await QueryWarningsAsync(session, null);
-            var attributed = account.Keys.Any(k => k != "");
-            foreach (var pid in plantIds)
+            if (account != null)
             {
-                var sid = resolved.TryGetValue(pid, out var r) ? r : pid;
-                if (attributed || account.Count == 0)
+                alarms = new Dictionary<string, List<AlarmRecord>>(StringComparer.OrdinalIgnoreCase);
+                var attributed = account.Keys.Any(k => k != "");
+                var accountUnnamed = account.TryGetValue("", out var au) ? au : new List<AlarmRecord>();
+                foreach (var pid in plantIds)
                 {
-                    alarms[pid] = account.TryGetValue(Norm(sid), out var list) ? list : new List<AlarmRecord>();
-                }
-                else
-                {
+                    var sid = resolved.TryGetValue(pid, out var r) ? r : pid;
+                    if (attributed || accountUnnamed.Count == 0)
+                    {
+                        alarms[pid] = account.TryGetValue(Norm(sid), out var list) ? list : new List<AlarmRecord>();
+                        continue;
+                    }
+
                     // The account-wide answer didn't say which station each row
-                    // belongs to — can't share it out safely, so ask per station.
+                    // belongs to — ask per station. If that returns the very
+                    // same rows, SEMS ignored the filter and they can't be
+                    // attributed; better none than another site's.
                     var mine = await QueryWarningsAsync(session, sid);
-                    alarms[pid] = mine.TryGetValue(Norm(sid), out var l1) ? l1
-                                : mine.TryGetValue("", out var l2) ? l2 : new List<AlarmRecord>();
+                    if (mine == null) { alarms.Remove(pid); continue; }
+                    if (mine.TryGetValue(Norm(sid), out var l1)) { alarms[pid] = l1; continue; }
+                    var unnamed = mine.TryGetValue("", out var l2) ? l2 : new List<AlarmRecord>();
+                    alarms[pid] = plantIds.Count > 1 && unnamed.Count > 0 && SameAlarms(unnamed, accountUnnamed)
+                        ? new List<AlarmRecord>()
+                        : unnamed;
                 }
             }
         }
@@ -824,7 +873,13 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     {
         public string ApiBase { get; set; } = "";    // e.g. "https://eu.semsportal.com/api/"
         public string TokenJson { get; set; } = "";  // JSON to put in Token header
+        /// <summary>Same key as the session cache — stable across re-logins, so per-account caches stay bounded.</summary>
+        public string AccountKey { get; set; } = "";
     }
+
+    /// <summary>The account's station list, reused for 10 minutes (guarded by _sessionCacheLock).</summary>
+    private static readonly Dictionary<string, (List<StationRow> Rows, DateTime ExpiresAt)> _stationListCache = new();
+    private static readonly TimeSpan StationListTtl = TimeSpan.FromMinutes(10);
 
     // Process-wide session cache: 6 API calls per installation × N installations
     // shouldn't re-login each time. GoodWe SEMS portal is rate-sensitive for
@@ -854,6 +909,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         var (session, _) = await LoginWithDetailAsync(credentials);
         if (session != null)
         {
+            session.AccountKey = cacheKey;
             lock (_sessionCacheLock)
             {
                 _sessionCache[cacheKey] = (session, DateTime.UtcNow.Add(SessionTtl));
@@ -1098,7 +1154,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     /// Field names vary between SEMS versions, so each is read from a short
     /// list of known spellings.
     /// </summary>
-    private static AlarmRecord? ParseWarning(JsonElement item)
+    private static AlarmRecord? ParseWarning(JsonElement item, bool dayFirst)
     {
         if (item.ValueKind != JsonValueKind.Object) return null;
 
@@ -1112,11 +1168,11 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
 
         DateTime? happened = null;
         foreach (var k in new[] { "happentime", "happen_time", "happenTime", "occurtime", "starttime", "startTime" })
-            if (item.TryGetProperty(k, out var hv) && (happened = ToVendorUtc(hv)) != null) break;
+            if (item.TryGetProperty(k, out var hv) && (happened = ToVendorUtc(hv, dayFirst)) != null) break;
 
         DateTime? recovered = null;
         foreach (var k in new[] { "recoverytime", "recovery_time", "recoveryTime", "endtime", "endTime" })
-            if (item.TryGetProperty(k, out var rv) && (recovered = ToVendorUtc(rv)) != null) break;
+            if (item.TryGetProperty(k, out var rv) && (recovered = ToVendorUtc(rv, dayFirst)) != null) break;
 
         // Nothing to call it, or no idea when it happened: not storable. The
         // old code stored these anyway, stamped "now", once an hour.
@@ -1193,7 +1249,36 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     /// with the invariant culture: under th-TH, DateTime.TryParse reads the
     /// year as Buddhist Era. A string without an offset is site-local time.
     /// </summary>
-    private static DateTime? ToVendorUtc(JsonElement v)
+    /// <summary>
+    /// Whether this response writes dates day-first. Decided once for the
+    /// whole response — per value, "05/11/2026" read as 11 May today and as
+    /// 5 November next week, which changed OccurredAt and duplicated the
+    /// alert. Any value with a first field over 12 means dd/MM; a second
+    /// field over 12 means MM/dd; with nothing to go on, dd/MM (Thai usage).
+    /// </summary>
+    private static bool DetectDayFirst(JsonElement root)
+    {
+        bool? found = null;
+        void Walk(JsonElement e)
+        {
+            if (found.HasValue) return;
+            if (e.ValueKind == JsonValueKind.Object) foreach (var p in e.EnumerateObject()) Walk(p.Value);
+            else if (e.ValueKind == JsonValueKind.Array) foreach (var x in e.EnumerateArray()) Walk(x);
+            else if (e.ValueKind == JsonValueKind.String)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(e.GetString() ?? "", @"^(\d{1,2})/(\d{1,2})/\d{4}");
+                if (!m.Success) return;
+                var a = int.Parse(m.Groups[1].Value);
+                var b = int.Parse(m.Groups[2].Value);
+                if (a > 12) found = true;
+                else if (b > 12) found = false;
+            }
+        }
+        Walk(root);
+        return found ?? true;
+    }
+
+    private static DateTime? ToVendorUtc(JsonElement v, bool dayFirst = true)
     {
         if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var num) && num > 0)
             return num > 100_000_000_000
@@ -1214,18 +1299,15 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             return SolarApp.Services.SiteTime.ToUtc(isoLocal);
 
         // "10/09/2026" is 10 September or 9 October depending on the
-        // account's language. Take whichever reading is possible; when both
-        // are, the one that isn't in the future and is closest to now — an
-        // alarm is something that has already happened.
+        // account's language; the caller decides once per response.
         var dm = new[] { "dd/MM/yyyy HH:mm:ss", "dd/MM/yyyy HH:mm", "d/M/yyyy H:mm:ss", "d/M/yyyy H:mm" };
         var md = new[] { "MM/dd/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm", "M/d/yyyy H:mm:ss", "M/d/yyyy H:mm" };
-        var candidates = new List<DateTime>();
-        if (DateTime.TryParseExact(s, dm, ci, System.Globalization.DateTimeStyles.None, out var a)) candidates.Add(a);
-        if (DateTime.TryParseExact(s, md, ci, System.Globalization.DateTimeStyles.None, out var b)) candidates.Add(b);
-        if (candidates.Count == 0) return null;
-        var nowLocal = SolarApp.Services.SiteTime.Now.AddMinutes(10);
-        var pick = candidates.Where(c => c <= nowLocal).OrderByDescending(c => c).FirstOrDefault();
-        return SolarApp.Services.SiteTime.ToUtc(pick == default ? candidates.Min() : pick);
+        var styles = System.Globalization.DateTimeStyles.None;
+        if (DateTime.TryParseExact(s, dayFirst ? dm : md, ci, styles, out var first))
+            return SolarApp.Services.SiteTime.ToUtc(first);
+        if (DateTime.TryParseExact(s, dayFirst ? md : dm, ci, styles, out var second))
+            return SolarApp.Services.SiteTime.ToUtc(second);
+        return null;
     }
 
     private static string? GetString(JsonElement el, string prop)

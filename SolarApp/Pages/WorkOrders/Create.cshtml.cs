@@ -86,7 +86,8 @@ public class CreateModel : PageModel
 
     public static string KindFor(WorkOrderType type, bool cleaning) =>
         VisitKinds.FirstOrDefault(k => k.Type == type && k.Cleaning == cleaning).Key
-        ?? VisitKinds.First(k => k.Type == type).Key;
+        ?? VisitKinds.FirstOrDefault(k => k.Type == type).Key
+        ?? "other";
 
     public class WorkOrderInput
     {

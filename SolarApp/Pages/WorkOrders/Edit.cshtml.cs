@@ -108,11 +108,14 @@ public class EditModel : PageModel
         wo.Description = Input.Description;
         wo.Scope = Input.Scope;
         wo.SpecialInstructions = Input.SpecialInstructions;
-        wo.Type = Input.Type;
-        // Only meaningful while the visit is still to be done: a completed
-        // order has already been counted (or not) against the contract.
+        // What the visit was is fixed once it's done: a completed order has
+        // already been counted (or not) against the cleaning contract, and
+        // changing its type afterwards would silently change that.
         if (wo.Status < WorkOrderStatus.Completed)
+        {
+            wo.Type = Input.Type;
             wo.IncludesCleaning = Input.Type != WorkOrderType.PanelCleaning && Input.IncludesCleaning;
+        }
 
         // If rescheduling to a different date, clear the reminder flag so the
         // background job fires a fresh LINE notification for the new date.

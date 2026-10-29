@@ -93,7 +93,8 @@
                 <div class="card-header bg-white"><h6 class="mb-0">งานที่ทำ</h6></div>
                 <div class="card-body">
                     <div class="row g-2" id="kindTiles">
-                        @foreach (var k in SolarApp.Pages.WorkOrders.CreateModel.VisitKinds.Where(k => k.Common || !quick))
+                        @foreach (var k in SolarApp.Pages.WorkOrders.CreateModel.VisitKinds
+                                     .Where(k => k.Common || !quick || k.Key == Model.Input.VisitKind))
                         {
                             var id = $"kind-{k.Key}";
                             <div class="@(k.Key == "pm_clean" ? "col-12 col-md-6" : "col-6 col-md-3")">
@@ -349,7 +350,11 @@
                 document.querySelectorAll('.plan-only').forEach(e => e.classList.toggle('d-none', !!done));
                 document.querySelectorAll('.submit-label').forEach(l => l.textContent = done ? 'บันทึกการเข้าบริการ' : 'บันทึกนัดหมาย');
                 document.querySelectorAll('.date-label').forEach(l => l.textContent = done ? 'วันที่เข้าทำ' : 'วันที่นัด');
-                if (date) date.max = done ? new Date().toISOString().slice(0, 10) : '';
+                // Local date — toISOString() is UTC, which in Thailand kept
+                // "today" unpickable until 07:00.
+                const n = new Date();
+                const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+                if (date) date.max = done ? today : '';
             }
             document.querySelectorAll('input[name="Input.MarkCompleted"]').forEach(r => r.addEventListener('change', sync));
             sync();

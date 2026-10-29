@@ -36,7 +36,7 @@
                 </div>
                 <div class="col-md-3">
                     <label asp-for="Input.Type" class="form-label">ประเภทงาน</label>
-                    <select asp-for="Input.Type" class="form-select">
+                    <select asp-for="Input.Type" class="form-select" disabled="@(wo.Status >= WorkOrderStatus.Completed)">
                         @foreach (var t in Enum.GetValues<WorkOrderType>())
                         { <option value="@((int)t)">@UiLabels.Label(t)</option> }
                     </select>
