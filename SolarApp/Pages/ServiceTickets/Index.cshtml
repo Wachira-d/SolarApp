@@ -34,7 +34,9 @@
 }
 
 @{
-    void TicketList(List<SolarApp.Models.ServiceTicket> list)
+    // async Task, not void: the body contains a tag helper (asp-page), and
+    // Razor only allows those in an async helper (MVC1006 / CS4033).
+    async Task TicketList(List<SolarApp.Models.ServiceTicket> list)
     {
         <div class="list-group list-group-flush">
             @foreach (var t in list)
@@ -64,7 +66,7 @@
         <h6 class="mb-0">ยังไม่ปิดเรื่อง</h6>
         <span class="badge bg-primary">@open.Count</span>
     </div>
-    @if (open.Any()) { TicketList(open); }
+    @if (open.Any()) { await TicketList(open); }
     else { <div class="card-body text-success text-center"><i class="bi bi-check-circle-fill"></i> ไม่มีเรื่องค้าง</div> }
 </div>
 
@@ -75,6 +77,6 @@
             <h6 class="mb-0 text-muted">ปิดเรื่องแล้ว</h6>
             <span class="badge bg-secondary">@closed.Count</span>
         </div>
-        @{ TicketList(closed); }
+        @{ await TicketList(closed); }
     </div>
 }
