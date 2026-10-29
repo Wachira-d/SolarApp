@@ -30,6 +30,9 @@ public class EditModel : PageModel
 
     public ServiceTicket Ticket { get; set; } = null!;
     public List<SelectListItem> Assignees { get; set; } = new();
+    /// <summary>Work orders raised for this ticket — the visit that answers the complaint.</summary>
+    public List<WorkOrder> WorkOrders { get; set; } = new();
+    public bool IsAdminOrPartner { get; set; }
 
     [TempData] public string? StatusMessage { get; set; }
 
@@ -72,6 +75,12 @@ public class EditModel : PageModel
         }
 
         Ticket = ticket;
+        IsAdminOrPartner = roles.Contains(UserRoles.Admin) || roles.Contains(UserRoles.Partner);
+        WorkOrders = await _context.WorkOrders.AsNoTracking()
+            .Include(w => w.AssignedToUser)
+            .Where(w => w.ServiceTicketId == id)
+            .OrderByDescending(w => w.ScheduledDate)
+            .ToListAsync();
         Input = new TicketEditInput
         {
             Id = ticket.Id,
@@ -121,8 +130,8 @@ public class EditModel : PageModel
         ticket.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
-        StatusMessage = $"Ticket {ticket.TicketNumber} updated";
-        return RedirectToPage("Index");
+        StatusMessage = "บันทึกแล้ว";
+        return RedirectToPage(new { id = ticket.Id });
     }
 
     public async Task<IActionResult> OnPostDeleteAsync(int id)
@@ -135,7 +144,7 @@ public class EditModel : PageModel
 
         _context.ServiceTickets.Remove(ticket);
         await _context.SaveChangesAsync();
-        StatusMessage = $"Ticket deleted";
+        StatusMessage = "ลบเรื่องแจ้งซ่อมแล้ว";
         return RedirectToPage("Index");
     }
 

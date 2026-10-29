@@ -2,13 +2,16 @@
 @model SolarApp.Pages.Maintenance.EditModel
 @using SolarApp.Models.Enums
 @{
-    ViewData["Title"] = "แก้ไขบำรุงรักษา";
+    ViewData["Title"] = "รายการบำรุงรักษา (เดิม)";
 }
 
-<div class="d-flex justify-content-between mb-3">
-    <h4>แก้ไขรายการบำรุงรักษา</h4>
-    <a asp-page="Index" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-arrow-left"></i> กลับ
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0">รายการบำรุงรักษา</h4>
+        <small class="text-muted">@Model.Record.Installation.SiteName · รายการแบบเดิม — งานใหม่ให้บันทึกเป็นใบสั่งงานจากหน้าไซต์</small>
+    </div>
+    <a asp-page="/Installations/Detail" asp-route-id="@Model.Record.InstallationId" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> หน้าไซต์
     </a>
 </div>
 
@@ -30,11 +33,17 @@
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label class="form-label">ประเภทงาน</label>
-                            <select asp-for="Input.MaintenanceType" asp-items="Html.GetEnumSelectList<MaintenanceType>()" class="form-select"></select>
+                            <select asp-for="Input.MaintenanceType" class="form-select">
+                                @foreach (var t in Enum.GetValues<MaintenanceType>())
+                                { <option value="@((int)t)">@UiLabels.Label(t)</option> }
+                            </select>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">สถานะ</label>
-                            <select asp-for="Input.Status" asp-items="Html.GetEnumSelectList<MaintenanceStatus>()" class="form-select"></select>
+                            <select asp-for="Input.Status" class="form-select">
+                                @foreach (var st in Enum.GetValues<MaintenanceStatus>())
+                                { <option value="@((int)st)">@UiLabels.Label(st)</option> }
+                            </select>
                         </div>
                     </div>
 
@@ -102,14 +111,9 @@
                                         <a href="@url" target="_blank">
                                             <img src="@url" class="img-thumbnail" style="width:120px;height:120px;object-fit:cover" />
                                         </a>
-                                        <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
-                                            <input type="hidden" name="id" value="@Model.Record.Id" />
-                                            <input type="hidden" name="url" value="@url" />
-                                            <input type="hidden" name="kind" value="before" />
-                                            <button type="submit" class="btn btn-sm btn-danger rounded-circle"
-                                                    style="width:24px;height:24px;padding:0;font-size:12px"
-                                                    onclick="return confirm('ลบรูปนี้?');">×</button>
-                                        </form>
+                                        <button type="submit" asp-page-handler="RemovePhoto" asp-route-id="@Model.Record.Id" asp-route-url="@url" asp-route-kind="before"
+                                                class="btn btn-sm btn-danger rounded-circle position-absolute top-0 end-0" style="width:24px;height:24px;padding:0;font-size:12px" formnovalidate aria-label="ลบ"
+                                                onclick="return confirm('ลบรูปนี้?');">×</button>
                                     </div>
                                 }
                             </div>
@@ -130,14 +134,9 @@
                                         <a href="@url" target="_blank">
                                             <img src="@url" class="img-thumbnail" style="width:120px;height:120px;object-fit:cover" />
                                         </a>
-                                        <form method="post" asp-page-handler="RemovePhoto" class="position-absolute top-0 end-0">
-                                            <input type="hidden" name="id" value="@Model.Record.Id" />
-                                            <input type="hidden" name="url" value="@url" />
-                                            <input type="hidden" name="kind" value="after" />
-                                            <button type="submit" class="btn btn-sm btn-danger rounded-circle"
-                                                    style="width:24px;height:24px;padding:0;font-size:12px"
-                                                    onclick="return confirm('ลบรูปนี้?');">×</button>
-                                        </form>
+                                        <button type="submit" asp-page-handler="RemovePhoto" asp-route-id="@Model.Record.Id" asp-route-url="@url" asp-route-kind="after"
+                                                class="btn btn-sm btn-danger rounded-circle position-absolute top-0 end-0" style="width:24px;height:24px;padding:0;font-size:12px" formnovalidate aria-label="ลบ"
+                                                onclick="return confirm('ลบรูปนี้?');">×</button>
                                     </div>
                                 }
                             </div>
@@ -157,13 +156,9 @@
                                         <a href="@url" target="_blank" class="me-2">
                                             <i class="bi bi-file-earmark"></i> @System.IO.Path.GetFileName(url)
                                         </a>
-                                        <form method="post" asp-page-handler="RemovePhoto" class="d-inline">
-                                            <input type="hidden" name="id" value="@Model.Record.Id" />
-                                            <input type="hidden" name="url" value="@url" />
-                                            <input type="hidden" name="kind" value="attach" />
-                                            <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1"
-                                                    onclick="return confirm('ลบไฟล์นี้?');">×</button>
-                                        </form>
+                                        <button type="submit" asp-page-handler="RemovePhoto" asp-route-id="@Model.Record.Id" asp-route-url="@url" asp-route-kind="attach"
+                                                class="btn btn-sm btn-outline-danger py-0 px-1 d-inline" formnovalidate aria-label="ลบ"
+                                                onclick="return confirm('ลบไฟล์นี้?');">×</button>
                                     </li>
                                 }
                             </ul>

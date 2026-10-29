@@ -240,7 +240,7 @@ public class DailySummaryJob
                 : null;
             var cleaningLine = cleaningDueCount > 0
                 ? $"\n🧽 ครบ/เลยกำหนดล้างแผง: {cleaningDueCount}"
-                  + (normalizedBase != null ? $" → {normalizedBase}/Maintenance" : "")
+                  + (normalizedBase != null ? $" → {normalizedBase}/Jobs" : "")
                 : "";
             var warrantyLine = warrantyExpiringCount > 0
                 ? $"\n🛡️ ประกันใกล้หมด: {warrantyExpiringCount}"

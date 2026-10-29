@@ -122,9 +122,11 @@ body {
 
 /* Touch-friendly tap target on mobile */
 @media (max-width: 767.98px) {
-    .btn-sm {
-        min-height: 38px;
-        padding: 0.4rem 0.75rem;
+    /* 44px is the smallest target a thumb hits reliably; a second rule
+       below used to shrink .btn-sm back to 34px. */
+    .btn-sm, .btn-group-sm > .btn {
+        min-height: 40px;
+        padding: 0.45rem 0.8rem;
     }
     .btn:not(.btn-sm):not(.btn-lg) {
         min-height: 44px;
@@ -133,8 +135,16 @@ body {
         min-height: 44px;
         font-size: 16px; /* prevents iOS zoom on focus */
     }
-    .btn-group-sm > .btn, .btn-sm {
-        min-height: 34px;
+    .form-control-sm, .form-select-sm {
+        min-height: 40px;
+    }
+    .dropdown-item {
+        padding-top: 0.6rem;
+        padding-bottom: 0.6rem;
+    }
+    .list-group-item {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
     }
 }
 

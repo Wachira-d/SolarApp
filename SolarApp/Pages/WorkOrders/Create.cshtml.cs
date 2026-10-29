@@ -9,10 +9,20 @@ using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.Authorization;
+using SolarApp.Services.FieldWork;
+using SolarApp.Services.FileUpload;
 using SolarApp.Services.WorkOrderTemplates;
 
 namespace SolarApp.Pages.WorkOrders;
 
+/// <summary>
+/// One form for every site visit — planned ahead, or written up after the
+/// crew is back in the truck. The second case is the one that used to be
+/// confusing: a visit already done had to be "scheduled", then "started",
+/// then "completed" across three screens, or filed on a separate maintenance
+/// page that nothing else read. "ทำเสร็จแล้ว" on this form now records it in
+/// one step, photos included, the way the cleaning sheet always has.
+/// </summary>
 [Authorize(Roles = "Admin,Partner")]
 public class CreateModel : PageModel
 {
@@ -20,27 +30,42 @@ public class CreateModel : PageModel
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IInstallationAccessHelper _installAccess;
     private readonly IWorkOrderTemplateService _templates;
+    private readonly IFileUploadService _uploader;
 
-    /// <summary>Per-type defaults injected into the page as JSON for the client-side dropdown handler.</summary>
+    /// <summary>Per-type defaults injected into the page as JSON for the client-side type handler.</summary>
     public Dictionary<int, object> TypeDefaults { get; set; } = new();
 
     public CreateModel(
         ApplicationDbContext context,
         UserManager<ApplicationUser> userManager,
         IInstallationAccessHelper installAccess,
-        IWorkOrderTemplateService templates)
+        IWorkOrderTemplateService templates,
+        IFileUploadService uploader)
     {
         _context = context;
         _userManager = userManager;
         _installAccess = installAccess;
         _templates = templates;
+        _uploader = uploader;
     }
 
     [BindProperty] public WorkOrderInput Input { get; set; } = new();
+    [BindProperty] public List<IFormFile> BeforePhotoFiles { get; set; } = new();
+    [BindProperty] public List<IFormFile> AfterPhotoFiles { get; set; } = new();
 
     public List<SelectListItem> Installations { get; set; } = new();
     public List<SelectListItem> Customers { get; set; } = new();
     public List<SelectListItem> Users { get; set; } = new();
+
+    /// <summary>
+    /// Set when the form was opened from a site page: the site is fixed and
+    /// shown as a heading instead of a picker, and the form starts in its
+    /// short layout.
+    /// </summary>
+    public Installation? LockedSite { get; set; }
+
+    /// <summary>The ticket this order answers, when opened from one.</summary>
+    public ServiceTicket? SourceTicket { get; set; }
 
     public class WorkOrderInput
     {
@@ -51,7 +76,7 @@ public class CreateModel : PageModel
         [StringLength(200, ErrorMessage = "หัวข้องานต้องไม่เกิน 200 ตัวอักษร")]
         public string Title { get; set; } = "";
 
-        [StringLength(2000, ErrorMessage = "คำอธิบายต้องไม่เกิน 2000 ตัวอักษร")]
+        [StringLength(2000, ErrorMessage = "รายละเอียดต้องไม่เกิน 2000 ตัวอักษร")]
         public string? Description { get; set; }
         [StringLength(2000, ErrorMessage = "ขอบเขตงานต้องไม่เกิน 2000 ตัวอักษร")]
         public string? Scope { get; set; }
@@ -60,6 +85,7 @@ public class CreateModel : PageModel
 
         // Linked installation (optional)
         public int? InstallationId { get; set; }
+        public int? ServiceTicketId { get; set; }
 
         // Standalone site info
         [StringLength(200, ErrorMessage = "ชื่อไซต์ต้องไม่เกิน 200 ตัวอักษร")]
@@ -75,8 +101,8 @@ public class CreateModel : PageModel
 
         public int? CustomerId { get; set; }
 
-        [Required(ErrorMessage = "กรุณาเลือกวันที่นัด")]
-        public DateTime ScheduledDate { get; set; } = SolarApp.Services.SiteTime.Today.AddDays(1);
+        [Required(ErrorMessage = "กรุณาเลือกวันที่")]
+        public DateTime ScheduledDate { get; set; } = SolarApp.Services.SiteTime.Today;
         public string? ScheduledTimeStr { get; set; }
 
         [Range(15, 24 * 60, ErrorMessage = "ระยะเวลาต้องอยู่ระหว่าง 15 นาที ถึง 24 ชั่วโมง")]
@@ -90,85 +116,110 @@ public class CreateModel : PageModel
 
         // Checklist template
         public string? ChecklistItems { get; set; }
+
+        /// <summary>The visit already happened: file it as completed in one step.</summary>
+        public bool MarkCompleted { get; set; }
+        [StringLength(2000, ErrorMessage = "บันทึกปิดงานต้องไม่เกิน 2000 ตัวอักษร")]
+        public string? CompletionNotes { get; set; }
     }
 
-    public async Task<IActionResult> OnGetAsync(int? installationId = null, string? type = null)
+    public async Task<IActionResult> OnGetAsync(int? installationId = null, string? type = null,
+        int? ticketId = null, bool done = false)
     {
         await LoadDropdownsAsync();
         await LoadTypeDefaultsAsync();
 
         if (installationId.HasValue)
         {
-            // Validate the user is allowed to create against this installation
             if (!await _installAccess.CanAccessAsync(installationId.Value, User))
                 return Forbid();
             Input.InstallationId = installationId;
+            LockedSite = await _context.Installations.AsNoTracking()
+                .Include(i => i.Customer)
+                .FirstOrDefaultAsync(i => i.Id == installationId.Value);
+        }
+
+        if (ticketId.HasValue)
+        {
+            var ticket = await _context.ServiceTickets.AsNoTracking()
+                .Include(t => t.Installation).ThenInclude(i => i.Customer)
+                .FirstOrDefaultAsync(t => t.Id == ticketId.Value);
+            if (ticket != null && await _installAccess.CanAccessAsync(ticket.InstallationId, User))
+            {
+                SourceTicket = ticket;
+                Input.ServiceTicketId = ticket.Id;
+                Input.InstallationId = ticket.InstallationId;
+                LockedSite = ticket.Installation;
+                Input.Type = WorkOrderType.CorrectiveRepair;
+                Input.Title = $"แจ้งซ่อม {ticket.TicketNumber}: {ticket.Subject}";
+                Input.Description = ticket.Description;
+            }
         }
 
         if (Enum.TryParse<WorkOrderType>(type, true, out var woType))
             Input.Type = woType;
 
-        // Client-side JS in Create.cshtml fills Title + ChecklistItems from
-        // per-type defaults (and updates them when the type dropdown changes).
-        // We deliberately don't set them here so the client and server agree.
+        Input.MarkCompleted = done;
+
+        // Client-side JS fills Title + ChecklistItems from per-type defaults
+        // when they are empty, so a ticket's title above is kept.
         return Page();
     }
 
-    // Date-window bounds for the ScheduledDate field. Surfaced as named
-    // constants so a reviewer doesn't have to grep raw numbers. Range
-    // attributes on the input class use compile-time constants for the
-    // same values (15..1440 minutes, 0..120 months recurrence).
-    private const int MaxBackdateDays = 30;
+    // Recording a visit after the fact needs a longer window than planning
+    // one ahead: paperwork from the last quarter is normal, next decade is not.
+    private const int MaxBackdateDays = 120;
     private const int MaxFutureYears = 5;
 
     public async Task<IActionResult> OnPostAsync()
     {
         if (Input.ScheduledDate.Date < SolarApp.Services.SiteTime.Today.AddDays(-MaxBackdateDays))
             ModelState.AddModelError("Input.ScheduledDate",
-                $"วันที่นัดไม่สามารถย้อนหลังเกิน {MaxBackdateDays} วันได้");
+                $"วันที่ย้อนหลังได้ไม่เกิน {MaxBackdateDays} วัน");
 
         if (Input.ScheduledDate.Date > SolarApp.Services.SiteTime.Today.AddYears(MaxFutureYears))
             ModelState.AddModelError("Input.ScheduledDate",
                 $"วันที่นัดไม่สามารถเกิน {MaxFutureYears} ปีในอนาคตได้");
 
+        if (Input.MarkCompleted && Input.ScheduledDate.Date > SolarApp.Services.SiteTime.Today)
+            ModelState.AddModelError("Input.ScheduledDate",
+                "งานที่ทำเสร็จแล้วต้องเป็นวันนี้หรือย้อนหลัง");
+
         // Either linked installation OR standalone site name must be provided
         if (!Input.InstallationId.HasValue && string.IsNullOrWhiteSpace(Input.ExternalSiteName))
             ModelState.AddModelError("Input.ExternalSiteName",
-                "กรุณาเลือก \"ไซต์ในระบบ\" หรือกรอก \"ชื่อไซต์\" ใน \"ไซต์นอกระบบ\" อย่างใดอย่างหนึ่ง");
+                "กรุณาเลือกไซต์ในระบบ หรือกรอกชื่อไซต์นอกระบบ อย่างใดอย่างหนึ่ง");
 
-        // Validate Partner cannot create against an installation they don't own
         if (Input.InstallationId.HasValue && !await _installAccess.CanAccessAsync(Input.InstallationId.Value, User))
             ModelState.AddModelError("Input.InstallationId", "คุณไม่มีสิทธิ์เข้าถึงไซต์นี้");
+
+        ServiceTicket? ticket = null;
+        if (Input.ServiceTicketId.HasValue)
+        {
+            ticket = await _context.ServiceTickets.FirstOrDefaultAsync(t => t.Id == Input.ServiceTicketId.Value);
+            if (ticket == null || ticket.InstallationId != Input.InstallationId)
+                ModelState.AddModelError("Input.ServiceTicketId", "เรื่องแจ้งซ่อมไม่ตรงกับไซต์ที่เลือก");
+        }
 
         if (!ModelState.IsValid)
         {
             await LoadDropdownsAsync();
             await LoadTypeDefaultsAsync();
+            if (Input.InstallationId.HasValue)
+                LockedSite = await _context.Installations.AsNoTracking().Include(i => i.Customer)
+                    .FirstOrDefaultAsync(i => i.Id == Input.InstallationId.Value);
             return Page();
         }
 
         var user = await _userManager.GetUserAsync(User);
-
-        // Generate WO number: WO-YYYYMM-NNNN
-        var prefix = $"WO-{DateTime.UtcNow:yyyyMM}";
-        var lastNum = await _context.WorkOrders
-            .Where(w => w.WorkOrderNumber.StartsWith(prefix))
-            .OrderByDescending(w => w.WorkOrderNumber)
-            .Select(w => w.WorkOrderNumber)
-            .FirstOrDefaultAsync();
-        var seq = 1;
-        if (lastNum != null && lastNum.Length > prefix.Length + 1
-            && int.TryParse(lastNum[(prefix.Length + 1)..], out var parsed))
-        {
-            seq = parsed + 1;
-        }
+        var now = DateTime.UtcNow;
 
         TimeSpan? scheduledTime = null;
         if (TimeSpan.TryParse(Input.ScheduledTimeStr, out var ts)) scheduledTime = ts;
 
         var wo = new WorkOrder
         {
-            WorkOrderNumber = $"{prefix}-{seq:D4}",
+            WorkOrderNumber = await WorkOrderCompletion.NextNumberAsync(_context, now),
             Type = Input.Type,
             Status = !string.IsNullOrWhiteSpace(Input.AssignedToUserId)
                 ? WorkOrderStatus.Assigned : WorkOrderStatus.Scheduled,
@@ -177,20 +228,23 @@ public class CreateModel : PageModel
             Scope = Input.Scope,
             SpecialInstructions = Input.SpecialInstructions,
             InstallationId = Input.InstallationId,
-            ExternalSiteName = Input.ExternalSiteName,
-            ExternalSiteAddress = Input.ExternalSiteAddress,
-            ExternalCustomerName = Input.ExternalCustomerName,
-            ExternalCustomerPhone = Input.ExternalCustomerPhone,
-            ExternalLatitude = Input.ExternalLatitude,
-            ExternalLongitude = Input.ExternalLongitude,
+            ServiceTicketId = ticket?.Id,
+            ExternalSiteName = Input.InstallationId.HasValue ? null : Input.ExternalSiteName,
+            ExternalSiteAddress = Input.InstallationId.HasValue ? null : Input.ExternalSiteAddress,
+            ExternalCustomerName = Input.InstallationId.HasValue ? null : Input.ExternalCustomerName,
+            ExternalCustomerPhone = Input.InstallationId.HasValue ? null : Input.ExternalCustomerPhone,
+            ExternalLatitude = Input.InstallationId.HasValue ? null : Input.ExternalLatitude,
+            ExternalLongitude = Input.InstallationId.HasValue ? null : Input.ExternalLongitude,
             CustomerId = Input.CustomerId,
-            ScheduledDate = Input.ScheduledDate,
+            ScheduledDate = Input.ScheduledDate.Date,
             ScheduledTime = scheduledTime,
             EstimatedDurationMinutes = Input.EstimatedDurationMinutes,
             RecurrenceMonths = Input.RecurrenceMonths,
             AssignedTeam = Input.AssignedTeam,
             AssignedToUserId = Input.AssignedToUserId,
             CreatedByUserId = user?.Id,
+            CreatedAt = now,
+            UpdatedAt = now
         };
 
         // Parse checklist items (newline-separated from textarea)
@@ -204,20 +258,58 @@ public class CreateModel : PageModel
                 wo.ChecklistItems.Add(new WorkOrderItem
                 {
                     SortOrder = order++,
-                    Description = line.Trim()
+                    Description = line.Trim(),
+                    // A visit written up afterwards was done in full.
+                    IsCompleted = Input.MarkCompleted,
+                    CompletedAt = Input.MarkCompleted ? now : null,
+                    CompletedByUserId = Input.MarkCompleted ? user?.Id : null
                 });
             }
         }
 
         _context.WorkOrders.Add(wo);
+
+        // Photos need the id for their folder, so the order is saved first.
         await _context.SaveChangesAsync();
 
+        var uploaded = false;
+        foreach (var file in BeforePhotoFiles.Where(f => f != null && f.Length > 0).Take(10))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, "wo-before", wo.Id);
+            if (ok) { wo.BeforePhotos = _uploader.AddToCsv(wo.BeforePhotos, url); uploaded = true; }
+        }
+        foreach (var file in AfterPhotoFiles.Where(f => f != null && f.Length > 0).Take(10))
+        {
+            var (ok, url) = await _uploader.UploadAsync(file, "wo-after", wo.Id);
+            if (ok) { wo.AfterPhotos = _uploader.AddToCsv(wo.AfterPhotos, url); uploaded = true; }
+        }
+
+        if (ticket != null && ticket.Status == TicketStatus.Open)
+        {
+            ticket.Status = TicketStatus.InProgress;
+            ticket.UpdatedAt = now;
+        }
+
+        if (Input.MarkCompleted)
+        {
+            // Completed on the day it was done, not the moment it was typed in.
+            var completedAt = Input.ScheduledDate.Date == SolarApp.Services.SiteTime.Today
+                ? now
+                : SolarApp.Services.SiteTime.ToUtc(Input.ScheduledDate.Date.AddHours(12));
+            await WorkOrderCompletion.ApplyAsync(_context, wo, completedAt, user?.Id, Input.CompletionNotes);
+        }
+
+        if (uploaded || ticket != null || Input.MarkCompleted)
+            await _context.SaveChangesAsync();
+
+        TempData["StatusMessage"] = Input.MarkCompleted
+            ? $"บันทึกงาน {wo.WorkOrderNumber} เป็นเสร็จแล้ว"
+            : $"สร้างใบสั่งงาน {wo.WorkOrderNumber} แล้ว";
         return RedirectToPage("Detail", new { id = wo.Id });
     }
 
     private async Task LoadDropdownsAsync()
     {
-        // Filter installations by what the user can access
         var user = await _userManager.GetUserAsync(User);
         var roles = user != null ? await _userManager.GetRolesAsync(user) : new List<string>();
 

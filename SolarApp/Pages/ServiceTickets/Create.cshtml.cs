@@ -29,7 +29,7 @@ public class CreateModel : PageModel
         _context = context;
     }
 
-    [BindProperty]
+    [BindProperty(SupportsGet = true)]
     public int InstallationId { get; set; }
 
     [BindProperty]
@@ -65,7 +65,7 @@ public class CreateModel : PageModel
         // actually allowed to file a ticket against before trusting it.
         if (!await CanAccessInstallationAsync(InstallationId, user!))
         {
-            ModelState.AddModelError(nameof(InstallationId), "You don't have access to that installation.");
+            ModelState.AddModelError(nameof(InstallationId), "คุณไม่มีสิทธิ์เข้าถึงไซต์นี้");
             await LoadInstallationsAsync();
             return Page();
         }
@@ -81,7 +81,8 @@ public class CreateModel : PageModel
         };
 
         await _maintenanceService.CreateTicketAsync(ticket);
-        return RedirectToPage("Index");
+        TempData["StatusMessage"] = $"รับเรื่องแจ้งซ่อม {ticket.TicketNumber} แล้ว";
+        return RedirectToPage("Edit", new { id = ticket.Id });
     }
 
     private async Task<bool> CanAccessInstallationAsync(int installationId, Models.ApplicationUser user)

@@ -74,7 +74,53 @@ public class VisitsModel : PageModel
             .Take(50)
             .ToListAsync();
 
+        // Work orders are where visits are recorded now; without them the
+        // customer saw cleaning and nothing else.
+        var orders = await _context.WorkOrders
+            .Include(w => w.Installation)
+            .Include(w => w.AssignedToUser)
+            .Where(w => w.InstallationId != null && w.Installation!.CustomerId == customerId
+                && w.Status != Models.Enums.WorkOrderStatus.Cancelled
+                && w.Status != Models.Enums.WorkOrderStatus.Draft
+                // A panel-cleaning order also writes a cleaning record, which is listed above.
+                && w.Type != Models.Enums.WorkOrderType.PanelCleaning
+                && (w.ScheduledDate >= oneYearAgo || w.ActualEndTime >= oneYearAgo))
+            .OrderByDescending(w => w.ActualEndTime ?? w.ScheduledDate)
+            .Take(50)
+            .ToListAsync();
+
         var all = new List<VisitVm>();
+
+        foreach (var w in orders)
+        {
+            var done = w.Status >= Models.Enums.WorkOrderStatus.Completed;
+            var when = done && w.ActualEndTime.HasValue
+                ? Services.SiteTime.ToSiteTime(w.ActualEndTime.Value).Date
+                : w.ScheduledDate.Date;
+            var icon = w.Type switch
+            {
+                Models.Enums.WorkOrderType.PreventiveMaintenance => "🔧",
+                Models.Enums.WorkOrderType.CorrectiveRepair => "🛠",
+                Models.Enums.WorkOrderType.Inspection => "🔍",
+                Models.Enums.WorkOrderType.NewInstallation => "📦",
+                Models.Enums.WorkOrderType.Commissioning => "⚡",
+                _ => "🧰"
+            };
+            all.Add(new VisitVm
+            {
+                When = when,
+                SiteName = w.Installation!.SiteName,
+                SiteId = w.Installation.Id,
+                Kind = $"{icon} {Models.Enums.UiLabels.Label(w.Type)}",
+                Status = done ? "Completed" : w.Status == Models.Enums.WorkOrderStatus.InProgress ? "InProgress" : "Scheduled",
+                Performer = w.AssignedToUser?.FullName ?? w.AssignedTeam,
+                // Customers see what was done, not internal planning notes.
+                Notes = done ? w.CompletionNotes : w.Title,
+                BeforePhotos = SplitPhotos(w.BeforePhotos, null),
+                AfterPhotos = SplitPhotos(w.AfterPhotos, null),
+                IsScheduled = !done && when >= now.Date,
+            });
+        }
 
         foreach (var c in cleanings)
         {
@@ -86,7 +132,7 @@ public class VisitsModel : PageModel
                 SiteId = c.Installation.Id,
                 Kind = "💧 ล้างแผงโซลาร์",
                 Status = c.Status.ToString(),
-                Performer = c.PerformedByUser?.UserName ?? c.PerformedByExternal,
+                Performer = c.PerformedByUser?.FullName ?? c.PerformedByExternal,
                 Notes = c.Notes,
                 BeforePhotos = SplitPhotos(c.BeforePhotos, c.BeforePhotoUrl),
                 AfterPhotos = SplitPhotos(c.AfterPhotos, c.AfterPhotoUrl),
@@ -113,7 +159,7 @@ public class VisitsModel : PageModel
                 SiteId = m.Installation.Id,
                 Kind = kindIcon,
                 Status = m.Status.ToString(),
-                Performer = m.PerformedByUser?.UserName,
+                Performer = m.PerformedByUser?.FullName,
                 Notes = m.Notes ?? m.Description,
                 BeforePhotos = SplitPhotos(m.BeforePhotos, null),
                 AfterPhotos = SplitPhotos(m.AfterPhotos, null),

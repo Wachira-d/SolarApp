@@ -16,7 +16,7 @@
 @functions {
     string VisitMeta(SolarApp.Pages.My.VisitsModel.VisitVm v)
     {
-        var parts = new List<string> { v.SiteName, v.When.ToLocalTime().ToString("dd/MM/yyyy") };
+        var parts = new List<string> { v.SiteName, v.When.ToString("dd/MM/yyyy") };
         if (!string.IsNullOrEmpty(v.Performer)) parts.Add($"โดย {v.Performer}");
         return string.Join(" · ", parts);
     }
@@ -55,6 +55,8 @@
                         "Completed" => ("เสร็จสิ้น", "#10b981"),
                         "InProgress" => ("กำลังทำ", "#f59e0b"),
                         "Cancelled" => ("ยกเลิก", "#6b7280"),
+                        "Missed" => ("ไม่ได้เข้า", "#ef4444"),
+                        "Scheduled" => ("นัดไว้", "#3b82f6"),
                         _ => (v.Status, "#3b82f6"),
                     };
                 }

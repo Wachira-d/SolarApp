@@ -5,11 +5,26 @@
     ViewData["Title"] = $"งานแจ้งซ่อม {Model.Ticket.TicketNumber}";
 }
 
-<div class="d-flex justify-content-between mb-3">
-    <h4>@Model.Ticket.TicketNumber - @Model.Ticket.Subject</h4>
-    <a asp-page="Index" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-arrow-left"></i> กลับไปรายการแจ้งซ่อม
-    </a>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0">
+            <span class="badge @UiLabels.Badge(Model.Ticket.Status) fs-6 align-middle">@UiLabels.Label(Model.Ticket.Status)</span>
+            @Model.Ticket.Subject
+        </h4>
+        <small class="text-muted">@Model.Ticket.TicketNumber · @Model.Ticket.Installation.SiteName</small>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        @if (Model.IsAdminOrPartner && Model.Ticket.Status != TicketStatus.Resolved && Model.Ticket.Status != TicketStatus.Closed
+             && !Model.WorkOrders.Any(w => w.Status != WorkOrderStatus.Cancelled))
+        {
+            <a asp-page="/WorkOrders/Create" asp-route-ticketId="@Model.Ticket.Id" class="btn btn-warning">
+                <i class="bi bi-clipboard2-plus"></i> นัดช่างเข้าไซต์
+            </a>
+        }
+        <a asp-page="Index" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> กลับ
+        </a>
+    </div>
 </div>
 
 @if (!string.IsNullOrEmpty(Model.StatusMessage))
@@ -40,11 +55,17 @@
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label class="form-label">ความสำคัญ</label>
-                            <select asp-for="Input.Priority" asp-items="Html.GetEnumSelectList<TicketPriority>()" class="form-select"></select>
+                            <select asp-for="Input.Priority" class="form-select">
+                                @foreach (var pr in Enum.GetValues<TicketPriority>())
+                                { <option value="@((int)pr)">@UiLabels.Label(pr)</option> }
+                            </select>
                         </div>
                         <div class="col-md-4 mb-3">
                             <label class="form-label">สถานะ</label>
-                            <select asp-for="Input.Status" asp-items="Html.GetEnumSelectList<TicketStatus>()" class="form-select"></select>
+                            <select asp-for="Input.Status" class="form-select" disabled="@(!Model.IsAdminOrPartner)">
+                                @foreach (var st in Enum.GetValues<TicketStatus>())
+                                { <option value="@((int)st)">@UiLabels.Label(st)</option> }
+                            </select>
                         </div>
                         <div class="col-md-4 mb-3">
                             <label class="form-label">ผู้รับผิดชอบ</label>
@@ -84,6 +105,27 @@
     </div>
 
     <div class="col-md-4">
+        @* The visit that answers this ticket — without it the ticket page was
+           a dead end and the technician had to find the work order by hand. *@
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-clipboard2-check"></i> ใบสั่งงานของเรื่องนี้</h6></div>
+            <div class="list-group list-group-flush">
+                @foreach (var w in Model.WorkOrders)
+                {
+                    <a asp-page="/WorkOrders/Detail" asp-route-id="@w.Id" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center gap-2">
+                        <div>
+                            <span class="fw-semibold">@w.Title</span>
+                            <small class="text-muted d-block">@w.ScheduledDate.ToString("dd/MM/yyyy") · @(w.AssignedToUser?.FullName ?? w.AssignedTeam ?? "ยังไม่ระบุช่าง")</small>
+                        </div>
+                        <span class="badge @UiLabels.Badge(w.Status)">@UiLabels.Label(w.Status)</span>
+                    </a>
+                }
+                @if (!Model.WorkOrders.Any())
+                {
+                    <div class="list-group-item text-muted small">ยังไม่ได้นัดช่าง — กด "นัดช่างเข้าไซต์" เมื่อพร้อม</div>
+                }
+            </div>
+        </div>
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white"><h6 class="mb-0">ข้อมูลงานแจ้งซ่อม</h6></div>
             <div class="card-body">

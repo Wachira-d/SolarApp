@@ -4,27 +4,37 @@
 @{
     var wo = Model.Order;
     ViewData["Title"] = $"ใบสั่งงาน {wo.WorkOrderNumber}";
+    var isOpen = wo.Status < WorkOrderStatus.Completed;
+    var canStart = wo.Status == WorkOrderStatus.Scheduled || wo.Status == WorkOrderStatus.Assigned
+                   || wo.Status == WorkOrderStatus.Accepted || wo.Status == WorkOrderStatus.Draft;
+    var photoCount = wo.BeforePhotoList.Count + wo.AfterPhotoList.Count + wo.Photos.Count;
 }
 
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
     <div>
-        <h4 class="mb-0">
-            <span class="badge @wo.StatusBadgeClass me-2">@wo.Status</span>
-            @wo.WorkOrderNumber
-        </h4>
-        <small class="text-muted">@wo.Type · @wo.SiteName · @wo.ScheduledDate.ToString("dd MMM yyyy")</small>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="badge @UiLabels.Badge(wo.Status) fs-6">@UiLabels.Label(wo.Status)</span>
+            <h4 class="mb-0">@wo.Title</h4>
+        </div>
+        <div class="text-muted small mt-1">
+            <i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type)
+            · @wo.WorkOrderNumber
+            · <i class="bi bi-calendar3"></i> @wo.ScheduledDate.ToString("dd/MM/yyyy")
+            @if (wo.ScheduledTime.HasValue) { <span>@wo.ScheduledTime.Value.ToString(@"hh\:mm")</span> }
+            @if (wo.IsOverdue) { <span class="badge bg-danger ms-1">เลยกำหนด</span> }
+        </div>
     </div>
     <div class="d-flex gap-2 flex-wrap align-items-center">
-        @* ── PRIMARY ACTION ── one large smart button per status ── *@
-        @if (wo.Status == WorkOrderStatus.Scheduled || wo.Status == WorkOrderStatus.Assigned)
+        @* ── One primary action per status; the rest in "เพิ่มเติม" ── *@
+        @if (Model.CanEdit && canStart)
         {
-            <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress">
+            <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress" class="d-none d-lg-block">
                 <button class="btn btn-warning"><i class="bi bi-play-fill"></i> เริ่มงาน</button>
             </form>
         }
-        else if (wo.Status == WorkOrderStatus.InProgress)
+        else if (Model.CanEdit && wo.Status == WorkOrderStatus.InProgress)
         {
-            <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#completeModal">
+            <button type="button" class="btn btn-success d-none d-lg-inline-block" data-bs-toggle="modal" data-bs-target="#completeModal">
                 <i class="bi bi-check-circle"></i> เสร็จสิ้นงาน
             </button>
         }
@@ -35,34 +45,47 @@
             </form>
         }
 
-        @* ── SECONDARY ACTIONS ── grouped in dropdown to declutter ── *@
         <div class="dropdown">
-            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+            <button class="btn btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-label="เมนูเพิ่มเติม">
                 <i class="bi bi-three-dots-vertical"></i> เพิ่มเติม
             </button>
             <ul class="dropdown-menu dropdown-menu-end">
+                @if (Model.CanEdit && isOpen)
+                {
+                    <li>
+                        <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#completeModal">
+                            <i class="bi bi-check-circle"></i> ปิดงานเลย (ข้าม "เริ่มงาน")
+                        </button>
+                    </li>
+                }
                 <li>
                     <a class="dropdown-item" asp-page="Photos" asp-route-id="@wo.Id">
-                        <i class="bi bi-camera"></i> รูปภาพ (@wo.Photos.Count)
+                        <i class="bi bi-images"></i> รูปภาพแยกหมวด (@wo.Photos.Count)
                     </a>
                 </li>
-                @if (Model.CanEdit
-                     && wo.Status != WorkOrderStatus.Closed
-                     && wo.Status != WorkOrderStatus.Cancelled
-                     && (User.IsInRole("Admin") || User.IsInRole("Partner")))
+                @if (Model.CanEdit && wo.Status != WorkOrderStatus.Closed && wo.Status != WorkOrderStatus.Cancelled)
                 {
                     <li>
                         <a class="dropdown-item" asp-page="Edit" asp-route-id="@wo.Id">
-                            <i class="bi bi-pencil"></i> แก้ไข
+                            <i class="bi bi-pencil"></i> แก้ไขรายละเอียด / เลื่อนนัด
                         </a>
                     </li>
                 }
-                @if (wo.Status < WorkOrderStatus.Completed)
+                @if (User.IsInRole("Admin") && (wo.Status == WorkOrderStatus.Completed || wo.Status == WorkOrderStatus.Verified))
+                {
+                    <li>
+                        <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress"
+                              onsubmit="return confirm('เปิดงานนี้กลับมาทำต่อ?')">
+                            <button type="submit" class="dropdown-item"><i class="bi bi-arrow-counterclockwise"></i> เปิดงานกลับมาทำต่อ</button>
+                        </form>
+                    </li>
+                }
+                @if (Model.CanEdit && isOpen)
                 {
                     <li><hr class="dropdown-divider"></li>
                     <li>
                         <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="Cancelled"
-                              onsubmit="return confirm('ยกเลิกใบสั่งงานนี้?')" class="d-inline">
+                              onsubmit="return confirm('ยกเลิกใบสั่งงานนี้?')">
                             <button type="submit" class="dropdown-item text-danger">
                                 <i class="bi bi-x-lg"></i> ยกเลิกงาน
                             </button>
@@ -72,33 +95,81 @@
             </ul>
         </div>
 
-        <a asp-page="Index" class="btn btn-link btn-sm text-muted ms-auto">
-            <i class="bi bi-arrow-left"></i> กลับ
-        </a>
+        @if (wo.InstallationId.HasValue)
+        {
+            <a asp-page="/Installations/Detail" asp-route-id="@wo.InstallationId" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> หน้าไซต์
+            </a>
+        }
+        else
+        {
+            <a asp-page="/Jobs/Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> งานภาคสนาม</a>
+        }
     </div>
 </div>
 
 @if (!string.IsNullOrEmpty(Model.StatusMessage))
-{ <div class="alert alert-success">@Model.StatusMessage</div> }
+{ <div class="alert alert-success"><i class="bi bi-check-circle"></i> @Model.StatusMessage</div> }
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{ <div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage</div> }
+
+@* ── Where to go and who to call: first thing on the screen on the way there ── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+        <div class="flex-grow-1">
+            <strong><i class="bi bi-house-gear"></i> @wo.SiteName</strong>
+            @if (wo.IsStandalone) { <span class="badge bg-info text-dark ms-1">ไซต์นอกระบบ</span> }
+            @if (!string.IsNullOrWhiteSpace(wo.SiteAddress)) { <div class="small text-muted">@wo.SiteAddress</div> }
+            @if (!string.IsNullOrWhiteSpace(wo.ExternalCustomerName))
+            { <div class="small"><i class="bi bi-person"></i> @wo.ExternalCustomerName</div> }
+            else if (wo.Installation?.Customer != null)
+            { <div class="small"><i class="bi bi-person"></i> @wo.Installation.Customer.FullName</div> }
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            @if (wo.MapCoords is { } woCoords)
+            {
+                <a href="https://www.google.com/maps/dir/?api=1&amp;destination=@woCoords"
+                   target="_blank" rel="noopener" class="btn btn-success">
+                    <i class="bi bi-sign-turn-right-fill"></i> นำทาง
+                </a>
+            }
+            @if (wo.SiteContactPhone is { Length: > 0 } phone)
+            {
+                <a href="tel:@phone" class="btn btn-outline-primary">
+                    <i class="bi bi-telephone-fill"></i> โทร
+                </a>
+            }
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(wo.SpecialInstructions))
+{
+    <div class="alert alert-warning py-2"><i class="bi bi-exclamation-triangle-fill"></i> <strong>ข้อควรรู้ก่อนเข้าไซต์:</strong> @wo.SpecialInstructions</div>
+}
 
 <div class="row g-3">
-    <!-- LEFT: Details -->
     <div class="col-lg-7">
-        <div class="card border-0 shadow-sm mb-3">
-            <div class="card-header bg-white"><h6 class="mb-0">รายละเอียดงาน</h6></div>
-            <div class="card-body">
-                <div class="row g-2 small">
-                    <div class="col-6"><strong>หัวข้อ:</strong> @wo.Title</div>
-                    <div class="col-6"><strong>ประเภท:</strong> @wo.Type</div>
+        @if (!string.IsNullOrWhiteSpace(wo.Description) || !string.IsNullOrWhiteSpace(wo.Scope) || wo.ServiceTicket != null)
+        {
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-white"><h6 class="mb-0">สิ่งที่ต้องทำ</h6></div>
+                <div class="card-body">
+                    @if (wo.ServiceTicket != null)
+                    {
+                        <div class="mb-2">
+                            <a asp-page="/ServiceTickets/Edit" asp-route-id="@wo.ServiceTicket.Id" class="badge bg-light text-body border text-decoration-none">
+                                <i class="bi bi-ticket-detailed"></i> จากเรื่องแจ้งซ่อม @wo.ServiceTicket.TicketNumber
+                            </a>
+                        </div>
+                    }
                     @if (!string.IsNullOrWhiteSpace(wo.Description))
-                    { <div class="col-12"><strong>รายละเอียด:</strong> @wo.Description</div> }
+                    { <div style="white-space:pre-wrap">@wo.Description</div> }
                     @if (!string.IsNullOrWhiteSpace(wo.Scope))
-                    { <div class="col-12"><strong>ขอบเขตงาน:</strong> @wo.Scope</div> }
-                    @if (!string.IsNullOrWhiteSpace(wo.SpecialInstructions))
-                    { <div class="col-12 text-warning"><strong>⚠ คำแนะนำพิเศษ:</strong> @wo.SpecialInstructions</div> }
+                    { <div class="mt-2 small text-muted"><strong>ขอบเขต:</strong> @wo.Scope</div> }
                 </div>
             </div>
-        </div>
+        }
 
         <!-- Checklist -->
         <div class="card border-0 shadow-sm mb-3">
@@ -114,11 +185,9 @@
                 @foreach (var item in wo.ChecklistItems)
                 {
                     <div class="list-group-item">
-                        @* The tick was a 24px icon. On a roof, in gloves, in
-                           sunlight, that is not a target — the whole row is
-                           the button now. *@
+                        @* The whole row is the button — a 24px tick is not a target on a roof. *@
                         <form method="post" asp-page-handler="CheckItem" asp-route-id="@wo.Id" asp-route-itemId="@item.Id">
-                            <button type="submit"
+                            <button type="submit" @(Model.CanEdit ? "" : "disabled")
                                     class="btn btn-link w-100 text-start text-decoration-none text-body d-flex align-items-start gap-3 p-2 border-0">
                                 @if (item.IsCompleted)
                                 { <i class="bi bi-check-circle-fill text-success fs-4"></i> }
@@ -143,116 +212,90 @@
         </div>
 
         <!-- Photos -->
-        <div class="row g-3">
-            <div class="col-md-6">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-header bg-white"><h6 class="mb-0">รูปก่อนทำงาน</h6></div>
-                    <div class="card-body">
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-camera"></i> รูปภาพ <small class="text-muted">(@photoCount)</small></h6>
+                <a asp-page="Photos" asp-route-id="@wo.Id" class="small">แยกหมวด / ลบรูป →</a>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="fw-semibold small mb-1">ก่อนทำงาน</div>
                         <div class="d-flex flex-wrap gap-2 mb-2">
                             @foreach (var url in wo.BeforePhotoList)
-                            { <a href="@url" target="_blank"><img src="@url" class="img-thumbnail" style="max-height:80px" /></a> }
+                            { <a href="@url" target="_blank"><img src="@url" class="img-thumbnail" style="width:88px;height:88px;object-fit:cover" alt="ก่อนทำงาน" /></a> }
+                            @if (!wo.BeforePhotoList.Any()) { <span class="text-muted small">ยังไม่มีรูป</span> }
                         </div>
-                        <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="before" enctype="multipart/form-data">
-                            <div class="input-group input-group-sm">
-                                <input type="file" name="BeforePhotoFiles" multiple accept="image/*"
-                                       capture="environment" class="form-control" />
-                                <button type="submit" class="btn btn-outline-primary"><i class="bi bi-upload"></i></button>
-                            </div>
-                        </form>
+                        @if (Model.CanEdit)
+                        {
+                            <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="before" enctype="multipart/form-data" class="d-flex gap-2">
+                                @* No capture attribute: the phone's picker offers both camera and gallery. *@
+                                <input type="file" name="BeforePhotoFiles" multiple accept="image/*" class="form-control" />
+                                <button type="submit" class="btn btn-outline-primary" title="อัปโหลด"><i class="bi bi-upload"></i></button>
+                            </form>
+                        }
                     </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-header bg-white"><h6 class="mb-0">รูปหลังทำงาน</h6></div>
-                    <div class="card-body">
+                    <div class="col-md-6">
+                        <div class="fw-semibold small mb-1">หลังทำงาน</div>
                         <div class="d-flex flex-wrap gap-2 mb-2">
                             @foreach (var url in wo.AfterPhotoList)
-                            { <a href="@url" target="_blank"><img src="@url" class="img-thumbnail" style="max-height:80px" /></a> }
+                            { <a href="@url" target="_blank"><img src="@url" class="img-thumbnail border-success" style="width:88px;height:88px;object-fit:cover" alt="หลังทำงาน" /></a> }
+                            @if (!wo.AfterPhotoList.Any()) { <span class="text-muted small">ยังไม่มีรูป</span> }
                         </div>
-                        <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="after" enctype="multipart/form-data">
-                            <div class="input-group input-group-sm">
-                                <input type="file" name="AfterPhotoFiles" multiple accept="image/*"
-                                       capture="environment" class="form-control" />
-                                <button type="submit" class="btn btn-outline-primary"><i class="bi bi-upload"></i></button>
-                            </div>
-                        </form>
+                        @if (Model.CanEdit)
+                        {
+                            <form method="post" asp-page-handler="UploadPhotos" asp-route-id="@wo.Id" asp-route-kind="after" enctype="multipart/form-data" class="d-flex gap-2">
+                                <input type="file" name="AfterPhotoFiles" multiple accept="image/*" class="form-control" />
+                                <button type="submit" class="btn btn-outline-success" title="อัปโหลด"><i class="bi bi-upload"></i></button>
+                            </form>
+                        }
                     </div>
                 </div>
             </div>
         </div>
+
+        @if (!string.IsNullOrWhiteSpace(wo.CompletionNotes))
+        {
+            <div class="card border-0 shadow-sm mb-3 border-success">
+                <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-journal-check"></i> บันทึกปิดงาน</h6></div>
+                <div class="card-body" style="white-space:pre-wrap">@wo.CompletionNotes</div>
+            </div>
+        }
     </div>
 
-    <!-- RIGHT: Info -->
     <div class="col-lg-5">
         <div class="card border-0 shadow-sm mb-3">
-            <div class="card-header bg-white"><h6 class="mb-0">ไซต์งาน</h6></div>
+            <div class="card-header bg-white"><h6 class="mb-0">นัดหมายและผู้รับผิดชอบ</h6></div>
             <div class="card-body small">
-                <strong>@wo.SiteName</strong> @if (wo.IsStandalone) { <span class="badge bg-info">งานเดี่ยว</span> }
-                @if (!string.IsNullOrWhiteSpace(wo.SiteAddress)) { <div class="text-muted">@wo.SiteAddress</div> }
-                @* This card is what the technician has open on the way to the
-                   job, so the address needs to be one tap from navigation. *@
-                <div class="d-flex gap-1 flex-wrap my-2">
-                    @if (wo.MapCoords is { } woCoords)
-                    {
-                        <a href="https://www.google.com/maps/dir/?api=1&amp;destination=@woCoords"
-                           target="_blank" rel="noopener" class="btn btn-sm btn-success">
-                            <i class="bi bi-sign-turn-right-fill"></i> นำทางไปไซต์
-                        </a>
-                        <a href="https://www.google.com/maps/search/?api=1&amp;query=@woCoords"
-                           target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">
-                            <i class="bi bi-geo-alt"></i> Google Maps
-                        </a>
-                    }
-                    @* Arriving to a locked gate is a phone call, not a support
-                       ticket — but the number was two pages away. *@
-                    @if (wo.SiteContactPhone is { Length: > 0 } phone)
-                    {
-                        <a href="tel:@phone" class="btn btn-sm btn-outline-primary">
-                            <i class="bi bi-telephone-fill"></i> โทรหาผู้ติดต่อ
-                        </a>
-                    }
-                </div>
-                @if (wo.Installation != null) { <a asp-page="/Installations/Detail" asp-route-id="@wo.InstallationId" class="small">เปิดหน้าไซต์งาน →</a> }
-                @if (!string.IsNullOrWhiteSpace(wo.ExternalCustomerName))
-                { <div class="mt-1"><i class="bi bi-person"></i> @wo.ExternalCustomerName @wo.ExternalCustomerPhone</div> }
-            </div>
-        </div>
-        <div class="card border-0 shadow-sm mb-3">
-            <div class="card-header bg-white"><h6 class="mb-0">Schedule & Assignment</h6></div>
-            <div class="card-body small">
-                <div class="row g-1">
-                    <div class="col-6"><strong>Date:</strong> @wo.ScheduledDate.ToString("dd/MM/yyyy")</div>
-                    <div class="col-6"><strong>Time:</strong> @(wo.ScheduledTime?.ToString(@"hh\:mm") ?? "—")</div>
-                    <div class="col-6"><strong>Duration:</strong> @wo.EstimatedDurationMinutes min</div>
-                    <div class="col-6"><strong>Recurrence:</strong> @(wo.RecurrenceMonths.HasValue ? $"Every {wo.RecurrenceMonths}mo" : "One-time")</div>
-                    <div class="col-6"><strong>Team:</strong> @(wo.AssignedTeam ?? "—")</div>
-                    <div class="col-6"><strong>Assigned:</strong> @(wo.AssignedToUser?.FullName ?? "Unassigned")</div>
-                    <div class="col-6"><strong>Created by:</strong> @(wo.CreatedByUser?.FullName ?? "—")</div>
-                    <div class="col-6"><strong>Created:</strong> @SolarApp.Services.SiteTime.ToSiteTime(wo.CreatedAt).ToString("dd/MM/yy HH:mm")</div>
-                    @if (wo.ActualStartTime.HasValue) { <div class="col-6"><strong>Started:</strong> @SolarApp.Services.SiteTime.ToSiteTime(wo.ActualStartTime.Value).ToString("dd/MM HH:mm")</div> }
-                    @if (wo.ActualEndTime.HasValue) { <div class="col-6"><strong>Ended:</strong> @SolarApp.Services.SiteTime.ToSiteTime(wo.ActualEndTime.Value).ToString("dd/MM HH:mm")</div> }
+                <div class="row g-2">
+                    <div class="col-6"><span class="text-muted">วันที่</span><br />@wo.ScheduledDate.ToString("dd/MM/yyyy")</div>
+                    <div class="col-6"><span class="text-muted">เวลา</span><br />@(wo.ScheduledTime?.ToString(@"hh\:mm") ?? "—")</div>
+                    <div class="col-6"><span class="text-muted">ผู้รับผิดชอบ</span><br />@(wo.AssignedToUser?.FullName ?? wo.AssignedTeam ?? "ยังไม่ระบุ")</div>
+                    <div class="col-6"><span class="text-muted">ใช้เวลาโดยประมาณ</span><br />@wo.EstimatedDurationMinutes นาที</div>
+                    @if (wo.RecurrenceMonths is > 0)
+                    { <div class="col-6"><span class="text-muted">ทำซ้ำ</span><br />ทุก @wo.RecurrenceMonths เดือน</div> }
+                    @if (wo.ActualStartTime.HasValue)
+                    { <div class="col-6"><span class="text-muted">เริ่มจริง</span><br />@SolarApp.Services.SiteTime.ToSiteTime(wo.ActualStartTime.Value).ToString("dd/MM HH:mm")</div> }
+                    @if (wo.ActualEndTime.HasValue)
+                    { <div class="col-6"><span class="text-muted">เสร็จจริง</span><br />@SolarApp.Services.SiteTime.ToSiteTime(wo.ActualEndTime.Value).ToString("dd/MM HH:mm")</div> }
+                    <div class="col-12 text-muted">
+                        สร้างโดย @(wo.CreatedByUser?.FullName ?? "—") · @SolarApp.Services.SiteTime.ToSiteTime(wo.CreatedAt).ToString("dd/MM/yy HH:mm")
+                    </div>
                 </div>
             </div>
         </div>
-        @if (wo.TotalCost > 0 || wo.Status >= WorkOrderStatus.Completed)
+
+        @if (wo.TotalCost > 0)
         {
             <div class="card border-0 shadow-sm mb-3">
                 <div class="card-header bg-white"><h6 class="mb-0">ค่าใช้จ่าย</h6></div>
                 <div class="card-body small">
-                    <div class="d-flex justify-content-between"><span>Labor:</span><strong>฿@wo.LaborCost.ToString("N0")</strong></div>
-                    <div class="d-flex justify-content-between"><span>Materials:</span><strong>฿@wo.MaterialCost.ToString("N0")</strong></div>
-                    <div class="d-flex justify-content-between"><span>Travel:</span><strong>฿@wo.TravelCost.ToString("N0")</strong></div>
+                    <div class="d-flex justify-content-between"><span>ค่าแรง</span><strong>฿@wo.LaborCost.ToString("N0")</strong></div>
+                    <div class="d-flex justify-content-between"><span>ค่าวัสดุ</span><strong>฿@wo.MaterialCost.ToString("N0")</strong></div>
+                    <div class="d-flex justify-content-between"><span>ค่าเดินทาง</span><strong>฿@wo.TravelCost.ToString("N0")</strong></div>
                     <hr class="my-1" />
-                    <div class="d-flex justify-content-between"><strong>Total:</strong><strong class="fs-5">฿@wo.TotalCost.ToString("N0")</strong></div>
+                    <div class="d-flex justify-content-between"><strong>รวม</strong><strong class="fs-5">฿@wo.TotalCost.ToString("N0")</strong></div>
                 </div>
-            </div>
-        }
-        @if (!string.IsNullOrWhiteSpace(wo.CompletionNotes))
-        {
-            <div class="card border-0 shadow-sm mb-3">
-                <div class="card-header bg-white"><h6 class="mb-0">บันทึกปิดงาน</h6></div>
-                <div class="card-body small">@wo.CompletionNotes</div>
             </div>
         }
     </div>
@@ -263,24 +306,42 @@
     <div class="modal-dialog">
         <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="Completed">
             <div class="modal-content">
-                <div class="modal-header"><h5 class="modal-title">ปิดใบสั่งงาน</h5></div>
+                <div class="modal-header"><h5 class="modal-title">ปิดงาน @wo.WorkOrderNumber</h5></div>
                 <div class="modal-body">
+                    @if (wo.ChecklistItems.Any(i => !i.IsCompleted))
+                    {
+                        <div class="alert alert-warning py-2 small">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            ยังติ๊กไม่ครบ @wo.ChecklistItems.Count(i => !i.IsCompleted) รายการ — ปิดงานได้ แต่ควรตรวจก่อน
+                        </div>
+                    }
+                    @if (wo.Type == WorkOrderType.PanelCleaning && wo.InstallationId.HasValue)
+                    {
+                        <div class="small text-muted mb-2">
+                            <i class="bi bi-droplet"></i> งานล้างแผง: ระบบจะนับครั้งล้าง บันทึกลงประวัติล้างแผงของไซต์ และตั้งรอบถัดไปให้
+                        </div>
+                    }
                     <div class="mb-2">
-                        <label class="form-label">บันทึกปิดงาน</label>
+                        <label class="form-label">บันทึกปิดงาน / สิ่งที่พบ</label>
                         <textarea asp-for="CompletionNotes" class="form-control" rows="3"></textarea>
                     </div>
-                    <div class="row g-2">
-                        <div class="col-4">
-                            <label class="form-label">ค่าแรง ฿</label>
-                            <input asp-for="LaborCost" type="number" min="0" step="any" class="form-control" />
-                        </div>
-                        <div class="col-4">
-                            <label class="form-label">ค่าวัสดุ ฿</label>
-                            <input asp-for="MaterialCost" type="number" min="0" step="any" class="form-control" />
-                        </div>
-                        <div class="col-4">
-                            <label class="form-label">ค่าเดินทาง ฿</label>
-                            <input asp-for="TravelCost" type="number" min="0" step="any" class="form-control" />
+                    <a class="small" data-bs-toggle="collapse" href="#costFields" role="button">
+                        <i class="bi bi-cash-coin"></i> บันทึกค่าใช้จ่าย (ถ้ามี)
+                    </a>
+                    <div class="collapse @(wo.TotalCost > 0 ? "show" : "")" id="costFields">
+                        <div class="row g-2 mt-1">
+                            <div class="col-sm-4">
+                                <label class="form-label">ค่าแรง ฿</label>
+                                <input asp-for="LaborCost" type="number" min="0" step="any" class="form-control" />
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="form-label">ค่าวัสดุ ฿</label>
+                                <input asp-for="MaterialCost" type="number" min="0" step="any" class="form-control" />
+                            </div>
+                            <div class="col-sm-4">
+                                <label class="form-label">ค่าเดินทาง ฿</label>
+                                <input asp-for="TravelCost" type="number" min="0" step="any" class="form-control" />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -293,12 +354,8 @@
     </div>
 </div>
 
-
-@* On a phone the action that ends the job sat above three cards of detail, so
-   the technician scrolled back up every time. Pinned to the bottom on small
-   screens only; on a desktop the header button is already in view. *@
-@if (wo.Status == WorkOrderStatus.Scheduled || wo.Status == WorkOrderStatus.Assigned
-     || wo.Status == WorkOrderStatus.InProgress)
+@* Pinned to the bottom on phones: the action that moves the job on. *@
+@if (Model.CanEdit && isOpen)
 {
     <div class="d-lg-none position-sticky bottom-0 py-2 mt-3"
          style="background:var(--app-bg, #f5f6fa); box-shadow:0 -4px 12px rgba(0,0,0,.08)">
@@ -311,9 +368,14 @@
         }
         else
         {
-            <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress">
-                <button class="btn btn-warning btn-lg w-100"><i class="bi bi-play-fill"></i> เริ่มงาน</button>
-            </form>
+            <div class="d-flex gap-2">
+                <form method="post" asp-page-handler="UpdateStatus" asp-route-id="@wo.Id" asp-route-newStatus="InProgress" class="flex-grow-1">
+                    <button class="btn btn-warning btn-lg w-100"><i class="bi bi-play-fill"></i> เริ่มงาน</button>
+                </form>
+                <button type="button" class="btn btn-outline-success btn-lg" data-bs-toggle="modal" data-bs-target="#completeModal" title="ปิดงานเลย">
+                    <i class="bi bi-check-circle"></i>
+                </button>
+            </div>
         }
     </div>
 }

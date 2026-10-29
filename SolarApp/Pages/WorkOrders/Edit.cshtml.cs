@@ -44,7 +44,7 @@ public class EditModel : PageModel
         [Required] public DateTime ScheduledDate { get; set; }
         public string? ScheduledTimeStr { get; set; }
         [Range(15, 24 * 60)] public int EstimatedDurationMinutes { get; set; } = 120;
-        [Range(0, 120, ErrorMessage = "Recurrence must be 0-120 months")]
+        [Range(0, 120, ErrorMessage = "การทำซ้ำต้องอยู่ระหว่าง 0-120 เดือน")]
         public int? RecurrenceMonths { get; set; }
         [StringLength(100)] public string? AssignedTeam { get; set; }
         public string? AssignedToUserId { get; set; }
@@ -88,11 +88,11 @@ public class EditModel : PageModel
         // Cannot edit a closed/cancelled WO
         if (wo.Status == WorkOrderStatus.Closed || wo.Status == WorkOrderStatus.Cancelled)
         {
-            ModelState.AddModelError(string.Empty, $"Cannot edit a {wo.Status} work order.");
+            ModelState.AddModelError(string.Empty, $"แก้ไขงานที่{UiLabels.Label(wo.Status)}แล้วไม่ได้");
         }
 
         if (Input.ScheduledDate.Date > SolarApp.Services.SiteTime.Today.AddYears(5))
-            ModelState.AddModelError("Input.ScheduledDate", "Scheduled date cannot be more than 5 years in the future.");
+            ModelState.AddModelError("Input.ScheduledDate", "วันที่นัดไม่สามารถเกิน 5 ปีในอนาคตได้");
 
         if (!ModelState.IsValid)
         {
@@ -132,7 +132,7 @@ public class EditModel : PageModel
         wo.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
-        StatusMessage = "Work order updated.";
+        StatusMessage = "บันทึกการแก้ไขแล้ว";
         return RedirectToPage("Detail", new { id = wo.Id });
     }
 

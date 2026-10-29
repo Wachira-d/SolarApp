@@ -50,7 +50,8 @@ public class CalendarModel : PageModel
             start = w.ScheduledDate.ToString("yyyy-MM-dd"),
             color = w.Status switch
             {
-                WorkOrderStatus.Completed or WorkOrderStatus.Verified or WorkOrderStatus.Closed => "#198754",
+                WorkOrderStatus.Completed or WorkOrderStatus.Verified or WorkOrderStatus.Invoiced or WorkOrderStatus.Closed => "#198754",
+                WorkOrderStatus.Cancelled => "#6c757d",
                 WorkOrderStatus.InProgress => "#ffc107",
                 _ => w.ScheduledDate.Date < now ? "#dc3545" : "#0d6efd"
             },

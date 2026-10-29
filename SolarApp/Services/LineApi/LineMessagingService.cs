@@ -993,7 +993,7 @@ public class LineMessagingService : ILineMessagingService
                     type = "button",
                     style = "secondary",
                     height = "sm",
-                    action = new { type = "uri", label = $"🧽 งานล้างแผง ({s.CleaningDueCount})", uri = $"{baseUrl}/Maintenance" }
+                    action = new { type = "uri", label = $"🧽 งานล้างแผง ({s.CleaningDueCount})", uri = $"{baseUrl}/Jobs" }
                 });
             }
             if (s.PendingWorkOrders > 0)
@@ -1003,7 +1003,7 @@ public class LineMessagingService : ILineMessagingService
                     type = "button",
                     style = "link",
                     height = "sm",
-                    action = new { type = "uri", label = $"📋 Work Orders ค้าง ({s.PendingWorkOrders})", uri = $"{baseUrl}/WorkOrders" }
+                    action = new { type = "uri", label = $"📋 ใบสั่งงานค้าง ({s.PendingWorkOrders})", uri = $"{baseUrl}/Jobs" }
                 });
             }
         }

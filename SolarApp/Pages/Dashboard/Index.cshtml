@@ -200,9 +200,9 @@
                 }
                 @if (d.PendingMaintenanceCount > 0)
                 {
-                    <a asp-page="/Maintenance/Index" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
+                    <a asp-page="/Jobs/Index" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-primary">@d.PendingMaintenanceCount</div>
-                        <small class="text-body">รอบำรุงรักษา</small>
+                        <small class="text-body">งานค้าง</small>
                     </a>
                 }
                 @if (d.OpenTicketCount > 0)

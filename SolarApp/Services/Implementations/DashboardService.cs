@@ -118,9 +118,15 @@ public class DashboardService : IDashboardService
             .ToDictionary(g => g.Key, g => g.First());
 
         // ── Pending maintenance ──
+        // Open field work on these sites: work orders plus the legacy
+        // maintenance records that pre-date them. Counting only the legacy
+        // table made the tile read 0 while a dozen orders were overdue.
         var pendingMaintenance = await _context.MaintenanceRecords
             .CountAsync(m => installationIds.Contains(m.InstallationId)
-                && m.Status == MaintenanceStatus.Scheduled);
+                && m.Status == MaintenanceStatus.Scheduled)
+            + await _context.WorkOrders
+            .CountAsync(w => w.InstallationId != null && installationIds.Contains(w.InstallationId.Value)
+                && w.Status < WorkOrderStatus.Completed);
 
         // ── Open tickets ──
         var openTickets = await _context.ServiceTickets

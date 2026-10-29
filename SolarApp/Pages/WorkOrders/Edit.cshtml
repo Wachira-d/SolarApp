@@ -3,17 +3,17 @@
 @using SolarApp.Models.Enums
 @{
     var wo = Model.Order;
-    ViewData["Title"] = $"Edit — {wo.WorkOrderNumber}";
+    ViewData["Title"] = $"แก้ไข {wo.WorkOrderNumber}";
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-pencil-square"></i> Edit Work Order</h4>
+        <h4 class="mb-0"><i class="bi bi-pencil-square"></i> แก้ไขใบสั่งงาน</h4>
         <small class="text-muted">@wo.WorkOrderNumber · @wo.SiteName</small>
     </div>
     <div>
         <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-arrow-left"></i> Back
+            <i class="bi bi-arrow-left"></i> กลับ
         </a>
     </div>
 </div>
@@ -23,7 +23,10 @@
         <form method="post">
             <input type="hidden" asp-for="Input.Id" />
 
-            <div asp-validation-summary="All" class="alert alert-danger" role="alert"></div>
+            @if (!ViewData.ModelState.IsValid)
+            {
+                <div asp-validation-summary="All" class="alert alert-danger" role="alert"></div>
+            }
 
             <div class="row g-3">
                 <div class="col-md-6">
@@ -33,11 +36,13 @@
                 </div>
                 <div class="col-md-3">
                     <label asp-for="Input.Type" class="form-label">ประเภทงาน</label>
-                    <select asp-for="Input.Type" class="form-select"
-                            asp-items="Html.GetEnumSelectList<WorkOrderType>()"></select>
+                    <select asp-for="Input.Type" class="form-select">
+                        @foreach (var t in Enum.GetValues<WorkOrderType>())
+                        { <option value="@((int)t)">@UiLabels.Label(t)</option> }
+                    </select>
                 </div>
                 <div class="col-md-3">
-                    <label asp-for="Input.RecurrenceMonths" class="form-label">Recurrence (months)</label>
+                    <label asp-for="Input.RecurrenceMonths" class="form-label">ทำซ้ำทุก (เดือน)</label>
                     <input asp-for="Input.RecurrenceMonths" type="number" min="0" max="120" class="form-control" />
                     <span asp-validation-for="Input.RecurrenceMonths" class="text-danger small"></span>
                 </div>
@@ -52,7 +57,7 @@
                     <input asp-for="Input.ScheduledTimeStr" type="time" class="form-control" />
                 </div>
                 <div class="col-md-4">
-                    <label asp-for="Input.EstimatedDurationMinutes" class="form-label">Estimated Duration (min)</label>
+                    <label asp-for="Input.EstimatedDurationMinutes" class="form-label">ใช้เวลาโดยประมาณ (นาที)</label>
                     <input asp-for="Input.EstimatedDurationMinutes" type="number" min="15" max="1440" class="form-control" />
                     <span asp-validation-for="Input.EstimatedDurationMinutes" class="text-danger small"></span>
                 </div>
@@ -60,12 +65,12 @@
                 <div class="col-md-6">
                     <label asp-for="Input.AssignedToUserId" class="form-label">ผู้รับผิดชอบ</label>
                     <select asp-for="Input.AssignedToUserId" class="form-select" asp-items="Model.Users">
-                        <option value="">— unassigned —</option>
+                        <option value="">(ยังไม่ระบุ)</option>
                     </select>
                 </div>
                 <div class="col-md-6">
                     <label asp-for="Input.AssignedTeam" class="form-label">ทีมที่มอบหมาย</label>
-                    <input asp-for="Input.AssignedTeam" class="form-control" placeholder="e.g. Cleaning Crew A" />
+                    <input asp-for="Input.AssignedTeam" class="form-control" placeholder="เช่น ทีมล้าง A" />
                 </div>
 
                 <div class="col-12">
@@ -77,7 +82,7 @@
                     <textarea asp-for="Input.Scope" class="form-control" rows="3"></textarea>
                 </div>
                 <div class="col-md-6">
-                    <label asp-for="Input.SpecialInstructions" class="form-label">คำแนะนำพิเศษ</label>
+                    <label asp-for="Input.SpecialInstructions" class="form-label">หมายเหตุพิเศษ (กุญแจ, ผู้ติดต่อ, ข้อควรระวัง)</label>
                     <textarea asp-for="Input.SpecialInstructions" class="form-control" rows="3"></textarea>
                 </div>
             </div>
@@ -85,7 +90,7 @@
             <div class="d-flex justify-content-end gap-2 mt-3">
                 <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-outline-secondary">ยกเลิก</a>
                 <button type="submit" class="btn btn-warning">
-                    <i class="bi bi-save"></i> Save Changes
+                    <i class="bi bi-save"></i> บันทึกการแก้ไข
                 </button>
             </div>
         </form>

@@ -98,7 +98,9 @@ public class IndexModel : PageModel
             var s = Search.Trim().ToLower();
             q = q.Where(w => w.Title.ToLower().Contains(s)
                           || w.WorkOrderNumber.ToLower().Contains(s)
-                          || (w.ExternalSiteName ?? "").ToLower().Contains(s));
+                          || (w.ExternalSiteName ?? "").ToLower().Contains(s)
+                          // Linked sites were not searchable — only standalone names were.
+                          || (w.Installation != null && w.Installation.SiteName.ToLower().Contains(s)));
         }
 
         var now = SolarApp.Services.SiteTime.Today;

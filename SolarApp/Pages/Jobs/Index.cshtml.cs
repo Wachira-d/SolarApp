@@ -62,6 +62,17 @@ public class IndexModel : PageModel
 
     public List<JobRow> Jobs { get; private set; } = new();
 
+    /// <summary>
+    /// Sites whose cleaning is due, by the shared rule (Installation.CleaningDueAsOf).
+    /// This used to live on its own "การบำรุงรักษา" page, so the one thing the
+    /// crew most often has to do next was not on the page listing their work.
+    /// </summary>
+    public List<Installation> CleaningDue { get; private set; } = new();
+
+    /// <summary>Open service tickets with no work order yet — complaints waiting for a visit.</summary>
+    public List<ServiceTicket> UnansweredTickets { get; private set; } = new();
+    public bool CanCreate { get; private set; }
+
     [BindProperty(SupportsGet = true)] public string? Source { get; set; }
     /// <summary>"open" (default), "overdue", "done", or "all".</summary>
     [BindProperty(SupportsGet = true)] public string Show { get; set; } = "open";
@@ -106,6 +117,28 @@ public class IndexModel : PageModel
 
         var siteIds = await sites.Select(i => i.Id).ToListAsync();
         var rows = new List<JobRow>();
+        CanCreate = isAdmin || roles.Contains(UserRoles.Partner);
+
+        CleaningDue = await sites
+            .Include(i => i.Customer)
+            .Where(Installation.CleaningDueAsOf(SolarApp.Services.SiteTime.Today))
+            .OrderBy(i => i.NextCleaningDueDate)
+            .ToListAsync();
+
+        if (CanCreate)
+        {
+            var answered = _context.WorkOrders
+                .Where(w => w.ServiceTicketId != null && w.Status != WorkOrderStatus.Cancelled)
+                .Select(w => w.ServiceTicketId!.Value);
+            UnansweredTickets = await _context.ServiceTickets.AsNoTracking()
+                .Include(t => t.Installation)
+                .Where(t => siteIds.Contains(t.InstallationId)
+                            && (t.Status == TicketStatus.Open || t.Status == TicketStatus.Assigned)
+                            && !answered.Contains(t.Id))
+                .OrderBy(t => t.Priority).ThenBy(t => t.CreatedAt)
+                .Take(20)
+                .ToListAsync();
+        }
 
         // ── Work orders ──
         var workOrders = await _context.WorkOrders.AsNoTracking()
@@ -124,9 +157,9 @@ public class IndexModel : PageModel
             "ใบสั่งงาน", "workorder", "clipboard2-check",
             w.Id, w.InstallationId, w.SiteName,
             w.Installation?.Customer?.FullName ?? w.ExternalCustomerName,
-            string.IsNullOrWhiteSpace(w.Title) ? w.Type.ToString() : w.Title,
+            string.IsNullOrWhiteSpace(w.Title) ? UiLabels.Label(w.Type) : w.Title,
             w.ScheduledDate, w.ActualEndTime,
-            w.Status.ToString(), w.StatusBadgeClass,
+            UiLabels.Label(w.Status), UiLabels.Badge(w.Status),
             w.Status < WorkOrderStatus.Completed && w.Status != WorkOrderStatus.Cancelled,
             w.AssignedToUser?.FullName ?? w.AssignedTeam,
             $"/WorkOrders/Detail/{w.Id}")));
@@ -146,16 +179,9 @@ public class IndexModel : PageModel
             "บำรุงรักษา", "maintenance", "tools",
             m.Id, m.InstallationId, m.Installation.SiteName,
             m.Installation.Customer?.FullName,
-            string.IsNullOrWhiteSpace(m.Description) ? m.MaintenanceType.ToString() : m.Description,
+            string.IsNullOrWhiteSpace(m.Description) ? UiLabels.Label(m.MaintenanceType) : m.Description,
             m.ScheduledDate, m.CompletedDate,
-            m.Status.ToString(),
-            m.Status switch
-            {
-                MaintenanceStatus.Completed => "bg-success",
-                MaintenanceStatus.InProgress => "bg-warning text-dark",
-                MaintenanceStatus.Cancelled => "bg-secondary",
-                _ => "bg-info"
-            },
+            UiLabels.Label(m.Status), UiLabels.Badge(m.Status),
             m.Status != MaintenanceStatus.Completed && m.Status != MaintenanceStatus.Cancelled,
             m.PerformedByUser?.FullName,
             $"/Maintenance/Edit/{m.Id}")));
@@ -176,14 +202,7 @@ public class IndexModel : PageModel
             c.Installation.Customer?.FullName,
             "ล้างแผงโซลาร์",
             c.ScheduledDate, c.ActualDate,
-            c.Status.ToString(),
-            c.Status switch
-            {
-                CleaningStatus.Completed => "bg-success",
-                CleaningStatus.Missed => "bg-danger",
-                CleaningStatus.Cancelled => "bg-secondary",
-                _ => "bg-info"
-            },
+            UiLabels.Label(c.Status), UiLabels.Badge(c.Status),
             c.Status == CleaningStatus.Scheduled,
             c.PerformedByUser?.FullName ?? c.PerformedByExternal,
             // Cleaning has no per-record page — it's edited on the site's
@@ -205,6 +224,8 @@ public class IndexModel : PageModel
         rows = Show switch
         {
             "overdue" => rows.Where(r => r.IsOverdue).ToList(),
+            "today" => rows.Where(r => r.IsOpen && r.ScheduledDate.Date <= SolarApp.Services.SiteTime.Today).ToList(),
+            "week" => rows.Where(r => r.IsOpen && r.ScheduledDate.Date <= weekEnd).ToList(),
             "done" => rows.Where(r => !r.IsOpen).ToList(),
             "all" => rows,
             _ => rows.Where(r => r.IsOpen).ToList(),

@@ -44,6 +44,8 @@ public class DetailModel : PageModel
     public Installation Installation { get; set; } = null!;
     public List<MaintenanceRecord> MaintenanceRecords { get; set; } = new();
     public List<ServiceTicket> ServiceTickets { get; set; } = new();
+    /// <summary>Work orders on this site, open ones first. The field-work card and history read these.</summary>
+    public List<WorkOrder> WorkOrders { get; set; } = new();
     /// <summary>Open "Station Faulty" alerts driving the Maintenance badge.</summary>
     public int OpenStationFaultCount { get; set; }
 
@@ -73,6 +75,13 @@ public class DetailModel : PageModel
         Installation = installation;
         MaintenanceRecords = await _maintenanceService.GetByInstallationAsync(id);
         ServiceTickets = await _maintenanceService.GetTicketsByInstallationAsync(id);
+        WorkOrders = await _context.WorkOrders.AsNoTracking()
+            .Include(w => w.AssignedToUser)
+            .Where(w => w.InstallationId == id)
+            .OrderBy(w => w.Status >= WorkOrderStatus.Completed)   // open first
+            .ThenByDescending(w => w.ScheduledDate)
+            .Take(30)
+            .ToListAsync();
 
         // Count unresolved "Station Faulty" alerts so the view can decide
         // whether to surface the "Force Recover" button.  Same predicate

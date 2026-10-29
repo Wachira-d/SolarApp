@@ -63,24 +63,18 @@
                 </a>
             </li>
         }
-        @* Field work lives in three tables with three pages. This is the one
-           list that answers "what is on this week" without merging them by
-           eye; the individual pages stay for editing. *@
-        <li class="nav-item">
-            <a class="nav-link text-white @ActiveClass("/jobs")" asp-page="/Jobs/Index">
-                <i class="bi bi-calendar2-check me-2"></i>งานภาคสนาม
-            </a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link text-white @ActiveClass("/workorders")" asp-page="/WorkOrders/Index">
-                <i class="bi bi-clipboard2-check me-2"></i>ใบสั่งงาน
-            </a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link text-white @ActiveClass("/maintenance")" asp-page="/Maintenance/Index">
-                <i class="bi bi-tools me-2"></i>การบำรุงรักษา
-            </a>
-        </li>
+        @* Field work: one hub (work orders, cleaning, legacy maintenance
+           records, tickets waiting for a visit) instead of four menu items
+           for three overlapping tables. Customers report problems through
+           แจ้งซ่อม and read their visits in the portal; they never dispatch. *@
+        @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+        {
+            <li class="nav-item">
+                <a class="nav-link text-white @ActiveClass("/jobs", "/workorders", "/maintenance")" asp-page="/Jobs/Index">
+                    <i class="bi bi-calendar2-check me-2"></i>งานภาคสนาม
+                </a>
+            </li>
+        }
         <li class="nav-item">
             <a class="nav-link text-white @ActiveClass("/servicetickets")" asp-page="/ServiceTickets/Index">
                 <i class="bi bi-ticket-detailed me-2"></i>แจ้งซ่อม

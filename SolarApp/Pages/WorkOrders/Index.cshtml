@@ -3,6 +3,7 @@
 @using SolarApp.Models.Enums
 @{
     ViewData["Title"] = "ใบสั่งงาน";
+    var today = SolarApp.Services.SiteTime.Today;
 }
 
 @if (!string.IsNullOrEmpty(Model.TableError))
@@ -16,14 +17,14 @@
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h4 class="mb-0"><i class="bi bi-clipboard2-check"></i> ใบสั่งงาน</h4>
-        <small class="text-muted">ล้างแผง, PM, ซ่อม, งานนอกระบบ</small>
+        <small class="text-muted">ทุกงานเข้าไซต์ · <a asp-page="/Jobs/Index">ดูรวมกับล้างแผงในหน้างานภาคสนาม</a></small>
     </div>
     <div class="d-flex gap-2">
-        <a asp-page="Calendar" class="btn btn-outline-info btn-sm">
+        <a asp-page="Calendar" class="btn btn-outline-secondary">
             <i class="bi bi-calendar3"></i> ปฏิทิน
         </a>
-        <a asp-page="Create" class="btn btn-warning btn-sm">
-            <i class="bi bi-plus-circle"></i> สร้างใบสั่งงาน
+        <a asp-page="Create" class="btn btn-warning">
+            <i class="bi bi-plus-lg"></i> สร้างใบสั่งงาน
         </a>
     </div>
 </div>
@@ -56,84 +57,120 @@
 <div class="card border-0 shadow-sm mb-3">
     <div class="card-body py-2">
         <form method="get" class="row g-2 align-items-end">
-            <div class="col-auto">
-                <select asp-for="StatusFilter" class="form-select form-select-sm" asp-items="Html.GetEnumSelectList<WorkOrderStatus>()">
+            <div class="col-6 col-md-2">
+                <select asp-for="StatusFilter" class="form-select form-select-sm">
                     <option value="">สถานะทั้งหมด</option>
+                    @foreach (var s in Enum.GetValues<WorkOrderStatus>())
+                    { <option value="@((int)s)">@UiLabels.Label(s)</option> }
                 </select>
             </div>
-            <div class="col-auto">
-                <select asp-for="TypeFilter" class="form-select form-select-sm" asp-items="Html.GetEnumSelectList<WorkOrderType>()">
+            <div class="col-6 col-md-2">
+                <select asp-for="TypeFilter" class="form-select form-select-sm">
                     <option value="">ประเภททั้งหมด</option>
+                    @foreach (var t in Enum.GetValues<WorkOrderType>())
+                    { <option value="@((int)t)">@UiLabels.Label(t)</option> }
                 </select>
             </div>
-            <div class="col-auto">
-                <input asp-for="FromDate" type="date" class="form-control form-control-sm" placeholder="ตั้งแต่" />
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-0 text-muted">ตั้งแต่</label>
+                <input asp-for="FromDate" type="date" class="form-control form-control-sm" />
             </div>
-            <div class="col-auto">
-                <input asp-for="ToDate" type="date" class="form-control form-control-sm" placeholder="ถึง" />
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-0 text-muted">ถึง</label>
+                <input asp-for="ToDate" type="date" class="form-control form-control-sm" />
             </div>
-            <div class="col">
-                <input asp-for="Search" class="form-control form-control-sm" placeholder="ค้นหาเลข WO / หัวเรื่อง / ไซต์..." />
+            <div class="col-8 col-md-3">
+                <input asp-for="Search" class="form-control form-control-sm" placeholder="ค้นหาเลขที่ / หัวข้อ / ไซต์" />
             </div>
-            <div class="col-auto">
-                <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-filter"></i></button>
-                <a asp-page="Index" class="btn btn-sm btn-outline-secondary">ล้าง</a>
+            <div class="col-4 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-sm btn-primary flex-grow-1" title="กรอง"><i class="bi bi-search"></i></button>
+                <a asp-page="Index" class="btn btn-sm btn-outline-secondary" title="ล้างตัวกรอง"><i class="bi bi-x-lg"></i></a>
             </div>
         </form>
     </div>
 </div>
 
-<!-- Table -->
-<div class="card border-0 shadow-sm">
+@if (!Model.Orders.Any())
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-clipboard-check text-muted d-block mb-2" style="font-size:3rem"></i>
+            <h6 class="mb-1">ไม่มีใบสั่งงานตามเงื่อนไขที่เลือก</h6>
+            <p class="text-muted small mb-3">สร้างใบสั่งงานเพื่อนัดช่างเข้าไซต์ หรือบันทึกงานที่ทำไปแล้ว</p>
+            <a asp-page="Create" class="btn btn-warning">
+                <i class="bi bi-plus-lg"></i> สร้างใบสั่งงาน
+            </a>
+        </div>
+    </div>
+    return;
+}
+
+@* ── Phone: one card per order, the whole card is the link ── *@
+<div class="d-md-none">
+    @foreach (var wo in Model.Orders)
+    {
+        <a asp-page="Detail" asp-route-id="@wo.Id"
+           class="card border-0 shadow-sm mb-2 text-decoration-none text-body @(wo.IsOverdue ? "border-start border-danger border-4" : "")">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div class="fw-semibold">@wo.Title</div>
+                    <span class="badge @UiLabels.Badge(wo.Status) text-nowrap">@UiLabels.Label(wo.Status)</span>
+                </div>
+                <div class="small text-muted">
+                    <i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type) · @wo.SiteName
+                </div>
+                <div class="small d-flex justify-content-between mt-1">
+                    <span class="@(wo.IsOverdue ? "text-danger fw-bold" : (wo.ScheduledDate.Date == today ? "text-warning fw-bold" : "text-muted"))">
+                        <i class="bi bi-calendar3"></i> @wo.ScheduledDate.ToString("dd/MM/yy")
+                        @if (wo.ScheduledTime.HasValue) { <span>@wo.ScheduledTime.Value.ToString(@"hh\:mm")</span> }
+                        @if (wo.IsOverdue) { <span>· เลยกำหนด</span> }
+                        else if (wo.ScheduledDate.Date == today) { <span>· วันนี้</span> }
+                    </span>
+                    <span class="text-muted"><i class="bi bi-person"></i> @(wo.AssignedToUser?.FullName ?? wo.AssignedTeam ?? "—")</span>
+                </div>
+            </div>
+        </a>
+    }
+</div>
+
+@* ── Desktop: table, rows clickable ── *@
+<div class="card border-0 shadow-sm d-none d-md-block">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover table-sm mb-0">
+            <table class="table table-hover mb-0 align-middle">
                 <thead class="table-light">
                     <tr>
-                        <th>เลขที่</th>
-                        <th>ประเภท</th>
-                        <th>ไซต์งาน</th>
                         <th>วันที่นัด</th>
-                        <th>ช่างที่รับผิดชอบ</th>
+                        <th>งาน</th>
+                        <th>ไซต์งาน</th>
+                        <th>ผู้รับผิดชอบ</th>
                         <th>สถานะ</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody>
-                    @if (!Model.Orders.Any())
-                    {
-                        <tr><td colspan="7" class="text-center py-5">
-                            <i class="bi bi-clipboard-check text-muted d-block mb-2" style="font-size:3rem"></i>
-                            <h6 class="mb-1">ยังไม่มีใบสั่งงาน</h6>
-                            <p class="text-muted small mb-3">สร้างใบสั่งงานเพื่อมอบหมายภารกิจ Maintenance หรือ Inspection ให้ทีมงาน</p>
-                            <a asp-page="Create" class="btn btn-sm btn-primary">
-                                <i class="bi bi-plus-lg"></i> สร้างใบสั่งงาน
-                            </a>
-                        </td></tr>
-                    }
                     @foreach (var wo in Model.Orders)
                     {
-                        <tr class="@(wo.IsOverdue ? "table-danger" : "")">
-                            <td><strong>@wo.WorkOrderNumber</strong></td>
-                            <td><small>@wo.Type</small></td>
-                            <td>
-                                <div class="text-truncate" style="max-width:200px">
-                                    @wo.SiteName
-                                    @if (wo.IsStandalone)
-                                    { <span class="badge bg-info ms-1">อิสระ</span> }
-                                </div>
+                        <tr class="@(wo.IsOverdue ? "table-danger" : "")" style="cursor:pointer"
+                            onclick="location.href='@Url.Page("Detail", new { id = wo.Id })'">
+                            <td class="text-nowrap">
+                                @wo.ScheduledDate.ToString("dd/MM/yy")
+                                @if (wo.ScheduledTime.HasValue) { <small class="text-muted">@wo.ScheduledTime.Value.ToString(@"hh\:mm")</small> }
+                                @if (wo.IsOverdue) { <br /><small class="text-danger fw-bold">เลยกำหนด</small> }
+                                else if (wo.ScheduledDate.Date == today) { <br /><small class="text-warning fw-bold">วันนี้</small> }
                             </td>
                             <td>
-                                <small>@wo.ScheduledDate.ToString("dd/MM/yy")</small>
-                                @if (wo.ScheduledTime.HasValue)
-                                { <small class="text-muted">@wo.ScheduledTime.Value.ToString(@"hh\:mm")</small> }
+                                <div class="fw-semibold">@wo.Title</div>
+                                <small class="text-muted"><i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type) · @wo.WorkOrderNumber</small>
                             </td>
-                            <td><small>@(wo.AssignedToUser?.FullName ?? wo.AssignedTeam ?? "-")</small></td>
-                            <td><span class="badge @wo.StatusBadgeClass">@wo.Status</span></td>
                             <td>
-                                <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-eye"></i>
-                                </a>
+                                @wo.SiteName
+                                @if (wo.IsStandalone) { <span class="badge bg-info text-dark ms-1">นอกระบบ</span> }
+                            </td>
+                            <td><small>@(wo.AssignedToUser?.FullName ?? wo.AssignedTeam ?? "—")</small></td>
+                            <td><span class="badge @UiLabels.Badge(wo.Status)">@UiLabels.Label(wo.Status)</span></td>
+                            <td class="text-end">
+                                <a asp-page="Detail" asp-route-id="@wo.Id" class="btn btn-sm btn-outline-primary">เปิด</a>
                             </td>
                         </tr>
                     }

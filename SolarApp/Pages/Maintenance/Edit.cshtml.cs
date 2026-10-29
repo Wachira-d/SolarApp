@@ -136,15 +136,15 @@ public class EditModel : PageModel
         }
 
         await _context.SaveChangesAsync();
-        StatusMessage = "Maintenance record updated";
-        return RedirectToPage("Index");
+        StatusMessage = "บันทึกแล้ว";
+        return RedirectToPage("/Installations/Detail", new { id = record.InstallationId });
     }
 
     public async Task<IActionResult> OnPostCompleteAsync(int id)
     {
         await _service.CompleteMaintenanceAsync(id, DateTime.UtcNow, null);
-        StatusMessage = "Maintenance marked as completed";
-        return RedirectToPage("Index");
+        StatusMessage = "ปิดงานแล้ว";
+        return RedirectToPage(new { id });
     }
 
     public async Task<IActionResult> OnPostDeleteAsync(int id)
@@ -155,10 +155,11 @@ public class EditModel : PageModel
         var record = await _context.MaintenanceRecords.FindAsync(id);
         if (record == null) return NotFound();
 
+        var siteId = record.InstallationId;
         _context.MaintenanceRecords.Remove(record);
         await _context.SaveChangesAsync();
-        StatusMessage = "Maintenance record deleted";
-        return RedirectToPage("Index");
+        StatusMessage = "ลบรายการแล้ว";
+        return RedirectToPage("/Installations/Detail", new { id = siteId });
     }
 
     public async Task<IActionResult> OnPostRemovePhotoAsync(int id, string url, string kind)
@@ -181,7 +182,7 @@ public class EditModel : PageModel
         _uploader.Delete(url);
         await _context.SaveChangesAsync();
 
-        StatusMessage = "File removed";
+        StatusMessage = "ลบไฟล์แล้ว";
         return RedirectToPage(new { id });
     }
 

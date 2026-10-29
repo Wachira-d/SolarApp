@@ -126,7 +126,7 @@ public class WorkOrderReminderJob
     private async Task SendReminderAsync(WorkOrder wo, string? alertGroupId, bool isOverdue)
     {
         var siteName = wo.SiteName;
-        var typeLabel = wo.Type.ToString();
+        var typeLabel = UiLabels.Label(wo.Type);
         // ScheduledDate is the date picked in the form — already site-local.
         // ToLocalTime() treated it as UTC and could shift it a day.
         var dateStr = wo.ScheduledDate.ToString("dd/MM/yyyy");
@@ -138,15 +138,15 @@ public class WorkOrderReminderJob
         if (isOverdue)
         {
             var daysLate = Math.Max(1, (int)Math.Round((SolarApp.Services.SiteTime.Today - wo.ScheduledDate.Date).TotalDays));
-            title = $"⚠ Overdue WO: {wo.WorkOrderNumber}";
-            body = $"งาน{typeLabel} ที่ '{siteName}' เลยกำหนด {daysLate} วัน " +
+            title = $"⚠ งานเลยกำหนด: {wo.WorkOrderNumber}";
+            body = $"งาน {typeLabel} ที่ '{siteName}' เลยกำหนด {daysLate} วัน " +
                    $"(เดิม {dateStr}). โปรดอัพเดตสถานะหรือเลื่อนนัดหมายในระบบ.";
         }
         else
         {
             var hoursAway = Math.Max(0, (int)Math.Round((wo.ScheduledDate - DateTime.UtcNow).TotalHours));
-            title = $"📅 Upcoming WO: {wo.WorkOrderNumber}";
-            body = $"งาน{typeLabel} ที่ '{siteName}' " +
+            title = $"📅 งานใกล้ถึงกำหนด: {wo.WorkOrderNumber}";
+            body = $"งาน {typeLabel} ที่ '{siteName}' " +
                    $"กำหนด {dateStr} {timeStr} (อีก ~{hoursAway} ชม.). " +
                    $"กรุณาเตรียมอุปกรณ์ + ตรวจ checklist ในแอปก่อนออกหน้างาน.";
         }

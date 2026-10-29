@@ -7,6 +7,7 @@ using SolarApp.Data;
 using SolarApp.Models;
 using SolarApp.Models.Enums;
 using SolarApp.Services.Authorization;
+using SolarApp.Services.FieldWork;
 using SolarApp.Services.FileUpload;
 
 namespace SolarApp.Pages.WorkOrders;
@@ -70,42 +71,50 @@ public class DetailModel : PageModel
 
     public async Task<IActionResult> OnPostUpdateStatusAsync(int id, WorkOrderStatus newStatus)
     {
-        var wo = await _context.WorkOrders.Include(w => w.ChecklistItems).FirstOrDefaultAsync(w => w.Id == id);
+        var wo = await _context.WorkOrders
+            .Include(w => w.Installation)
+            .Include(w => w.ServiceTicket)
+            .Include(w => w.ChecklistItems)
+            .FirstOrDefaultAsync(w => w.Id == id);
         if (wo == null) return NotFound();
         if (!await _access.CanEditAsync(wo, User)) return Forbid();
 
         var user = await _userManager.GetUserAsync(User);
+        var isAdmin = User.IsInRole(UserRoles.Admin);
 
-        if (newStatus == WorkOrderStatus.InProgress && wo.ActualStartTime == null)
-            wo.ActualStartTime = DateTime.UtcNow;
+        // The page only hides the buttons that don't apply; the URL still has
+        // to be refused, or a cancelled order could be "started" again.
+        if (!WorkOrderCompletion.CanTransition(wo.Status, newStatus, isAdmin))
+        {
+            ErrorMessage = $"เปลี่ยนสถานะจาก \"{UiLabels.Label(wo.Status)}\" เป็น \"{UiLabels.Label(newStatus)}\" ไม่ได้";
+            return RedirectToPage("Detail", new { id });
+        }
+
+        var now = DateTime.UtcNow;
+
+        if (newStatus == WorkOrderStatus.InProgress)
+        {
+            wo.ActualStartTime ??= now;
+            // Reopening a completed order: it is being worked on again.
+            wo.ActualEndTime = null;
+        }
 
         if (newStatus == WorkOrderStatus.Completed)
         {
             if (LaborCost < 0 || MaterialCost < 0 || TravelCost < 0)
             {
-                ErrorMessage = "Costs must be zero or positive.";
+                ErrorMessage = "ค่าใช้จ่ายต้องเป็นศูนย์หรือมากกว่า";
                 return RedirectToPage("Detail", new { id });
             }
 
-            // Wrap completion + recurring-WO creation in a transaction so we don't
-            // create duplicate next-cycle WOs when two users click "Complete" simultaneously.
+            // Completion + next-cycle creation in one transaction so two
+            // taps on "ปิดงาน" can't create two next orders.
             await using var tx = await _context.Database.BeginTransactionAsync();
 
-            // Re-load with row-lock semantics (EF translates to UPDLOCK on SaveChanges)
-            // and bail if already completed (idempotent guard against double-clicks).
-            if (wo.Status == WorkOrderStatus.Completed
-                || wo.Status == WorkOrderStatus.Verified
-                || wo.Status == WorkOrderStatus.Closed)
-            {
-                StatusMessage = "Work order already completed.";
-                return RedirectToPage("Detail", new { id });
-            }
-
-            wo.ActualEndTime = DateTime.UtcNow;
-            wo.CompletionNotes = CompletionNotes;
             wo.LaborCost = LaborCost;
             wo.MaterialCost = MaterialCost;
             wo.TravelCost = TravelCost;
+            await WorkOrderCompletion.ApplyAsync(_context, wo, now, user?.Id, CompletionNotes);
 
             string? createdNumber = null;
             if (wo.RecurrenceMonths.HasValue && wo.RecurrenceMonths > 0 && wo.RecurrenceMonths <= 120)
@@ -118,21 +127,9 @@ public class DetailModel : PageModel
 
                 if (!existingChild)
                 {
-                    var prefix = $"WO-{nextDate:yyyyMM}";
-                    var lastNum = await _context.WorkOrders
-                        .Where(w => w.WorkOrderNumber.StartsWith(prefix))
-                        .OrderByDescending(w => w.WorkOrderNumber)
-                        .Select(w => w.WorkOrderNumber).FirstOrDefaultAsync();
-                    var seq = 1;
-                    if (lastNum != null && lastNum.Length > prefix.Length + 1
-                        && int.TryParse(lastNum[(prefix.Length + 1)..], out var parsed))
-                    {
-                        seq = parsed + 1;
-                    }
-
                     var nextWo = new WorkOrder
                     {
-                        WorkOrderNumber = $"{prefix}-{seq:D4}",
+                        WorkOrderNumber = await WorkOrderCompletion.NextNumberAsync(_context, nextDate),
                         Type = wo.Type,
                         Status = WorkOrderStatus.Scheduled,
                         Title = wo.Title,
@@ -169,21 +166,36 @@ public class DetailModel : PageModel
                 }
             }
 
-            wo.Status = newStatus;
-            wo.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
             await tx.CommitAsync();
 
             StatusMessage = createdNumber != null
-                ? $"Status → {newStatus}. Next recurring WO created: {createdNumber}"
-                : $"Status → {newStatus}";
+                ? $"ปิดงานแล้ว · สร้างงานรอบถัดไป {createdNumber} ให้แล้ว"
+                : wo.Type == WorkOrderType.PanelCleaning && wo.InstallationId.HasValue
+                    ? "ปิดงานแล้ว · บันทึกลงประวัติล้างแผงของไซต์และตั้งรอบถัดไปให้แล้ว"
+                    : "ปิดงานแล้ว";
             return RedirectToPage("Detail", new { id });
         }
 
+        if (newStatus == WorkOrderStatus.Cancelled && wo.ServiceTicket != null
+            && wo.ServiceTicket.Status == TicketStatus.InProgress)
+        {
+            // The ticket goes back to the queue; it was not answered.
+            wo.ServiceTicket.Status = TicketStatus.Open;
+            wo.ServiceTicket.UpdatedAt = now;
+        }
+
         wo.Status = newStatus;
-        wo.UpdatedAt = DateTime.UtcNow;
+        wo.UpdatedAt = now;
         await _context.SaveChangesAsync();
-        StatusMessage = $"Status → {newStatus}";
+        StatusMessage = newStatus switch
+        {
+            WorkOrderStatus.InProgress => "เริ่มงานแล้ว",
+            WorkOrderStatus.Verified => "ตรวจรับงานแล้ว",
+            WorkOrderStatus.Closed => "ปิดงานถาวรแล้ว",
+            WorkOrderStatus.Cancelled => "ยกเลิกงานแล้ว",
+            _ => $"สถานะ: {UiLabels.Label(newStatus)}"
+        };
         return RedirectToPage("Detail", new { id });
     }
 

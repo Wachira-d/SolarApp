@@ -1,30 +1,48 @@
 @page
 @model SolarApp.Pages.Jobs.IndexModel
+@using SolarApp.Models.Enums
 @{
     ViewData["Title"] = "งานภาคสนาม";
     var today = SolarApp.Services.SiteTime.Today;
+
+    string OverdueText(DateTime? due)
+    {
+        if (!due.HasValue) return "";
+        var days = (int)Math.Floor((today - due.Value.Date).TotalDays);
+        return days > 0 ? $"เลยกำหนด {days} วัน" : days == 0 ? "ครบกำหนดวันนี้" : "";
+    }
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
         <h4 class="mb-0"><i class="bi bi-calendar2-check text-warning"></i> งานภาคสนาม</h4>
-        @* One list instead of three screens merged by eye. *@
-        <small class="text-muted">ใบสั่งงาน · บำรุงรักษา · ล้างแผง รวมในที่เดียว</small>
+        <small class="text-muted">ใบสั่งงาน · ล้างแผง · แจ้งซ่อม — ทั้งหมดในหน้าเดียว</small>
     </div>
-    @if (User.IsInRole("Admin") || User.IsInRole("Partner"))
+    @if (Model.CanCreate)
     {
-        <a asp-page="/WorkOrders/Create" class="btn btn-warning btn-sm">
-            <i class="bi bi-plus-lg"></i> สร้างใบสั่งงาน
-        </a>
+        <div class="d-flex gap-2 flex-wrap">
+            <a asp-page="/WorkOrders/Calendar" class="btn btn-outline-secondary"><i class="bi bi-calendar3"></i> ปฏิทิน</a>
+            <div class="dropdown">
+                <button class="btn btn-warning dropdown-toggle" data-bs-toggle="dropdown">
+                    <i class="bi bi-plus-lg"></i> สร้างงาน
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" asp-page="/WorkOrders/Create"><i class="bi bi-clipboard2-plus"></i> นัดงานเข้าไซต์ (ใบสั่งงาน)</a></li>
+                    <li><a class="dropdown-item" asp-page="/WorkOrders/Create" asp-route-done="true"><i class="bi bi-check2-circle"></i> บันทึกงานที่ทำเสร็จแล้ว</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" asp-page="/ServiceTickets/Create"><i class="bi bi-ticket-detailed"></i> รับเรื่องแจ้งซ่อม</a></li>
+                    <li class="dropdown-item-text small text-muted">ล้างแผง: บันทึกจากหน้าไซต์ → "ล้างแผง"</li>
+                </ul>
+            </div>
+        </div>
     }
 </div>
 
 <!-- ═══ SUMMARY ═══ -->
-<div class="row g-3 mb-3">
+<div class="row g-2 g-md-3 mb-3">
     <div class="col-4">
         <a asp-page="/Jobs/Index" asp-route-show="overdue"
-           class="card border-0 shadow-sm h-100 text-decoration-none action-tile
-                  @(Model.OverdueCount > 0 ? "border-danger border-2" : "")">
+           class="card border-0 shadow-sm h-100 text-decoration-none action-tile @(Model.OverdueCount > 0 ? "border-danger border-2" : "")">
             <div class="card-body text-center py-2 py-md-3">
                 <div class="fs-3 fw-bold @(Model.OverdueCount > 0 ? "text-danger" : "text-muted")">@Model.OverdueCount</div>
                 <small class="text-body">เลยกำหนด</small>
@@ -32,63 +50,172 @@
         </a>
     </div>
     <div class="col-4">
-        <div class="card border-0 shadow-sm h-100">
+        <a asp-page="/Jobs/Index" asp-route-show="week"
+           class="card border-0 shadow-sm h-100 text-decoration-none action-tile">
             <div class="card-body text-center py-2 py-md-3">
                 <div class="fs-3 fw-bold text-warning">@Model.DueThisWeekCount</div>
-                <small class="text-muted">ภายใน 7 วัน</small>
+                <small class="text-body">ภายใน 7 วัน</small>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-4">
-        <div class="card border-0 shadow-sm h-100">
+        <a asp-page="/Jobs/Index" asp-route-show="open"
+           class="card border-0 shadow-sm h-100 text-decoration-none action-tile">
             <div class="card-body text-center py-2 py-md-3">
                 <div class="fs-3 fw-bold">@Model.OpenCount</div>
-                <small class="text-muted">ค้างทั้งหมด</small>
+                <small class="text-body">ค้างทั้งหมด</small>
             </div>
-        </div>
+        </a>
     </div>
 </div>
 
+@* ═══ Cleaning due — the most common "what next" ═══ *@
+@if (Model.CleaningDue.Any())
+{
+    <div class="card border-warning border-2 shadow-sm mb-3">
+        <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-droplet-fill"></i> ครบกำหนดล้างแผง</span>
+            <span class="badge bg-dark">@Model.CleaningDue.Count ไซต์</span>
+        </div>
+        <div class="list-group list-group-flush">
+            @foreach (var inst in Model.CleaningDue)
+            {
+                var overdueDays = inst.NextCleaningDueDate.HasValue
+                    ? (int)Math.Floor((today - inst.NextCleaningDueDate.Value.Date).TotalDays) : 0;
+                <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div>
+                        <a asp-page="/Installations/Detail" asp-route-id="@inst.Id" class="fw-semibold text-decoration-none">@inst.SiteName</a>
+                        <div class="small text-muted">
+                            @inst.Customer?.FullName
+                            · กำหนด @inst.NextCleaningDueDate?.ToString("dd/MM/yyyy")
+                            · <span class="@(overdueDays > 90 ? "text-danger fw-bold" : "text-warning")">@OverdueText(inst.NextCleaningDueDate)</span>
+                            · @(inst.TotalCleaningCount > 0 ? $"เหลือ {inst.RemainingCleanings}/{inst.TotalCleaningCount} ครั้ง" : "ตามรอบ")
+                        </div>
+                    </div>
+                    @if (Model.CanCreate)
+                    {
+                        <a asp-page="/Installations/Cleaning" asp-route-id="@inst.Id" class="btn btn-warning btn-sm">
+                            <i class="bi bi-droplet"></i> บันทึกการล้าง
+                        </a>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@* ═══ Tickets waiting for a visit ═══ *@
+@if (Model.UnansweredTickets.Any())
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-ticket-detailed text-primary"></i> แจ้งซ่อมที่ยังไม่ได้นัดช่าง</span>
+            <span class="badge bg-primary">@Model.UnansweredTickets.Count</span>
+        </div>
+        <div class="list-group list-group-flush">
+            @foreach (var t in Model.UnansweredTickets)
+            {
+                <div class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div>
+                        <span class="badge @UiLabels.Badge(t.Priority) me-1">@UiLabels.Label(t.Priority)</span>
+                        <a asp-page="/ServiceTickets/Edit" asp-route-id="@t.Id" class="fw-semibold text-decoration-none">@t.Subject</a>
+                        <div class="small text-muted">@t.Installation.SiteName · @t.TicketNumber · แจ้งเมื่อ @SolarApp.Services.SiteTime.ToSiteTime(t.CreatedAt).ToString("dd/MM/yy")</div>
+                    </div>
+                    <a asp-page="/WorkOrders/Create" asp-route-ticketId="@t.Id" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-clipboard2-plus"></i> นัดช่าง
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+}
+
 <!-- ═══ FILTERS ═══ -->
 <form method="get" class="card border-0 shadow-sm mb-3">
-    <div class="card-body d-flex flex-wrap gap-2 align-items-center">
-        <select name="show" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
-            <option value="open" selected="@(Model.Show == "open")">ที่ยังไม่เสร็จ</option>
-            <option value="overdue" selected="@(Model.Show == "overdue")">เลยกำหนด</option>
-            <option value="done" selected="@(Model.Show == "done")">เสร็จแล้ว</option>
-            <option value="all" selected="@(Model.Show == "all")">ทั้งหมด</option>
-        </select>
-        <select name="source" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
-            <option value="">ทุกประเภทงาน</option>
-            <option value="workorder" selected="@(Model.Source == "workorder")">ใบสั่งงาน</option>
-            <option value="maintenance" selected="@(Model.Source == "maintenance")">บำรุงรักษา</option>
-            <option value="cleaning" selected="@(Model.Source == "cleaning")">ล้างแผง</option>
-        </select>
-        <div class="d-flex gap-1 align-items-center">
-            <input type="date" name="from" class="form-control form-control-sm" style="width:auto"
-                   value="@((Model.From ?? SolarApp.Services.SiteTime.Today.AddDays(-14)).ToString("yyyy-MM-dd"))" />
-            <span class="text-muted small">ถึง</span>
-            <input type="date" name="to" class="form-control form-control-sm" style="width:auto"
-                   value="@((Model.To ?? SolarApp.Services.SiteTime.Today.AddDays(30)).ToString("yyyy-MM-dd"))" />
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-6 col-md-2">
+                <select name="show" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="open" selected="@(Model.Show == "open")">ที่ยังไม่เสร็จ</option>
+                    <option value="today" selected="@(Model.Show == "today")">วันนี้</option>
+                    <option value="week" selected="@(Model.Show == "week")">ภายใน 7 วัน</option>
+                    <option value="overdue" selected="@(Model.Show == "overdue")">เลยกำหนด</option>
+                    <option value="done" selected="@(Model.Show == "done")">เสร็จแล้ว</option>
+                    <option value="all" selected="@(Model.Show == "all")">ทั้งหมด</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <select name="source" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">ทุกประเภทงาน</option>
+                    <option value="workorder" selected="@(Model.Source == "workorder")">ใบสั่งงาน</option>
+                    <option value="cleaning" selected="@(Model.Source == "cleaning")">ล้างแผง</option>
+                    <option value="maintenance" selected="@(Model.Source == "maintenance")">บำรุงรักษา (เดิม)</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-0 text-muted">ตั้งแต่</label>
+                <input type="date" name="from" class="form-control form-control-sm"
+                       value="@(Model.From?.ToString("yyyy-MM-dd"))" />
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small mb-0 text-muted">ถึง</label>
+                <input type="date" name="to" class="form-control form-control-sm"
+                       value="@(Model.To?.ToString("yyyy-MM-dd"))" />
+            </div>
+            <div class="col-8 col-md-3">
+                <input type="text" name="q" value="@Model.Q" class="form-control form-control-sm" placeholder="ค้นหาไซต์ / งาน / ลูกค้า" />
+            </div>
+            <div class="col-4 col-md-1 d-flex gap-1">
+                <button type="submit" class="btn btn-sm btn-primary flex-grow-1" title="กรอง"><i class="bi bi-search"></i></button>
+                <a asp-page="/Jobs/Index" class="btn btn-sm btn-outline-secondary" title="ล้างตัวกรอง"><i class="bi bi-x-lg"></i></a>
+            </div>
         </div>
-        <input type="text" name="q" value="@Model.Q" class="form-control form-control-sm"
-               style="max-width:200px" placeholder="ค้นหาไซต์ / งาน…" />
-        <button type="submit" class="btn btn-sm btn-outline-secondary">
-            <i class="bi bi-search"></i> กรอง
-        </button>
-        <a asp-page="/Jobs/Index" class="btn btn-sm btn-link">ล้างตัวกรอง</a>
     </div>
 </form>
 
-<!-- ═══ JOB LIST ═══ -->
-<div class="card border-0 shadow-sm">
+@if (!Model.Jobs.Any())
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-success py-4">
+            <i class="bi bi-check-circle-fill fs-3 d-block mb-1"></i> ไม่มีงานตามเงื่อนไขที่เลือก
+        </div>
+    </div>
+    return;
+}
+
+@* ── Phone: cards ── *@
+<div class="d-md-none">
+    @foreach (var j in Model.Jobs)
+    {
+        <a href="@j.Url" class="card border-0 shadow-sm mb-2 text-decoration-none text-body @(j.IsOverdue ? "border-start border-danger border-4" : "")">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div class="fw-semibold">@j.Title</div>
+                    <span class="badge @j.StatusClass text-nowrap">@j.StatusLabel</span>
+                </div>
+                <div class="small text-muted"><i class="bi bi-@j.Icon"></i> @j.Source · @j.SiteName@(string.IsNullOrWhiteSpace(j.CustomerName) ? "" : $" · {j.CustomerName}")</div>
+                <div class="small d-flex justify-content-between mt-1">
+                    <span class="@(j.IsOverdue ? "text-danger fw-bold" : (j.IsOpen && j.ScheduledDate.Date == today ? "text-warning fw-bold" : "text-muted"))">
+                        <i class="bi bi-calendar3"></i> @j.ScheduledDate.ToString("dd/MM/yy")
+                        @if (j.IsOverdue) { <span>· เลย @((today - j.ScheduledDate.Date).Days) วัน</span> }
+                        else if (j.IsOpen && j.ScheduledDate.Date == today) { <span>· วันนี้</span> }
+                        else if (j.CompletedDate.HasValue) { <span class="text-success">· ✓ @j.CompletedDate.Value.ToString("dd/MM/yy")</span> }
+                    </span>
+                    <span class="text-muted"><i class="bi bi-person"></i> @(j.AssignedTo ?? "—")</span>
+                </div>
+            </div>
+        </a>
+    }
+</div>
+
+@* ── Desktop: table ── *@
+<div class="card border-0 shadow-sm d-none d-md-block">
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover mb-0 align-middle">
                 <thead class="table-light">
                     <tr>
                         <th>กำหนด</th>
-                        <th>ประเภท</th>
                         <th>งาน</th>
                         <th>ไซต์งาน / ลูกค้า</th>
                         <th>ผู้รับผิดชอบ</th>
@@ -99,13 +226,12 @@
                 <tbody>
                     @foreach (var j in Model.Jobs)
                     {
-                        <tr class="@(j.IsOverdue ? "table-warning" : "")">
+                        <tr class="@(j.IsOverdue ? "table-warning" : "")" style="cursor:pointer" onclick="location.href='@j.Url'">
                             <td class="text-nowrap">
                                 @j.ScheduledDate.ToString("dd/MM/yy")
                                 @if (j.IsOverdue)
                                 {
-                                    var late = (today - j.ScheduledDate.Date).Days;
-                                    <br /><small class="text-danger fw-bold">เลย @late วัน</small>
+                                    <br /><small class="text-danger fw-bold">เลย @((today - j.ScheduledDate.Date).Days) วัน</small>
                                 }
                                 else if (j.IsOpen && j.ScheduledDate.Date == today)
                                 {
@@ -117,21 +243,11 @@
                                 }
                             </td>
                             <td>
-                                <span class="badge bg-light text-body border">
-                                    <i class="bi bi-@j.Icon"></i> @j.Source
-                                </span>
+                                <div class="fw-semibold">@j.Title</div>
+                                <small class="text-muted"><i class="bi bi-@j.Icon"></i> @j.Source</small>
                             </td>
-                            <td>@j.Title</td>
                             <td>
-                                @if (j.InstallationId.HasValue)
-                                {
-                                    <a asp-page="/Installations/Detail" asp-route-id="@j.InstallationId"
-                                       class="text-decoration-none"><strong>@j.SiteName</strong></a>
-                                }
-                                else
-                                {
-                                    <strong>@j.SiteName</strong>
-                                }
+                                <strong>@j.SiteName</strong>
                                 @if (!string.IsNullOrWhiteSpace(j.CustomerName))
                                 {
                                     <br /><small class="text-muted">@j.CustomerName</small>
@@ -141,14 +257,6 @@
                             <td><span class="badge @j.StatusClass">@j.StatusLabel</span></td>
                             <td class="text-end">
                                 <a href="@j.Url" class="btn btn-sm btn-outline-secondary">เปิด</a>
-                            </td>
-                        </tr>
-                    }
-                    @if (!Model.Jobs.Any())
-                    {
-                        <tr>
-                            <td colspan="7" class="text-center text-success py-4">
-                                <i class="bi bi-check-circle-fill"></i> ไม่มีงานตามเงื่อนไขที่เลือก
                             </td>
                         </tr>
                     }
