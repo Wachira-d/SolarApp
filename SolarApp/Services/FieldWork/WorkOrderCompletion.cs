@@ -34,7 +34,12 @@ public static class WorkOrderCompletion
         {
             var inst = wo.Installation
                        ?? await context.Installations.FirstOrDefaultAsync(i => i.Id == wo.InstallationId.Value);
-            if (inst != null)
+            // An admin can reopen a completed order and close it again; the
+            // visit happened once, so it is counted once.
+            var tag = $"จากใบสั่งงาน {wo.WorkOrderNumber}";
+            var alreadyCounted = inst != null && await context.CleaningRecords
+                .AnyAsync(c => c.InstallationId == inst.Id && c.Notes != null && c.Notes.StartsWith(tag));
+            if (inst != null && !alreadyCounted)
             {
                 // The cleaning sheet is what the customer portal, the monthly
                 // report and the contract count read, so the order's visit

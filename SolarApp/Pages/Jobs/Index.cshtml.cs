@@ -27,7 +27,7 @@ namespace SolarApp.Pages.Jobs;
 /// lives. The schema merge stays possible later; the daily confusion doesn't
 /// have to wait for it.
 /// </summary>
-[Authorize]
+[Authorize(Roles = "Admin,Partner")]
 public class IndexModel : PageModel
 {
     private readonly ApplicationDbContext _context;
@@ -224,8 +224,9 @@ public class IndexModel : PageModel
         rows = Show switch
         {
             "overdue" => rows.Where(r => r.IsOverdue).ToList(),
-            "today" => rows.Where(r => r.IsOpen && r.ScheduledDate.Date <= SolarApp.Services.SiteTime.Today).ToList(),
-            "week" => rows.Where(r => r.IsOpen && r.ScheduledDate.Date <= weekEnd).ToList(),
+            "today" => rows.Where(r => r.IsOpen && r.ScheduledDate.Date == SolarApp.Services.SiteTime.Today).ToList(),
+            "week" => rows.Where(r => r.IsOpen && r.ScheduledDate.Date >= SolarApp.Services.SiteTime.Today
+                                     && r.ScheduledDate.Date <= weekEnd).ToList(),
             "done" => rows.Where(r => !r.IsOpen).ToList(),
             "all" => rows,
             _ => rows.Where(r => r.IsOpen).ToList(),

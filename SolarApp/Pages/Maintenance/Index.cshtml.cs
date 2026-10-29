@@ -9,7 +9,7 @@ namespace SolarApp.Pages.Maintenance;
 /// hub (/Jobs), which also shows work orders and tickets. This route stays
 /// so old links, LINE messages and bookmarks still land somewhere useful.
 /// </summary>
-[Authorize]
+[Authorize(Roles = "Admin,Partner")]
 public class IndexModel : PageModel
 {
     public IActionResult OnGet() => RedirectToPagePermanent("/Jobs/Index");

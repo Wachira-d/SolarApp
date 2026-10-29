@@ -190,6 +190,10 @@ public class CreateModel : PageModel
             ModelState.AddModelError("Input.ExternalSiteName",
                 "กรุณาเลือกไซต์ในระบบ หรือกรอกชื่อไซต์นอกระบบ อย่างใดอย่างหนึ่ง");
 
+        if (Input.InstallationId.HasValue && !string.IsNullOrWhiteSpace(Input.ExternalSiteName))
+            ModelState.AddModelError("Input.ExternalSiteName",
+                "เลือกไซต์ในระบบไว้แล้ว — ลบชื่อไซต์นอกระบบออก หรือยกเลิกการเลือกไซต์ในระบบ");
+
         if (Input.InstallationId.HasValue && !await _installAccess.CanAccessAsync(Input.InstallationId.Value, User))
             ModelState.AddModelError("Input.InstallationId", "คุณไม่มีสิทธิ์เข้าถึงไซต์นี้");
 
@@ -199,6 +203,11 @@ public class CreateModel : PageModel
             ticket = await _context.ServiceTickets.FirstOrDefaultAsync(t => t.Id == Input.ServiceTicketId.Value);
             if (ticket == null || ticket.InstallationId != Input.InstallationId)
                 ModelState.AddModelError("Input.ServiceTicketId", "เรื่องแจ้งซ่อมไม่ตรงกับไซต์ที่เลือก");
+            // The button is hidden once a visit is booked, but a stale tab
+            // would still book a second one.
+            else if (await _context.WorkOrders.AnyAsync(w => w.ServiceTicketId == ticket.Id
+                                                             && w.Status != WorkOrderStatus.Cancelled))
+                ModelState.AddModelError("Input.ServiceTicketId", "เรื่องแจ้งซ่อมนี้มีใบสั่งงานอยู่แล้ว");
         }
 
         if (!ModelState.IsValid)
@@ -208,11 +217,20 @@ public class CreateModel : PageModel
             if (Input.InstallationId.HasValue)
                 LockedSite = await _context.Installations.AsNoTracking().Include(i => i.Customer)
                     .FirstOrDefaultAsync(i => i.Id == Input.InstallationId.Value);
+            if (Input.ServiceTicketId.HasValue)
+                SourceTicket = await _context.ServiceTickets.AsNoTracking()
+                    .FirstOrDefaultAsync(t => t.Id == Input.ServiceTicketId.Value);
             return Page();
         }
 
         var user = await _userManager.GetUserAsync(User);
         var now = DateTime.UtcNow;
+
+        // A visit written up afterwards is completed on the day it was done,
+        // not the moment it was typed in — checklist ticks included.
+        var completedAt = Input.ScheduledDate.Date == SolarApp.Services.SiteTime.Today
+            ? now
+            : SolarApp.Services.SiteTime.ToUtc(Input.ScheduledDate.Date.AddHours(12));
 
         TimeSpan? scheduledTime = null;
         if (TimeSpan.TryParse(Input.ScheduledTimeStr, out var ts)) scheduledTime = ts;
@@ -261,7 +279,7 @@ public class CreateModel : PageModel
                     Description = line.Trim(),
                     // A visit written up afterwards was done in full.
                     IsCompleted = Input.MarkCompleted,
-                    CompletedAt = Input.MarkCompleted ? now : null,
+                    CompletedAt = Input.MarkCompleted ? completedAt : null,
                     CompletedByUserId = Input.MarkCompleted ? user?.Id : null
                 });
             }
@@ -292,10 +310,6 @@ public class CreateModel : PageModel
 
         if (Input.MarkCompleted)
         {
-            // Completed on the day it was done, not the moment it was typed in.
-            var completedAt = Input.ScheduledDate.Date == SolarApp.Services.SiteTime.Today
-                ? now
-                : SolarApp.Services.SiteTime.ToUtc(Input.ScheduledDate.Date.AddHours(12));
             await WorkOrderCompletion.ApplyAsync(_context, wo, completedAt, user?.Id, Input.CompletionNotes);
         }
 

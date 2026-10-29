@@ -198,7 +198,7 @@
                         <small class="text-body">ครบล้างแผง</small>
                     </a>
                 }
-                @if (d.PendingMaintenanceCount > 0)
+                @if (d.PendingMaintenanceCount > 0 && (User.IsInRole("Admin") || User.IsInRole("Partner")))
                 {
                     <a asp-page="/Jobs/Index" class="col-6 col-sm-4 col-md-auto border-end border-bottom p-2 p-md-3 text-center text-decoration-none action-tile">
                         <div class="fs-3 fw-bold text-primary">@d.PendingMaintenanceCount</div>

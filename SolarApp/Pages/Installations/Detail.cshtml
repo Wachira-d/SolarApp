@@ -518,7 +518,10 @@
         }
         @foreach (var m in Model.MaintenanceRecords)
         {
-            <a asp-page="/Maintenance/Edit" asp-route-id="@m.Id" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center gap-2">
+            var mRowClass = "list-group-item d-flex justify-content-between align-items-center gap-2" + (canWork ? " list-group-item-action" : "");
+            if (canWork)
+            {
+                <a asp-page="/Maintenance/Edit" asp-route-id="@m.Id" class="@mRowClass">
                 <div>
                     <i class="bi bi-tools"></i>
                     <span class="fw-semibold">@(string.IsNullOrWhiteSpace(m.Description) ? SolarApp.Models.Enums.UiLabels.Label(m.MaintenanceType) : m.Description)</span>
@@ -530,7 +533,24 @@
                     </small>
                 </div>
                 <span class="badge @SolarApp.Models.Enums.UiLabels.Badge(m.Status) text-nowrap">@SolarApp.Models.Enums.UiLabels.Label(m.Status)</span>
-            </a>
+                </a>
+            }
+            else
+            {
+                <div class="@mRowClass">
+                <div>
+                    <i class="bi bi-tools"></i>
+                    <span class="fw-semibold">@(string.IsNullOrWhiteSpace(m.Description) ? SolarApp.Models.Enums.UiLabels.Label(m.MaintenanceType) : m.Description)</span>
+                    <small class="text-muted d-block">
+                        @SolarApp.Models.Enums.UiLabels.Label(m.MaintenanceType) (รายการเดิม)
+                        · @((m.CompletedDate ?? m.ScheduledDate).ToString("dd/MM/yyyy"))
+                        · @(m.PerformedByUser?.FullName ?? "—")
+                        @if (m.Cost is > 0) { <span>· ฿@m.Cost.Value.ToString("N0")</span> }
+                    </small>
+                </div>
+                <span class="badge @SolarApp.Models.Enums.UiLabels.Badge(m.Status) text-nowrap">@SolarApp.Models.Enums.UiLabels.Label(m.Status)</span>
+                </div>
+            }
         }
         @if (!doneOrders.Any() && !Model.MaintenanceRecords.Any())
         {
