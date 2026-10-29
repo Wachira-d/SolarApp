@@ -145,8 +145,8 @@ public class DeviceImporter : IDeviceImporter
             await _context.SaveChangesAsync(ct);
             var reason = devResult.IsApiFailure
                 ? $"[{devResult.Kind}] {devResult.Message}"
-                : "API returned no devices for this plant. Possible causes: " +
-                  "wrong Plant ID, no device-level access for your Northbound account, or plant has no inverters.";
+                : "ระบบผู้ผลิตไม่ส่งรายการอุปกรณ์ของไซต์นี้มา — ตรวจ Plant/Station ID และสิทธิ์ของบัญชีที่ใช้เชื่อมต่อ " +
+                  "(เปิดหน้า \"ตรวจระบบ\" เพื่อดูสาเหตุละเอียด)";
             _logger.LogWarning("DeviceImporter: zero devices for installation {Id} ({Brand}). Reason: {Reason}",
                 installationId, installation.InverterBrand, reason);
             return new DeviceImportResult(false, reason, 0, 0, 0, installationNote);

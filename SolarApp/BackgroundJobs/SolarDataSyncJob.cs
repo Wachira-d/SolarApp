@@ -212,6 +212,76 @@ public class SolarDataSyncJob
             await Task.WhenAll(alarmTasks);
         }
 
+        // ──────────────────────────────────────────────────────────────────
+        // GoodWe: one pass per SEMS account. One login, the station list once,
+        // each station's detail a few at a time, and the account's warnings in
+        // one query shared out by station. Before, every site logged in and
+        // queried on its own, so an account with ten sites made ten of each in
+        // a row — exactly the back-to-back pattern SEMS answers with empty data.
+        // ──────────────────────────────────────────────────────────────────
+        var goodweBatch = new System.Collections.Concurrent.ConcurrentDictionary<int, ApiResult<RealtimeData>>();
+        var goodweBatchAlarms = new System.Collections.Concurrent.ConcurrentDictionary<int, List<AlarmRecord>>();
+        var goodweInstallations = installations
+            .Where(i => i.InverterBrand == InverterBrand.GoodWe
+                        && !string.IsNullOrWhiteSpace(i.PlantId)
+                        && !Services.InverterApi.Common.SyncCircuitBreaker.IsOpen(i.Id))
+            .ToList();
+        if (goodweInstallations.Count > 0)
+        {
+            var gwIds = goodweInstallations.Select(i => i.Id).ToList();
+            var gwAlarmCutoff = DateTime.UtcNow.AddMinutes(-55);
+            var gwLastAlarm = (await _context.InverterApiLogs
+                    .Where(l => gwIds.Contains(l.InstallationId) && l.Endpoint == "GetAlarms" && l.IsSuccess)
+                    .GroupBy(l => l.InstallationId)
+                    .Select(g => new { InstallationId = g.Key, Last = g.Max(l => l.RequestTime) })
+                    .ToListAsync())
+                .ToDictionary(x => x.InstallationId, x => x.Last);
+
+            var gwGroups = goodweInstallations
+                .Select(i => (inst: i,
+                              user: _credProtector.Unprotect(i.CloudUsername)?.Trim().ToLowerInvariant() ?? "",
+                              pwd: _credProtector.Unprotect(i.CloudPassword)))
+                .Where(x => x.user.Length > 0)
+                .GroupBy(x => $"{x.user}|{x.pwd?.Length ?? 0}")
+                .ToList();
+
+            var gwTasks = gwGroups.Select(async group =>
+            {
+                try
+                {
+                    var first = group.First().inst;
+                    var credentials = new ApiCredentials
+                    {
+                        Username = _credProtector.Unprotect(first.CloudUsername),
+                        Password = _credProtector.Unprotect(first.CloudPassword),
+                        ApiKey = _credProtector.Unprotect(first.CloudApiKey),
+                        ApiSecret = _credProtector.Unprotect(first.CloudApiSecret),
+                        ApiBaseUrl = first.CloudApiBaseUrl,
+                    };
+                    var alarmDue = group.Where(x => !gwLastAlarm.TryGetValue(x.inst.Id, out var t) || t < gwAlarmCutoff)
+                                        .Select(x => x.inst.Id).ToHashSet();
+                    var gwAdapter = (GoodWeAdapter)_adapterFactory.GetAdapter(InverterBrand.GoodWe);
+                    var result = await gwAdapter.GetAccountBatchAsync(
+                        credentials, group.Select(x => x.inst.PlantId!).ToList(), includeAlarms: alarmDue.Count > 0);
+
+                    foreach (var (inst, _, _) in group)
+                    {
+                        if (result.Realtime.TryGetValue(inst.PlantId!, out var rt))
+                            goodweBatch[inst.Id] = rt;
+                        if (result.Alarms != null && alarmDue.Contains(inst.Id)
+                            && result.Alarms.TryGetValue(inst.PlantId!, out var list))
+                            goodweBatchAlarms[inst.Id] = list;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Sites without a batch entry fall back to their own calls below.
+                    _logger.LogWarning(ex, "GoodWe account batch failed ({Count} stations)", group.Count());
+                }
+            });
+            await Task.WhenAll(gwTasks);
+        }
+
         int processedSinceLastSave = 0;
         foreach (var installation in installations)
         {
@@ -306,6 +376,11 @@ public class SolarDataSyncJob
                                 $"[API FAILURE] Huawei batch error: {batch.Error}");
                             continue;
                     }
+                }
+                else if (installation.InverterBrand == InverterBrand.GoodWe
+                         && goodweBatch.TryGetValue(installation.Id, out var gwRealtime))
+                {
+                    realtimeResult = gwRealtime;
                 }
                 else
                 {
@@ -732,6 +807,14 @@ public class SolarDataSyncJob
                     alarmsForThisInstallation = batchedAlarms;
                     LogApiCall(installation, "GetAlarms", 200, true,
                         $"[ALARMS-BATCH] {alarmsForThisInstallation.Count} alarm(s) from batch fetch.");
+                }
+                else if (installation.InverterBrand == InverterBrand.GoodWe
+                         && goodweBatchAlarms.TryGetValue(installation.Id, out var gwAlarms))
+                {
+                    alarmsForThisInstallation = gwAlarms;
+                    LogApiCall(installation, "GetAlarms", 200, true,
+                        $"[ALARMS-BATCH] {gwAlarms.Count} alarm(s) from the account-wide query " +
+                        $"({gwAlarms.Count(a => !a.ClearedAt.HasValue)} still occurring).");
                 }
                 else
                 {

@@ -132,6 +132,11 @@ public class AlarmRecord
         {
             var parts = new List<string>();
 
+            // What the vendor's English name means, in Thai — the part the
+            // reader actually needed and the vendor never sends.
+            if (SolarApp.Services.InverterApi.Common.VendorAlarmGlossary.Lookup(DisplayTitle) is { } meaning)
+                parts.Add($"{(meaning.SafetyCritical ? "⚠ " : "")}{meaning.Thai} — {meaning.Meaning}");
+
             if (!string.IsNullOrWhiteSpace(Description) && Description!.Trim() != DisplayTitle)
                 parts.Add(Description.Trim());
 

@@ -106,8 +106,12 @@ public class AdapterDiagnostics : IAdapterDiagnostics
         {
             await RunStepAsync(report, "2. Plant Info", async () =>
             {
-                var plant = await adapter.GetPlantInfoAsync(credentials);
-                if (plant == null) return (false, "No plant data returned", 0, null);
+                // The *Result variants carry the adapter's reason; the bare
+                // calls only said "no data", which is what left operators
+                // guessing between a wrong ID, a region and an outage.
+                var pr = await adapter.GetPlantInfoResultAsync(credentials);
+                var plant = pr.Data;
+                if (plant == null) return (false, pr.Message, 0, pr.TechnicalDetail);
                 return (true, $"Plant: {plant.PlantName} | Capacity: {plant.CapacityKw} kW",
                     1, $"ID={plant.PlantId}, Address={plant.Address ?? "N/A"}");
             });
@@ -118,8 +122,9 @@ public class AdapterDiagnostics : IAdapterDiagnostics
         {
             await RunStepAsync(report, "3. Realtime Data", async () =>
             {
-                var rt = await adapter.GetRealtimeDataAsync(credentials);
-                if (rt == null) return (false, "No realtime data returned", 0, null);
+                var rr = await adapter.GetRealtimeResultAsync(credentials);
+                var rt = rr.Data;
+                if (rt == null) return (false, rr.Message, 0, rr.TechnicalDetail);
 
                 var detail = $"Power={rt.CurrentPowerKw} kW, Today={rt.TodayEnergyKwh} kWh, " +
                              $"Total={rt.TotalEnergyKwh} kWh, Online={rt.IsOnline}";
@@ -155,8 +160,9 @@ public class AdapterDiagnostics : IAdapterDiagnostics
         {
             await RunStepAsync(report, "5. Device List", async () =>
             {
-                var devices = await adapter.GetDevicesAsync(credentials);
-                if (devices.Count == 0) return (true, "No devices returned", 0, null);
+                var dr = await adapter.GetDevicesResultAsync(credentials);
+                var devices = dr.Data ?? new List<SolarApp.Services.InverterApi.Models.DeviceInfo>();
+                if (devices.Count == 0) return (false, dr.Message, 0, dr.TechnicalDetail);
                 var online = devices.Count(d => d.IsOnline);
                 return (true,
                     $"{devices.Count} devices ({online} online)",

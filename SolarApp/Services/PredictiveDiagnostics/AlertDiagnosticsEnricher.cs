@@ -68,6 +68,20 @@ public class AlertDiagnosticsEnricher
             }
         }
 
+        // ── 2b. Vendor alarm by name ──
+        // The alarm name is the vendor's English ("Low Insulation Resistance");
+        // without this every one of them got the same "ตรวจ error code" text.
+        // Matched on the title only — the alarm name — never on free text.
+        if (diag.PredictedCause == null && alert.AlertType == AlertType.Error
+            && SolarApp.Services.InverterApi.Common.VendorAlarmGlossary.Lookup(alert.Title) is { } known)
+        {
+            diag.PredictedCause = $"{alert.Title}: {known.Thai} — {known.Meaning}";
+            diag.CheckSteps.AddRange(known.Checks);
+            diag.FixSteps.AddRange(known.Fixes);
+            if (known.SafetyCritical)
+                diag.SafetyWarning ??= $"⚠ {known.Thai} — ประเด็นความปลอดภัย ควรให้ช่างตรวจ";
+        }
+
         // ── 3. Analyze by alert type ──
         switch (alert.AlertType)
         {
