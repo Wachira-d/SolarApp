@@ -858,6 +858,19 @@ BEGIN
         ELSE 99 END;
 END"));
 
+        // Stage 1d: remove the phantom GoodWe alarms. The old parser couldn't
+        // read SEMS's station-grouped response, so each hourly sync stored a
+        // "new", open alarm titled with a random Guid and stamped "now" — on
+        // sites that were running normally. They describe nothing that
+        // happened, so they're deleted rather than closed (closed, they'd
+        // still read as faults in history, counts and the customer portal).
+        // The pattern is exact: the fallback title with a 36-char Guid.
+        // Idempotent; nothing references SystemAlerts by id.
+        stages.Add(("RemovePhantomVendorAlarms", @"
+DELETE FROM [SystemAlerts]
+WHERE [AlertType] = 2
+  AND [Title] LIKE N'แจ้งเตือนจากอินเวอร์เตอร์ (รหัส ________-____-____-____-____________)'"));
+
         // Stage 2: each table CREATE in its own stage. Failures in one don't block others.
         stages.Add(("CreateTable:AlertRules", @"
 IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'AlertRules')

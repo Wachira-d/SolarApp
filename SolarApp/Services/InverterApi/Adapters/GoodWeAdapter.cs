@@ -460,30 +460,49 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
 
         if (json == null) return alarms;
 
-        if (json.Value.TryGetProperty("data", out var data)
-            && data.TryGetProperty("list", out var list))
+        if (!json.Value.TryGetProperty("data", out var data)
+            || !data.TryGetProperty("list", out var list)
+            || list.ValueKind != JsonValueKind.Array)
+            return alarms;
+
+        // SEMS groups warnings by station: data.list[] is one entry per
+        // station with its warnings in a nested array. The old parser read
+        // each station entry as if it were a warning, so it never found the
+        // id, name, device, time or recovery state — and filled the gaps with
+        // a random Guid and DateTime.UtcNow. Every hourly sync therefore
+        // produced a "new", still-open, nameless alarm with a fresh code:
+        // a phantom fault on a site that was running normally. A flat list
+        // of warnings is still accepted, in case the response varies.
+        var skipped = 0;
+        string? skippedSample = null;
+        foreach (var entry in list.EnumerateArray())
         {
-            foreach (var item in list.EnumerateArray())
+            if (entry.ValueKind != JsonValueKind.Object) continue;
+
+            // When the station is named on the entry, it must be ours — the
+            // query is per station, but a filter the API ignores would hand
+            // us every station on the account.
+            var entryStation = FirstString(entry, "stationId", "stationid", "powerstationId",
+                "powerstation_id", "pw_id", "pwId");
+            if (entryStation != null && !string.IsNullOrEmpty(credentials.PlantId)
+                && !string.Equals(entryStation, credentials.PlantId, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var nested = FirstArray(entry, "warning", "warnings", "warninglist", "warningList", "list", "data");
+            var items = nested.HasValue ? nested.Value.EnumerateArray().ToList() : new List<JsonElement> { entry };
+
+            foreach (var item in items)
             {
                 try
                 {
-                    int severity = 3;
-                    if (item.TryGetProperty("level", out var lv))
-                        severity = ToInt(lv) ?? 3;
-
-                    DateTime occurredAt = DateTime.UtcNow;
-                    if (item.TryGetProperty("happentime", out var ht))
-                        occurredAt = ToDateTime(ht) ?? DateTime.UtcNow;
-
-                    alarms.Add(new AlarmRecord
+                    var alarm = ParseWarning(item);
+                    if (alarm == null)
                     {
-                        AlarmId = GetString(item, "warningid") ?? Guid.NewGuid().ToString(),
-                        AlarmName = GetString(item, "warning") ?? "",
-                        Severity = severity,
-                        OccurredAt = occurredAt,
-                        DeviceName = GetString(item, "device_sn"),
-                        Description = GetString(item, "warning_desc")
-                    });
+                        skipped++;
+                        skippedSample ??= Truncate(item.GetRawText(), 800);
+                        continue;
+                    }
+                    alarms.Add(alarm);
                 }
                 catch (Exception ex)
                 {
@@ -491,6 +510,13 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                 }
             }
         }
+
+        // An alarm we can't identify is dropped rather than invented. The raw
+        // shape is logged so the field names can be checked against SEMS.
+        if (skipped > 0)
+            _logger.LogWarning(
+                "GoodWe alarms for station {Sid}: skipped {Skipped} item(s) without a recognisable name/time. Sample: {Sample}",
+                credentials.PlantId, skipped, skippedSample);
 
         return alarms;
     }
@@ -799,6 +825,126 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     // ══════════════════════════════════════════════════════════════
     //  HELPERS
     // ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// One SEMS warning → AlarmRecord, or null when it doesn't carry enough to
+    /// be a real, identifiable alarm (no name/code, or no time it happened).
+    /// Field names vary between SEMS versions, so each is read from a short
+    /// list of known spellings.
+    /// </summary>
+    private static AlarmRecord? ParseWarning(JsonElement item)
+    {
+        if (item.ValueKind != JsonValueKind.Object) return null;
+
+        var name = FirstString(item, "warningname", "warning_name", "warningName", "alarmname",
+            "alarmName", "name", "warning");
+        var code = FirstString(item, "warning_code", "warningcode", "warningCode", "errorcode",
+            "error_code", "code");
+        var desc = FirstString(item, "warning_desc", "warningdesc", "description", "desc");
+        var device = FirstString(item, "deviceName", "devicename", "device_name", "deviceSN",
+            "device_sn", "sn", "inverter_sn");
+
+        DateTime? happened = null;
+        foreach (var k in new[] { "happentime", "happen_time", "happenTime", "occurtime", "starttime", "startTime" })
+            if (item.TryGetProperty(k, out var hv) && (happened = ToVendorUtc(hv)) != null) break;
+
+        DateTime? recovered = null;
+        foreach (var k in new[] { "recoverytime", "recovery_time", "recoveryTime", "endtime", "endTime" })
+            if (item.TryGetProperty(k, out var rv) && (recovered = ToVendorUtc(rv)) != null) break;
+
+        // Nothing to call it, or no idea when it happened: not storable. The
+        // old code stored these anyway, stamped "now", once an hour.
+        if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(desc))
+            return null;
+        if (happened == null) return null;
+
+        // Recovered per the vendor even when it gives no recovery time.
+        if (recovered == null)
+        {
+            var status = FirstString(item, "status", "warningstatus", "warning_status");
+            if (status != null && status.Contains("recover", StringComparison.OrdinalIgnoreCase))
+                recovered = happened;
+        }
+
+        var levelText = FirstString(item, "warninglevel", "warning_level", "warningLevel", "level");
+        int severity = levelText?.Trim().ToLowerInvariant() switch
+        {
+            null or "" => 3,
+            "fault" or "error" => 2,
+            "alarm" or "warning" => 3,
+            "notice" or "info" => 4,
+            var t when int.TryParse(t, out var n) && n is >= 1 and <= 4 => n,
+            _ => 3
+        };
+
+        // Stable identity: the vendor id when there is one, otherwise what
+        // makes the alarm itself unique. Never a random Guid.
+        var id = FirstString(item, "warningid", "warning_id", "warningId", "id")
+                 ?? $"{device}|{code ?? name}|{happened:O}";
+
+        return new AlarmRecord
+        {
+            AlarmId = id,
+            AlarmName = name ?? "",
+            AlarmCode = code,
+            Severity = severity,
+            OccurredAt = happened.Value,
+            ClearedAt = recovered,
+            DeviceName = device,
+            Description = desc
+        };
+    }
+
+    private static string? FirstString(JsonElement el, params string[] props)
+    {
+        foreach (var p in props)
+        {
+            var v = GetString(el, p);
+            if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+        }
+        return null;
+    }
+
+    private static JsonElement? FirstArray(JsonElement el, params string[] props)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return null;
+        foreach (var p in props)
+            if (el.TryGetProperty(p, out var v) && v.ValueKind == JsonValueKind.Array)
+                return v;
+        return null;
+    }
+
+    /// <summary>
+    /// Vendor timestamp → UTC. SEMS sends either epoch milliseconds or a
+    /// station-local "dd/MM/yyyy HH:mm:ss"-style string. Strings are parsed
+    /// with the invariant culture: under th-TH, DateTime.TryParse reads the
+    /// year as Buddhist Era. A string without an offset is site-local time.
+    /// </summary>
+    private static DateTime? ToVendorUtc(JsonElement v)
+    {
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var num) && num > 0)
+            return num > 100_000_000_000
+                ? DateTimeOffset.FromUnixTimeMilliseconds(num).UtcDateTime
+                : DateTimeOffset.FromUnixTimeSeconds(num).UtcDateTime;
+        if (v.ValueKind != JsonValueKind.String) return null;
+
+        var s = v.GetString()?.Trim();
+        if (string.IsNullOrEmpty(s) || s.StartsWith("0001") || s == "0") return null;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+
+        if ((s.EndsWith("Z") || s.Contains('+') || System.Text.RegularExpressions.Regex.IsMatch(s, @"T.*-\d{2}:\d{2}$"))
+            && DateTimeOffset.TryParse(s, ci, System.Globalization.DateTimeStyles.None, out var dto))
+            return dto.UtcDateTime;
+
+        var formats = new[]
+        {
+            "dd/MM/yyyy HH:mm:ss", "dd/MM/yyyy HH:mm", "MM/dd/yyyy HH:mm:ss", "MM/dd/yyyy HH:mm",
+            "yyyy-MM-dd HH:mm:ss", "yyyy-MM-ddTHH:mm:ss", "yyyy/MM/dd HH:mm:ss", "yyyy-MM-dd HH:mm"
+        };
+        if (DateTime.TryParseExact(s, formats, ci, System.Globalization.DateTimeStyles.None, out var local))
+            return SolarApp.Services.SiteTime.ToUtc(local);
+        return null;
+    }
 
     private static string? GetString(JsonElement el, string prop)
     {

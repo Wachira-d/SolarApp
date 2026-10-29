@@ -761,7 +761,23 @@ public class SolarDataSyncJob
                     }
                 }
 
+                // An alarm with no name, code or description can't be told
+                // apart from the next one, and the dedupe below keys on the
+                // title. When an adapter can't parse the vendor's payload it
+                // must not become a fresh "fault" every sync.
                 if (alarmsForThisInstallation != null)
+                {
+                    var unnamed = alarmsForThisInstallation.RemoveAll(a =>
+                        string.IsNullOrWhiteSpace(a.AlarmName)
+                        && string.IsNullOrWhiteSpace(a.AlarmCode)
+                        && string.IsNullOrWhiteSpace(a.Description));
+                    if (unnamed > 0)
+                        _logger.LogWarning(
+                            "Dropped {Count} unidentifiable vendor alarm(s) for installation {Id} ({Brand})",
+                            unnamed, installation.Id, installation.InverterBrand);
+                }
+
+                if (alarmsForThisInstallation != null && alarmsForThisInstallation.Count > 0)
                 {
                     try
                     {
