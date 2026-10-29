@@ -87,7 +87,16 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                 BeginDiag();
                 var detail = await GetStationDetailAsync(session, credentials.PlantId);
                 if (detail == null)
-                    return (false, $"เข้าสู่ระบบได้ แต่ดึงข้อมูลสถานีไม่ได้: {TakeDiag() ?? "ไม่ทราบสาเหตุ"}");
+                {
+                    var why = TakeDiag() ?? "ไม่ทราบสาเหตุ";
+                    // The station is in the account's list with live figures:
+                    // monitoring works, just without the per-inverter detail.
+                    var fromList = await RealtimeFromListAsync(session, credentials.PlantId);
+                    if (fromList != null)
+                        return (true, $"Connected — ใช้ข้อมูลจากรายการสถานี (สถานะ/กำลังผลิต/ผลิตวันนี้) " +
+                                      $"เพราะ SEMS ไม่ส่งรายละเอียดสถานีนี้ให้บัญชีนี้ — ไม่มีข้อมูลรายอินเวอร์เตอร์/กริด. ({why})");
+                    return (false, $"เข้าสู่ระบบได้ แต่ดึงข้อมูลสถานีไม่ได้: {why}");
+                }
                 if (!StationIdMatches(detail.Value.StationId, credentials.PlantId) || detail.Value.StationId != credentials.PlantId.Trim())
                     return (true, $"Connected — ใช้ Station ID '{detail.Value.StationId}' (ที่บันทึกไว้: '{credentials.PlantId}')");
             }
@@ -161,7 +170,12 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         => (await ListStationRowsAsync(session)).Select(r => (r.Id, r.Name)).ToList();
 
     /// <summary>One station as the account-wide list reports it.</summary>
-    private sealed record StationRow(string Id, string Name, int? Status, decimal? PacW, decimal? TodayKwh);
+    private sealed record StationRow(string Id, string Name, int? Status, decimal? PacW, decimal? TodayKwh,
+        decimal? TotalKwh = null, decimal? CapacityKw = null, string? Raw = null)
+    {
+        /// <summary>The row carries live figures, not just a name.</summary>
+        public bool HasLiveData => Status.HasValue || PacW.HasValue || TodayKwh.HasValue;
+    }
 
     /// <summary>
     /// Every station on the account, from whichever list endpoint this SEMS
@@ -222,8 +236,11 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                     var name = FirstString(item, "stationname", "station_name", "stationName", "name") ?? "(unnamed)";
                     int? status = item.TryGetProperty("status", out var st) ? ToInt(st) : null;
                     results.Add(new StationRow(id, name, status,
-                        FirstDecimal(item, "pac", "out_pac"),
-                        FirstDecimal(item, "eday", "today_power", "power")));
+                        FirstDecimal(item, "pac", "out_pac", "currentPower", "current_power"),
+                        FirstDecimal(item, "eday", "today_power", "todayPower", "power", "eDay"),
+                        FirstDecimal(item, "etotal", "total_power", "totalPower", "eTotal"),
+                        FirstDecimal(item, "capacity", "installedCapacity"),
+                        Truncate(item.GetRawText(), 700)));
                 }
                 // A page with nothing new is the end (or an endpoint that
                 // ignores paging and returns the same page every time).
@@ -253,7 +270,12 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         if (session == null) { SetDiag("เข้าสู่ระบบ SEMS ไม่สำเร็จ"); return null; }
 
         var detail = await GetStationDetailAsync(session, credentials.PlantId);
-        return detail == null ? null : ParseRealtime(detail.Value.Data);
+        if (detail != null) return ParseRealtime(detail.Value.Data);
+
+        var fromList = await RealtimeFromListAsync(session, credentials.PlantId);
+        if (fromList != null)
+            _logger.LogInformation("GoodWe {Sid}: detail empty, using the station list's live figures", credentials.PlantId);
+        return fromList;
     }
 
     /// <summary>
@@ -367,7 +389,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         lock (_sessionCacheLock)
             stationId = _resolvedStations.TryGetValue(cacheKey, out var known) ? known : plantId.Trim();
 
-        var (data, error) = await FetchDetailAsync(session, stationId);
+        var (data, error) = await FetchDetailAnyAsync(session, stationId);
         if (data != null)
         {
             lock (_sessionCacheLock) _resolvedStations[cacheKey] = stationId;
@@ -379,7 +401,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         var match = stations.FirstOrDefault(r => StationIdMatches(r.Id, plantId));
         if (match != null && match.Id != stationId)
         {
-            var (data2, error2) = await FetchDetailAsync(session, match.Id);
+            var (data2, error2) = await FetchDetailAnyAsync(session, match.Id);
             if (data2 != null)
             {
                 _logger.LogInformation("GoodWe: PlantId '{Stored}' resolved to '{Found}' from the account's station list",
@@ -389,14 +411,93 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             }
             error = error2;
         }
+        if (match != null)
+            lock (_sessionCacheLock) _resolvedStations[cacheKey] = match.Id;
 
         var available = stations.Count == 0
             ? "บัญชีนี้ไม่มีสถานีให้เห็นเลย (หรือ SEMS ไม่ส่งรายการสถานีมา)"
             : "สถานีที่บัญชีนี้เห็น: " + string.Join(", ", stations.Take(10).Select(r => $"{r.Name} [{r.Id}]"));
         SetDiag(match == null
             ? $"ไม่พบ Station ID '{plantId}' ในบัญชี SEMS นี้ — {available}. ({error})"
-            : $"พบสถานีแต่ SEMS ไม่ส่งข้อมูลกลับมา: {error}");
+            : $"พบสถานีแต่ SEMS ไม่ส่งข้อมูลรายละเอียดกลับมา: {error}. แถวในรายการสถานี: {match.Raw}");
         return null;
+    }
+
+    /// <summary>
+    /// Detail endpoints, in the order tried. The v2 monitor-detail call is
+    /// what most accounts answer; stations shared into an account from
+    /// another organisation, or on SEMS+, came back with "data": {} there —
+    /// the station is in the account's list but the legacy call won't
+    /// describe it — so the newer plant-detail call and the v1/v3 variants
+    /// are tried before giving up.
+    /// </summary>
+    private static readonly string[] DetailPaths =
+    {
+        "v2/PowerStation/GetMonitorDetailByPowerstationId",
+        "v3/PowerStation/GetPlantDetailByPowerstationId",
+        "v1/PowerStation/GetMonitorDetailByPowerstationId",
+        "v3/PowerStation/GetMonitorDetailByPowerstationId",
+    };
+
+    /// <summary>Which detail path answered for an account (guarded by _sessionCacheLock).</summary>
+    private static readonly Dictionary<string, string> _detailPathByAccount = new();
+
+    /// <summary>Stations whose detail is empty on every path — skipped for an hour, then retried.</summary>
+    private static readonly Dictionary<string, DateTime> _detailEmptyUntil = new();
+
+    private async Task<(JsonElement? Data, string Error)> FetchDetailAnyAsync(Session session, string stationId)
+    {
+        var emptyKey = session.AccountKey + "|" + stationId.ToLowerInvariant();
+        string? preferred;
+        lock (_sessionCacheLock)
+        {
+            if (_detailEmptyUntil.TryGetValue(emptyKey, out var until) && DateTime.UtcNow < until)
+                return (null, "ทุก endpoint รายละเอียดตอบว่างในรอบก่อน (จะลองใหม่ภายใน 1 ชม.)");
+            _detailPathByAccount.TryGetValue(session.AccountKey, out preferred);
+        }
+
+        var order = preferred == null ? DetailPaths : DetailPaths.OrderBy(x => x == preferred ? 0 : 1).ToArray();
+        var errors = new List<string>();
+        foreach (var path in order)
+        {
+            var (data, error) = await FetchDetailAsync(session, stationId, path);
+            if (data != null)
+            {
+                lock (_sessionCacheLock) _detailPathByAccount[session.AccountKey] = path;
+                return (data, "");
+            }
+            errors.Add($"{path.Split('/').Last()}@{path.Split('/')[0]}: {error}");
+        }
+        lock (_sessionCacheLock) _detailEmptyUntil[emptyKey] = DateTime.UtcNow.AddHours(1);
+        return (null, string.Join(" | ", errors));
+    }
+
+    /// <summary>
+    /// Live figures from the account's station list, for a station whose
+    /// detail endpoints return nothing. Coarser than the detail (no grid or
+    /// battery split, no per-inverter rows) but it is what SEMS shows in its
+    /// own station list: status, current power, today's and total energy.
+    /// Read fresh — the cached list is for ID resolution, not live values.
+    /// </summary>
+    private async Task<RealtimeData?> RealtimeFromListAsync(Session session, string? plantId,
+        List<StationRow>? freshRows = null)
+    {
+        var rows = freshRows ?? await ScanStationRowsAsync(session);
+        var row = rows.FirstOrDefault(r => StationIdMatches(r.Id, plantId));
+        if (row == null || !row.HasLiveData) return null;
+
+        var pacW = row.PacW ?? 0;
+        // SEMS list "status": -1 offline, 0 waiting, 1 generating, 2 fault.
+        var online = (row.Status.HasValue && row.Status.Value != -1) || pacW > 0;
+        return new RealtimeData
+        {
+            Timestamp = DateTime.UtcNow,
+            CurrentPowerKw = pacW / 1000m,
+            TodayEnergyKwh = row.TodayKwh ?? 0,
+            TotalEnergyKwh = row.TotalKwh ?? 0,
+            IsOnline = online,
+            Health = online ? HealthState.Healthy : HealthState.Disconnected,
+        };
     }
 
     /// <summary>
@@ -404,10 +505,9 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     /// flag, a non-zero code or a payload with no station data is a failure
     /// with a reason — not a station that happens to read zero.
     /// </summary>
-    private async Task<(JsonElement? Data, string Error)> FetchDetailAsync(Session session, string stationId)
+    private async Task<(JsonElement? Data, string Error)> FetchDetailAsync(Session session, string stationId, string path)
     {
-        var json = await PostAsync(session, "v2/PowerStation/GetMonitorDetailByPowerstationId",
-            new { powerStationId = stationId });
+        var json = await PostAsync(session, path, new { powerStationId = stationId });
         if (json == null) return (null, "SEMS ไม่ตอบกลับ / HTTP error");
 
         var root = json.Value;
@@ -729,6 +829,8 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         }
 
         var resolved = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Scanned at most once per round, and only if some station needs it.
+        var freshList = new Lazy<Task<List<StationRow>>>(() => ScanStationRowsAsync(session));
         using var gate = new SemaphoreSlim(3);
         var tasks = plantIds.Distinct(StringComparer.OrdinalIgnoreCase).Select(async pid =>
         {
@@ -738,6 +840,20 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             {
                 BeginDiag();
                 var detail = await GetStationDetailAsync(session, pid);
+                if (detail == null)
+                {
+                    var rows = await freshList.Value;
+                    var fromList = await RealtimeFromListAsync(session, pid, rows);
+                    if (fromList != null)
+                    {
+                        sw.Stop();
+                        var match = rows.FirstOrDefault(r => StationIdMatches(r.Id, pid));
+                        if (match != null) resolved[pid] = match.Id;
+                        return (pid, fromList.IsOnline
+                            ? ApiResult<RealtimeData>.Ok(fromList, "Device online (station list)", sw.Elapsed)
+                            : ApiResult<RealtimeData>.Offline(fromList, "Station list reports offline", sw.Elapsed));
+                    }
+                }
                 sw.Stop();
                 if (detail == null)
                 {
@@ -806,9 +922,15 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         if (session == null) { SetDiag("เข้าสู่ระบบ SEMS ไม่สำเร็จ"); return devices; }
 
         var detail = await GetStationDetailAsync(session, credentials.PlantId);
-        if (detail == null) return devices;
+        var why = TakeDiag();
+        string stationId;
+        lock (_sessionCacheLock)
+            stationId = _resolvedStations.TryGetValue(session.AccountKey + "|" + (credentials.PlantId ?? "").Trim().ToLowerInvariant(), out var r)
+                ? r : (credentials.PlantId ?? "").Trim();
+        if (detail != null) stationId = detail.Value.StationId;
 
-        if (detail.Value.Data.TryGetProperty("inverter", out var inverters) && inverters.ValueKind == JsonValueKind.Array)
+        if (detail != null
+            && detail.Value.Data.TryGetProperty("inverter", out var inverters) && inverters.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in inverters.EnumerateArray())
             {
@@ -823,7 +945,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         {
             foreach (var path in new[] { "v2/PowerStation/GetInverterAllPoint", "v1/PowerStation/GetInverterAllPoint" })
             {
-                var json = await PostAsync(session, path, new { powerStationId = detail.Value.StationId });
+                var json = await PostAsync(session, path, new { powerStationId = stationId });
                 if (json == null || !json.Value.TryGetProperty("data", out var d) || d.ValueKind != JsonValueKind.Object) continue;
                 var rows = FirstArray(d, "inverterPoints", "inverters", "inverter", "list");
                 if (rows == null) continue;
@@ -838,8 +960,9 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
 
         if (devices.Count == 0)
         {
-            var keys = string.Join(",", detail.Value.Data.EnumerateObject().Select(p => p.Name).Take(20));
-            SetDiag($"SEMS ส่งข้อมูลสถานี {detail.Value.StationId} มา แต่ไม่มีรายการอินเวอร์เตอร์ (keys: {keys})");
+            SetDiag(detail == null
+                ? $"{why ?? "ดึงรายละเอียดสถานีไม่ได้"} — และ endpoint รายการอินเวอร์เตอร์ก็ไม่ส่งข้อมูลมา"
+                : $"SEMS ส่งข้อมูลสถานี {stationId} มา แต่ไม่มีรายการอินเวอร์เตอร์ (keys: {string.Join(",", detail.Value.Data.EnumerateObject().Select(p => p.Name).Take(20))})");
         }
         return devices;
     }
