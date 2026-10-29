@@ -23,6 +23,17 @@ public class WorkOrder
     [Required]
     public WorkOrderType Type { get; set; } = WorkOrderType.PanelCleaning;
 
+    /// <summary>
+    /// The visit also washed the panels. A contract PM round usually includes
+    /// a cleaning, and recording it as one visit (rather than a PM order plus
+    /// a separate cleaning entry) is how crews actually work. Completing the
+    /// order counts the cleaning against the contract either way.
+    /// </summary>
+    public bool IncludesCleaning { get; set; }
+
+    /// <summary>Whether completing this order counts as a cleaning.</summary>
+    public bool CountsAsCleaning => Type == WorkOrderType.PanelCleaning || IncludesCleaning;
+
     public WorkOrderStatus Status { get; set; } = WorkOrderStatus.Draft;
 
     // ─── Link to Installation (optional — null = standalone job) ───

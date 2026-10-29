@@ -91,6 +91,13 @@ public class VisitsModel : PageModel
 
         var all = new List<VisitVm>();
 
+        // A PM visit that also cleaned writes a cleaning record too; the
+        // customer should see one visit, not the same morning twice.
+        var orderNumbers = orders.Where(o => o.IncludesCleaning).Select(o => o.WorkOrderNumber).ToList();
+        cleanings = cleanings
+            .Where(c => c.Notes == null || !orderNumbers.Any(n => c.Notes.StartsWith($"จากใบสั่งงาน {n}")))
+            .ToList();
+
         foreach (var w in orders)
         {
             var done = w.Status >= Models.Enums.WorkOrderStatus.Completed;
@@ -111,7 +118,7 @@ public class VisitsModel : PageModel
                 When = when,
                 SiteName = w.Installation!.SiteName,
                 SiteId = w.Installation.Id,
-                Kind = $"{icon} {Models.Enums.UiLabels.Label(w.Type)}",
+                Kind = $"{icon} {Models.Enums.UiLabels.Label(w.Type, w.IncludesCleaning)}",
                 Status = done ? "Completed" : w.Status == Models.Enums.WorkOrderStatus.InProgress ? "InProgress" : "Scheduled",
                 Performer = w.AssignedToUser?.FullName ?? w.AssignedTeam,
                 // Customers see what was done, not internal planning notes.

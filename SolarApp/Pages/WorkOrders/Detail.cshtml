@@ -17,7 +17,7 @@
             <h4 class="mb-0">@wo.Title</h4>
         </div>
         <div class="text-muted small mt-1">
-            <i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type)
+            <i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type, wo.IncludesCleaning)
             · @wo.WorkOrderNumber
             · <i class="bi bi-calendar3"></i> @wo.ScheduledDate.ToString("dd/MM/yyyy")
             @if (wo.ScheduledTime.HasValue) { <span>@wo.ScheduledTime.Value.ToString(@"hh\:mm")</span> }
@@ -315,7 +315,7 @@
                             ยังติ๊กไม่ครบ @wo.ChecklistItems.Count(i => !i.IsCompleted) รายการ — ปิดงานได้ แต่ควรตรวจก่อน
                         </div>
                     }
-                    @if (wo.Type == WorkOrderType.PanelCleaning && wo.InstallationId.HasValue)
+                    @if (wo.CountsAsCleaning && wo.InstallationId.HasValue)
                     {
                         <div class="small text-muted mb-2">
                             <i class="bi bi-droplet"></i> งานล้างแผง: ระบบจะนับครั้งล้าง บันทึกลงประวัติล้างแผงของไซต์ และตั้งรอบถัดไปให้

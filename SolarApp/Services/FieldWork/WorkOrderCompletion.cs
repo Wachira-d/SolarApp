@@ -30,7 +30,7 @@ public static class WorkOrderCompletion
             wo.CompletionNotes = completionNotes.Trim();
         wo.UpdatedAt = completedAtUtc;
 
-        if (wo.Type == WorkOrderType.PanelCleaning && wo.InstallationId.HasValue)
+        if (wo.CountsAsCleaning && wo.InstallationId.HasValue)
         {
             var inst = wo.Installation
                        ?? await context.Installations.FirstOrDefaultAsync(i => i.Id == wo.InstallationId.Value);

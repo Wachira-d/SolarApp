@@ -27,11 +27,11 @@
                     <i class="bi bi-plus-lg"></i> สร้างงาน
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end">
-                    <li><a class="dropdown-item" asp-page="/WorkOrders/Create"><i class="bi bi-clipboard2-plus"></i> นัดงานเข้าไซต์ (ใบสั่งงาน)</a></li>
-                    <li><a class="dropdown-item" asp-page="/WorkOrders/Create" asp-route-done="true"><i class="bi bi-check2-circle"></i> บันทึกงานที่ทำเสร็จแล้ว</a></li>
+                    <li><a class="dropdown-item" asp-page="/WorkOrders/Create" asp-route-done="true"><i class="bi bi-check2-circle"></i> บันทึกการเข้าบริการ (ทำแล้ว)</a></li>
+                    <li><a class="dropdown-item" asp-page="/WorkOrders/Create" asp-route-done="false"><i class="bi bi-calendar-plus"></i> นัดล่วงหน้า</a></li>
                     <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item" asp-page="/ServiceTickets/Create"><i class="bi bi-ticket-detailed"></i> รับเรื่องแจ้งซ่อม</a></li>
-                    <li class="dropdown-item-text small text-muted">ล้างแผง: บันทึกจากหน้าไซต์ → "ล้างแผง"</li>
+                    <li class="dropdown-item-text small text-muted">เปิดจากหน้าไซต์จะเลือกไซต์และงานตามสัญญาให้</li>
                 </ul>
             </div>
         </div>
@@ -94,8 +94,10 @@
                     </div>
                     @if (Model.CanCreate)
                     {
-                        <a asp-page="/Installations/Cleaning" asp-route-id="@inst.Id" class="btn btn-warning btn-sm">
-                            <i class="bi bi-droplet"></i> บันทึกการล้าง
+                        @* Same form as the site page: the contract's work (cleaning, or
+                           cleaning + PM) is pre-selected and counted on save. *@
+                        <a asp-page="/WorkOrders/Create" asp-route-installationId="@inst.Id" asp-route-done="true" class="btn btn-warning btn-sm">
+                            <i class="bi bi-clipboard2-check"></i> บันทึกการเข้าบริการ
                         </a>
                     }
                 </div>

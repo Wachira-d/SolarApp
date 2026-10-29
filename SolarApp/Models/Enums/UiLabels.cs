@@ -24,6 +24,10 @@ public static class UiLabels
         _ => t.ToString()
     };
 
+    /// <summary>What the visit was, including a cleaning done as part of it.</summary>
+    public static string Label(WorkOrderType t, bool includesCleaning) =>
+        includesCleaning && t != WorkOrderType.PanelCleaning ? $"{Label(t)} + ล้างแผง" : Label(t);
+
     public static string Icon(WorkOrderType t) => t switch
     {
         WorkOrderType.PanelCleaning => "droplet",

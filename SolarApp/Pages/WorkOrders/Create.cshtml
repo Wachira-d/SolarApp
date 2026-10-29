@@ -4,22 +4,18 @@
 @using System.Text.Json
 @{
     var quick = Model.LockedSite != null;
-    ViewData["Title"] = quick ? $"บันทึกงาน - {Model.LockedSite!.SiteName}" : "สร้างใบสั่งงาน";
-    var typeDefaultsJson = JsonSerializer.Serialize(Model.TypeDefaults);
     var site = Model.LockedSite;
-    var backPage = quick ? "/Installations/Detail" : "/Jobs/Index";
-    var tileTypes = new[]
-    {
-        WorkOrderType.PanelCleaning, WorkOrderType.PreventiveMaintenance,
-        WorkOrderType.CorrectiveRepair, WorkOrderType.Inspection,
-        WorkOrderType.NewInstallation, WorkOrderType.Commissioning,
-        WorkOrderType.Decommission, WorkOrderType.Other
-    };
+    ViewData["Title"] = quick ? $"บันทึกการเข้าบริการ - {site!.SiteName}" : "บันทึกการเข้าบริการ";
+    var typeDefaultsJson = JsonSerializer.Serialize(Model.TypeDefaults);
+    var kindsJson = JsonSerializer.Serialize(SolarApp.Pages.WorkOrders.CreateModel.VisitKinds
+        .ToDictionary(k => k.Key, k => new { type = (int)k.Type, cleaning = k.Cleaning, label = k.Label }));
+    var done = Model.Input.MarkCompleted;
+    var cleaningNotInScope = quick && !site!.HasCleaningInScope;
 }
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
-        <h4 class="mb-0"><i class="bi bi-clipboard2-plus"></i> @(quick ? "บันทึกงานเข้าไซต์" : "สร้างใบสั่งงาน")</h4>
+        <h4 class="mb-0"><i class="bi bi-clipboard2-check"></i> บันทึกการเข้าบริการ</h4>
         @if (quick)
         {
             <div class="text-muted">
@@ -29,7 +25,7 @@
         }
         else
         {
-            <small class="text-muted">นัดล่วงหน้า หรือบันทึกงานที่ทำเสร็จแล้วก็ได้</small>
+            <small class="text-muted">ล้างแผง · บำรุงรักษา · ซ่อม — บันทึกงานที่ทำแล้ว หรือนัดล่วงหน้า</small>
         }
     </div>
     @if (quick)
@@ -49,8 +45,8 @@
     <div class="alert alert-info d-flex align-items-start gap-2">
         <i class="bi bi-ticket-detailed fs-5"></i>
         <div>
-            สร้างจากเรื่องแจ้งซ่อม <strong>@Model.SourceTicket.TicketNumber</strong> — @Model.SourceTicket.Subject
-            <div class="small text-muted">เมื่อปิดงานนี้ เรื่องแจ้งซ่อมจะถูกตั้งเป็น "แก้ไขแล้ว" ให้อัตโนมัติ</div>
+            จากเรื่องแจ้งซ่อม <strong>@Model.SourceTicket.TicketNumber</strong> — @Model.SourceTicket.Subject
+            <div class="small text-muted">เมื่องานนี้เสร็จ เรื่องแจ้งซ่อมจะถูกตั้งเป็น "แก้ไขแล้ว" ให้อัตโนมัติ</div>
         </div>
     </div>
 }
@@ -68,33 +64,64 @@
 
     <div class="row g-3">
         <div class="col-lg-7">
-            @* ── 1. What kind of visit ── *@
+            @* ── 1. Done already, or booking ahead? Done is the usual case. ── *@
             <div class="card border-0 shadow-sm mb-3">
-                <div class="card-header bg-white"><h6 class="mb-0">1. ประเภทงาน</h6></div>
                 <div class="card-body">
-                    <div class="row g-2" id="typeTiles">
-                        @foreach (var t in tileTypes)
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <input type="radio" class="btn-check" name="Input.MarkCompleted" id="mode-done" value="true"
+                                   checked="@done" autocomplete="off" />
+                            <label class="btn btn-outline-success w-100 py-2" for="mode-done">
+                                <i class="bi bi-check2-circle"></i> ทำเสร็จแล้ว
+                                <small class="d-block">บันทึกงานที่เข้าไปทำมา</small>
+                            </label>
+                        </div>
+                        <div class="col-6">
+                            <input type="radio" class="btn-check" name="Input.MarkCompleted" id="mode-plan" value="false"
+                                   checked="@(!done)" autocomplete="off" />
+                            <label class="btn btn-outline-primary w-100 py-2" for="mode-plan">
+                                <i class="bi bi-calendar-plus"></i> นัดล่วงหน้า
+                                <small class="d-block">ยังไม่ได้เข้าไปทำ</small>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            @* ── 2. What was done ── *@
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-white"><h6 class="mb-0">งานที่ทำ</h6></div>
+                <div class="card-body">
+                    <div class="row g-2" id="kindTiles">
+                        @foreach (var k in SolarApp.Pages.WorkOrders.CreateModel.VisitKinds.Where(k => k.Common || !quick))
                         {
-                            var id = $"type-{(int)t}";
-                            <div class="col-6 col-md-3">
-                                <input type="radio" class="btn-check" name="Input.Type" id="@id" value="@((int)t)"
-                                       checked="@(Model.Input.Type == t)" autocomplete="off" />
+                            var id = $"kind-{k.Key}";
+                            <div class="@(k.Key == "pm_clean" ? "col-12 col-md-6" : "col-6 col-md-3")">
+                                <input type="radio" class="btn-check" name="Input.VisitKind" id="@id" value="@k.Key"
+                                       checked="@(Model.Input.VisitKind == k.Key)" autocomplete="off" />
                                 <label class="btn btn-outline-primary w-100 h-100 py-3 d-flex flex-column align-items-center gap-1" for="@id">
-                                    <i class="bi bi-@UiLabels.Icon(t) fs-4"></i>
-                                    <span class="small">@UiLabels.Label(t)</span>
+                                    <i class="bi bi-@k.Icon fs-4"></i>
+                                    <span class="small fw-semibold">@k.Label</span>
+                                    @if (k.Key == "pm_clean") { <small class="text-muted">รอบตามสัญญา — นับครั้งล้างให้ด้วย</small> }
                                 </label>
                             </div>
                         }
                     </div>
-                    <span asp-validation-for="Input.Type" class="text-danger small"></span>
+                    <span asp-validation-for="Input.VisitKind" class="text-danger small"></span>
+                    @if (cleaningNotInScope)
+                    {
+                        <div class="small text-muted mt-2" id="cleanScopeNote">
+                            <i class="bi bi-info-circle"></i> ไซต์นี้ไม่อยู่ในสัญญาล้างแผง — บันทึกการล้างได้ (งานครั้งเดียว) แต่ระบบจะไม่ตั้งรอบถัดไป
+                        </div>
+                    }
                 </div>
             </div>
 
-            @* ── 2. Site (only when not opened from one) ── *@
+            @* ── 3. Site (only when not opened from one) ── *@
             @if (!quick)
             {
                 <div class="card border-0 shadow-sm mb-3">
-                    <div class="card-header bg-white"><h6 class="mb-0">2. ไซต์งาน <span class="text-danger">*</span></h6></div>
+                    <div class="card-header bg-white"><h6 class="mb-0">ไซต์งาน <span class="text-danger">*</span></h6></div>
                     <div class="card-body">
                         <ul class="nav nav-pills mb-3" role="tablist">
                             <li class="nav-item">
@@ -116,13 +143,11 @@
                                 </select>
                                 <span asp-validation-for="Input.InstallationId" class="text-danger small"></span>
                                 <small class="text-muted d-block mt-1">
-                                    เคล็ดลับ: เปิดจากหน้าไซต์ (ปุ่ม "บันทึกงานเข้าไซต์") จะเลือกไซต์ให้อัตโนมัติ
+                                    เคล็ดลับ: เปิดจากหน้าไซต์ (ปุ่ม "บันทึกการเข้าบริการ") จะเลือกไซต์และงานตามสัญญาให้อัตโนมัติ
                                 </small>
                             </div>
                             <div class="tab-pane fade" id="tabStandalone">
-                                <small class="text-muted d-block mb-2">
-                                    สำหรับไซต์ที่ยังไม่อยู่ในระบบ (ลูกค้าใหม่, งานครั้งเดียว)
-                                </small>
+                                <small class="text-muted d-block mb-2">สำหรับไซต์ที่ยังไม่อยู่ในระบบ (ลูกค้าใหม่, งานครั้งเดียว)</small>
                                 <div class="row g-2">
                                     <div class="col-md-6">
                                         <label class="form-label">ชื่อไซต์ *</label>
@@ -156,66 +181,58 @@
                 </div>
             }
 
-            @* ── 3. Details ── *@
+            @* ── 4. When, who, what was found ── *@
             <div class="card border-0 shadow-sm mb-3">
-                <div class="card-header bg-white"><h6 class="mb-0">@(quick ? "2" : "3"). รายละเอียด</h6></div>
+                <div class="card-header bg-white"><h6 class="mb-0">รายละเอียด</h6></div>
                 <div class="card-body">
                     <div class="row g-3">
-                        <div class="col-12">
-                            <label class="form-label">หัวข้องาน *</label>
-                            <input asp-for="Input.Title" class="form-control" placeholder="เช่น ล้างแผงรอบไตรมาส 4" />
-                            <span asp-validation-for="Input.Title" class="text-danger small"></span>
-                        </div>
                         <div class="col-md-6">
-                            <label class="form-label">วันที่ *</label>
+                            <label class="form-label"><span class="date-label">@(done ? "วันที่เข้าทำ" : "วันที่นัด")</span> *</label>
                             <input asp-for="Input.ScheduledDate" type="date" class="form-control" />
                             <span asp-validation-for="Input.ScheduledDate" class="text-danger small"></span>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">ผู้รับผิดชอบ</label>
+                            <label class="form-label">ผู้เข้าทำงาน</label>
                             <select asp-for="Input.AssignedToUserId" class="form-select">
-                                <option value="">(ยังไม่ระบุ)</option>
+                                <option value="">(ไม่ระบุ)</option>
                                 @foreach (var u in Model.Users) { <option value="@u.Value">@u.Text</option> }
                             </select>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">รายละเอียด / สิ่งที่ต้องทำ</label>
+                            <label class="form-label">หัวข้อ *</label>
+                            <input asp-for="Input.Title" class="form-control" />
+                            <span asp-validation-for="Input.Title" class="text-danger small"></span>
+                        </div>
+
+                        <div class="col-12 done-only @(done ? "" : "d-none")">
+                            <label class="form-label">สิ่งที่ทำ / สิ่งที่พบ</label>
+                            <textarea asp-for="Input.CompletionNotes" class="form-control" rows="3"
+                                      placeholder="เช่น ล้างแผง 486 แผ่น, ขันขั้วต่อ MC4 string 3, วัดค่าฉนวนปกติ"></textarea>
+                        </div>
+                        <div class="col-md-6 done-only @(done ? "" : "d-none")">
+                            <label class="form-label"><i class="bi bi-camera"></i> รูปก่อนทำ</label>
+                            <input type="file" name="BeforePhotoFiles" class="form-control" multiple accept="image/*" />
+                        </div>
+                        <div class="col-md-6 done-only @(done ? "" : "d-none")">
+                            <label class="form-label"><i class="bi bi-camera-fill"></i> รูปหลังทำ</label>
+                            <input type="file" name="AfterPhotoFiles" class="form-control" multiple accept="image/*" />
+                        </div>
+
+                        <div class="col-12 plan-only @(done ? "d-none" : "")">
+                            <label class="form-label">สิ่งที่ต้องทำ</label>
                             <textarea asp-for="Input.Description" class="form-control" rows="3"
                                       placeholder="เช่น อินเวอร์เตอร์ 2 ขึ้น error E031 ตรวจสาย DC"></textarea>
                             <span asp-validation-for="Input.Description" class="text-danger small"></span>
                         </div>
-                        <div class="col-12">
-                            <label class="form-label">รายการตรวจสอบ (checklist) <small class="text-muted">— 1 รายการต่อบรรทัด</small></label>
-                            <textarea asp-for="Input.ChecklistItems" class="form-control" rows="4"></textarea>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            @* ── 4. Already done? ── *@
-            <div class="card border-0 shadow-sm mb-3 border-success" id="doneCard">
-                <div class="card-body">
-                    <div class="form-check form-switch fs-5">
-                        <input asp-for="Input.MarkCompleted" class="form-check-input" role="switch" />
-                        <label asp-for="Input.MarkCompleted" class="form-check-label fw-semibold">
-                            ทำเสร็จแล้ว — บันทึกเป็นงานที่เสร็จทันที
-                        </label>
-                    </div>
-                    <small class="text-muted d-block mb-2">
-                        ใช้เมื่อเข้าไซต์มาแล้วและมาจดย้อนหลัง งานล้างแผงจะไปนับครั้งล้างและตั้งรอบถัดไปให้เอง
-                    </small>
-                    <div id="doneFields" class="row g-3 @(Model.Input.MarkCompleted ? "" : "d-none")">
                         <div class="col-12">
-                            <label class="form-label">บันทึกปิดงาน / สิ่งที่พบ</label>
-                            <textarea asp-for="Input.CompletionNotes" class="form-control" rows="2"></textarea>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label"><i class="bi bi-camera"></i> รูปก่อนทำงาน</label>
-                            <input type="file" name="BeforePhotoFiles" class="form-control" multiple accept="image/*" />
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label"><i class="bi bi-camera-fill"></i> รูปหลังทำงาน</label>
-                            <input type="file" name="AfterPhotoFiles" class="form-control" multiple accept="image/*" />
+                            <a class="small" data-bs-toggle="collapse" href="#checklistBox" role="button">
+                                <i class="bi bi-list-check"></i> รายการตรวจสอบ (checklist)
+                            </a>
+                            <div class="collapse @(done ? "" : "show")" id="checklistBox">
+                                <textarea asp-for="Input.ChecklistItems" class="form-control mt-1" rows="5"></textarea>
+                                <small class="text-muted">1 รายการต่อบรรทัด · งานที่ "ทำเสร็จแล้ว" จะติ๊กครบให้</small>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -223,18 +240,17 @@
         </div>
 
         <div class="col-lg-5">
-            @* ── Advanced, folded away ── *@
             <div class="card border-0 shadow-sm mb-3">
                 <button class="card-header bg-white w-100 text-start border-0 d-flex justify-content-between align-items-center"
                         type="button" data-bs-toggle="collapse" data-bs-target="#advanced">
                     <h6 class="mb-0"><i class="bi bi-sliders"></i> ตัวเลือกเพิ่มเติม</h6>
                     <i class="bi bi-chevron-down"></i>
                 </button>
-                <div class="collapse @(quick ? "" : "show")" id="advanced">
+                <div class="collapse" id="advanced">
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-6">
-                                <label class="form-label">เวลานัด</label>
+                                <label class="form-label">เวลา</label>
                                 <input asp-for="Input.ScheduledTimeStr" type="time" class="form-control" />
                             </div>
                             <div class="col-6">
@@ -242,21 +258,16 @@
                                 <input asp-for="Input.EstimatedDurationMinutes" type="number" min="15" step="15" class="form-control" />
                                 <span asp-validation-for="Input.EstimatedDurationMinutes" class="text-danger small"></span>
                             </div>
-                            <div class="col-md-6">
+                            <div class="col-md-6 plan-only @(done ? "d-none" : "")">
                                 <label class="form-label">ทำซ้ำทุก (เดือน)</label>
                                 <input asp-for="Input.RecurrenceMonths" type="number" min="0" max="120" class="form-control" placeholder="เว้นว่าง = ครั้งเดียว" />
                                 <span asp-validation-for="Input.RecurrenceMonths" class="text-danger small"></span>
-                                <small class="text-muted">ปิดงานแล้วระบบจะสร้างงานรอบถัดไปให้</small>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">ทีม</label>
+                                <label class="form-label">ทีม / ผู้รับเหมา</label>
                                 <input asp-for="Input.AssignedTeam" class="form-control" placeholder="เช่น ทีมล้าง A" />
                             </div>
-                            <div class="col-12">
-                                <label class="form-label">ขอบเขตงาน</label>
-                                <textarea asp-for="Input.Scope" class="form-control" rows="2"></textarea>
-                            </div>
-                            <div class="col-12">
+                            <div class="col-12 plan-only @(done ? "d-none" : "")">
                                 <label class="form-label">หมายเหตุพิเศษ (กุญแจ, ผู้ติดต่อ, ข้อควรระวัง)</label>
                                 <textarea asp-for="Input.SpecialInstructions" class="form-control" rows="2"></textarea>
                             </div>
@@ -276,8 +287,8 @@
             </div>
 
             <div class="d-none d-lg-block">
-                <button type="submit" class="btn btn-warning btn-lg w-100" id="submitDesktop">
-                    <i class="bi bi-check2-circle"></i> <span class="submit-label">บันทึกใบสั่งงาน</span>
+                <button type="submit" class="btn btn-warning btn-lg w-100">
+                    <i class="bi bi-check2-circle"></i> <span class="submit-label">@(done ? "บันทึกการเข้าบริการ" : "บันทึกนัดหมาย")</span>
                 </button>
             </div>
         </div>
@@ -287,7 +298,7 @@
     <div class="d-lg-none position-sticky bottom-0 py-2 mt-3"
          style="background:var(--app-bg, #f5f6fa); box-shadow:0 -4px 12px rgba(0,0,0,.08)">
         <button type="submit" class="btn btn-warning btn-lg w-100">
-            <i class="bi bi-check2-circle"></i> <span class="submit-label">บันทึกใบสั่งงาน</span>
+            <i class="bi bi-check2-circle"></i> <span class="submit-label">@(done ? "บันทึกการเข้าบริการ" : "บันทึกนัดหมาย")</span>
         </button>
     </div>
 </form>
@@ -297,52 +308,51 @@
     <script>
         // Per-type defaults for Title + Checklist, from Admin → ค่ามาตรฐานใบสั่งงาน.
         const WO_DEFAULTS = @Html.Raw(typeDefaultsJson);
-        const OTHER = 99;
+        const KINDS = @Html.Raw(kindsJson);
+        const CLEANING_TYPE = 1, OTHER = 99;
 
+        // Title + checklist follow the chosen kind; a cleaning-included PM
+        // gets both checklists. Anything typed by hand (or copied from a
+        // ticket) is kept: only empty fields or the previous default change.
         (function () {
             const titleEl = document.querySelector('[name="Input.Title"]');
             const checkEl = document.querySelector('[name="Input.ChecklistItems"]');
-            const radios  = document.querySelectorAll('input[name="Input.Type"]');
-            if (!titleEl || !checkEl || !radios.length) return;
+            if (!titleEl || !checkEl) return;
+            let lastTitle = titleEl.value, lastChecklist = checkEl.value;
 
-            let lastTitle = titleEl.value;
-            let lastChecklist = checkEl.value;
-
-            function current() {
-                const r = document.querySelector('input[name="Input.Type"]:checked');
-                return r ? parseInt(r.value, 10) : OTHER;
+            function defaultsFor(key) {
+                const k = KINDS[key] || { type: OTHER, cleaning: false, label: '' };
+                const d = WO_DEFAULTS[k.type] || WO_DEFAULTS[OTHER] || { title: '', checklist: '' };
+                if (!k.cleaning) return { title: d.title || k.label, checklist: d.checklist || '' };
+                const c = WO_DEFAULTS[CLEANING_TYPE] || { checklist: '' };
+                return {
+                    title: k.label,
+                    checklist: [d.checklist, c.checklist].filter(x => x && x.trim()).join('\n')
+                };
             }
-            // Only overwrite what is empty or still the previous default, so a
-            // title typed by hand (or copied from a ticket) survives a type change.
             function apply() {
-                const d = WO_DEFAULTS[current()] || WO_DEFAULTS[OTHER] || { title: '', checklist: '' };
-                if (titleEl.value.trim() === '' || titleEl.value === lastTitle) {
-                    titleEl.value = d.title || '';
-                    lastTitle = titleEl.value;
-                }
-                if (checkEl.value.trim() === '' || checkEl.value === lastChecklist) {
-                    checkEl.value = d.checklist || '';
-                    lastChecklist = checkEl.value;
-                }
+                const r = document.querySelector('input[name="Input.VisitKind"]:checked');
+                const d = defaultsFor(r ? r.value : 'other');
+                if (titleEl.value.trim() === '' || titleEl.value === lastTitle) { titleEl.value = d.title; lastTitle = d.title; }
+                if (checkEl.value.trim() === '' || checkEl.value === lastChecklist) { checkEl.value = d.checklist; lastChecklist = d.checklist; }
             }
             apply();
-            radios.forEach(r => r.addEventListener('change', apply));
+            document.querySelectorAll('input[name="Input.VisitKind"]').forEach(r => r.addEventListener('change', apply));
         })();
 
-        // "ทำเสร็จแล้ว" reveals the closing notes + photos and relabels the button.
+        // Done vs planned: swap the fields that only make sense for one of them.
         (function () {
-            const sw = document.querySelector('[name="Input.MarkCompleted"][type="checkbox"]');
-            const fields = document.getElementById('doneFields');
-            const labels = document.querySelectorAll('.submit-label');
             const date = document.querySelector('[name="Input.ScheduledDate"]');
-            if (!sw || !fields) return;
             function sync() {
-                fields.classList.toggle('d-none', !sw.checked);
-                labels.forEach(l => l.textContent = sw.checked ? 'บันทึกงานที่ทำเสร็จแล้ว' : 'บันทึกใบสั่งงาน');
-                if (date) date.max = sw.checked ? new Date().toISOString().slice(0, 10) : '';
+                const done = document.getElementById('mode-done')?.checked;
+                document.querySelectorAll('.done-only').forEach(e => e.classList.toggle('d-none', !done));
+                document.querySelectorAll('.plan-only').forEach(e => e.classList.toggle('d-none', !!done));
+                document.querySelectorAll('.submit-label').forEach(l => l.textContent = done ? 'บันทึกการเข้าบริการ' : 'บันทึกนัดหมาย');
+                document.querySelectorAll('.date-label').forEach(l => l.textContent = done ? 'วันที่เข้าทำ' : 'วันที่นัด');
+                if (date) date.max = done ? new Date().toISOString().slice(0, 10) : '';
             }
+            document.querySelectorAll('input[name="Input.MarkCompleted"]').forEach(r => r.addEventListener('change', sync));
             sync();
-            sw.addEventListener('change', sync);
         })();
 
         // Re-open the standalone tab after a validation round-trip.

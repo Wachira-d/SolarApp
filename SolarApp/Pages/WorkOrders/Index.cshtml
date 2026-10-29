@@ -117,7 +117,7 @@
                     <span class="badge @UiLabels.Badge(wo.Status) text-nowrap">@UiLabels.Label(wo.Status)</span>
                 </div>
                 <div class="small text-muted">
-                    <i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type) · @wo.SiteName
+                    <i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type, wo.IncludesCleaning) · @wo.SiteName
                 </div>
                 <div class="small d-flex justify-content-between mt-1">
                     <span class="@(wo.IsOverdue ? "text-danger fw-bold" : (wo.ScheduledDate.Date == today ? "text-warning fw-bold" : "text-muted"))">
@@ -161,7 +161,7 @@
                             </td>
                             <td>
                                 <div class="fw-semibold">@wo.Title</div>
-                                <small class="text-muted"><i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type) · @wo.WorkOrderNumber</small>
+                                <small class="text-muted"><i class="bi bi-@UiLabels.Icon(wo.Type)"></i> @UiLabels.Label(wo.Type, wo.IncludesCleaning) · @wo.WorkOrderNumber</small>
                             </td>
                             <td>
                                 @wo.SiteName

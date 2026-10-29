@@ -157,7 +157,7 @@ public class IndexModel : PageModel
             "ใบสั่งงาน", "workorder", "clipboard2-check",
             w.Id, w.InstallationId, w.SiteName,
             w.Installation?.Customer?.FullName ?? w.ExternalCustomerName,
-            string.IsNullOrWhiteSpace(w.Title) ? UiLabels.Label(w.Type) : w.Title,
+            string.IsNullOrWhiteSpace(w.Title) ? UiLabels.Label(w.Type, w.IncludesCleaning) : w.Title,
             w.ScheduledDate, w.ActualEndTime,
             UiLabels.Label(w.Status), UiLabels.Badge(w.Status),
             w.Status < WorkOrderStatus.Completed && w.Status != WorkOrderStatus.Cancelled,

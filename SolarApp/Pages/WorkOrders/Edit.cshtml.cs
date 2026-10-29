@@ -49,6 +49,7 @@ public class EditModel : PageModel
         [StringLength(100)] public string? AssignedTeam { get; set; }
         public string? AssignedToUserId { get; set; }
         [Required] public WorkOrderType Type { get; set; }
+        public bool IncludesCleaning { get; set; }
     }
 
     public async Task<IActionResult> OnGetAsync(int id)
@@ -74,6 +75,7 @@ public class EditModel : PageModel
             AssignedTeam = wo.AssignedTeam,
             AssignedToUserId = wo.AssignedToUserId,
             Type = wo.Type,
+            IncludesCleaning = wo.IncludesCleaning,
         };
         await LoadUsersAsync();
         return Page();
@@ -107,6 +109,10 @@ public class EditModel : PageModel
         wo.Scope = Input.Scope;
         wo.SpecialInstructions = Input.SpecialInstructions;
         wo.Type = Input.Type;
+        // Only meaningful while the visit is still to be done: a completed
+        // order has already been counted (or not) against the contract.
+        if (wo.Status < WorkOrderStatus.Completed)
+            wo.IncludesCleaning = Input.Type != WorkOrderType.PanelCleaning && Input.IncludesCleaning;
 
         // If rescheduling to a different date, clear the reminder flag so the
         // background job fires a fresh LINE notification for the new date.

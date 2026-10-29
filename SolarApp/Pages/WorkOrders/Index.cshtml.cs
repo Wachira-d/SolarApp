@@ -178,6 +178,7 @@ BEGIN
         [CustomerFeedback] nvarchar(max) NULL,
         [ServiceTicketId] int NULL,
         [ReminderSentAt] datetime2 NULL,
+        [IncludesCleaning] bit NOT NULL DEFAULT 0,
         [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
         [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
     );

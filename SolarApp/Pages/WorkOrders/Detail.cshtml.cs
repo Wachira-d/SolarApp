@@ -131,6 +131,7 @@ public class DetailModel : PageModel
                     {
                         WorkOrderNumber = await WorkOrderCompletion.NextNumberAsync(_context, nextDate),
                         Type = wo.Type,
+                        IncludesCleaning = wo.IncludesCleaning,
                         Status = WorkOrderStatus.Scheduled,
                         Title = wo.Title,
                         Description = wo.Description,
@@ -171,7 +172,7 @@ public class DetailModel : PageModel
 
             StatusMessage = createdNumber != null
                 ? $"ปิดงานแล้ว · สร้างงานรอบถัดไป {createdNumber} ให้แล้ว"
-                : wo.Type == WorkOrderType.PanelCleaning && wo.InstallationId.HasValue
+                : wo.CountsAsCleaning && wo.InstallationId.HasValue
                     ? "ปิดงานแล้ว · บันทึกลงประวัติล้างแผงของไซต์และตั้งรอบถัดไปให้แล้ว"
                     : "ปิดงานแล้ว";
             return RedirectToPage("Detail", new { id });

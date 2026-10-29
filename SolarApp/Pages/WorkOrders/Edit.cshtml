@@ -41,6 +41,13 @@
                         { <option value="@((int)t)">@UiLabels.Label(t)</option> }
                     </select>
                 </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <div class="form-check form-switch mb-2">
+                        <input asp-for="Input.IncludesCleaning" class="form-check-input" role="switch"
+                               disabled="@(wo.Status >= WorkOrderStatus.Completed)" />
+                        <label asp-for="Input.IncludesCleaning" class="form-check-label">รวมล้างแผงในงานนี้</label>
+                    </div>
+                </div>
                 <div class="col-md-3">
                     <label asp-for="Input.RecurrenceMonths" class="form-label">ทำซ้ำทุก (เดือน)</label>
                     <input asp-for="Input.RecurrenceMonths" type="number" min="0" max="120" class="form-control" />

@@ -131,26 +131,31 @@
                     <small class="text-muted">ค้าง @openOrders.Count งาน@(openTickets.Count > 0 ? $" · แจ้งซ่อมรอ {openTickets.Count} เรื่อง" : "")</small>
                 }
             </div>
+            @* Most visits are written up after the crew is back, and a contract
+               round is usually cleaning + PM together — so the main button
+               records a finished visit, with the contract's work pre-selected. *@
+            <a asp-page="/WorkOrders/Create" asp-route-installationId="@inst.Id" asp-route-done="true"
+               class="btn btn-warning btn-lg w-100 mb-2 d-flex align-items-center justify-content-center gap-2">
+                <i class="bi bi-clipboard2-check fs-4"></i>
+                <span class="text-start">
+                    <span class="fw-semibold d-block">บันทึกการเข้าบริการ</span>
+                    <small>ล้างแผง + บำรุงรักษา · บำรุงรักษาอย่างเดียว · ซ่อม</small>
+                </span>
+            </a>
             <div class="row g-2 mb-3">
-                <div class="col-12 col-md-4">
-                    <a asp-page="Cleaning" asp-route-id="@inst.Id" class="btn btn-outline-info w-100 py-3 d-flex flex-column align-items-center">
-                        <i class="bi bi-droplet fs-3"></i>
-                        <span class="fw-semibold">ล้างแผง</span>
-                        <small class="text-muted">บันทึกการล้าง / ดูรอบ</small>
+                <div class="col-4">
+                    <a asp-page="Cleaning" asp-route-id="@inst.Id" class="btn btn-outline-info w-100 py-2">
+                        <i class="bi bi-droplet"></i><span class="d-block small">ประวัติ/รอบล้างแผง</span>
                     </a>
                 </div>
-                <div class="col-12 col-md-4">
-                    <a asp-page="/WorkOrders/Create" asp-route-installationId="@inst.Id" class="btn btn-outline-warning w-100 py-3 d-flex flex-column align-items-center">
-                        <i class="bi bi-clipboard2-plus fs-3"></i>
-                        <span class="fw-semibold">บันทึกงานเข้าไซต์</span>
-                        <small class="text-muted">PM · ซ่อม · ตรวจสอบ — นัดหรือจดย้อนหลัง</small>
+                <div class="col-4">
+                    <a asp-page="/WorkOrders/Create" asp-route-installationId="@inst.Id" asp-route-done="false" class="btn btn-outline-primary w-100 py-2">
+                        <i class="bi bi-calendar-plus"></i><span class="d-block small">นัดล่วงหน้า</span>
                     </a>
                 </div>
-                <div class="col-12 col-md-4">
-                    <a asp-page="/ServiceTickets/Create" asp-route-installationId="@inst.Id" class="btn btn-outline-primary w-100 py-3 d-flex flex-column align-items-center">
-                        <i class="bi bi-ticket-detailed fs-3"></i>
-                        <span class="fw-semibold">แจ้งซ่อม</span>
-                        <small class="text-muted">รับเรื่องปัญหาจากลูกค้า</small>
+                <div class="col-4">
+                    <a asp-page="/ServiceTickets/Create" asp-route-installationId="@inst.Id" class="btn btn-outline-secondary w-100 py-2">
+                        <i class="bi bi-ticket-detailed"></i><span class="d-block small">แจ้งซ่อม</span>
                     </a>
                 </div>
             </div>
@@ -507,7 +512,7 @@
                     <i class="bi bi-@SolarApp.Models.Enums.UiLabels.Icon(w.Type)"></i>
                     <span class="fw-semibold">@w.Title</span>
                     <small class="text-muted d-block">
-                        @SolarApp.Models.Enums.UiLabels.Label(w.Type)
+                        @SolarApp.Models.Enums.UiLabels.Label(w.Type, w.IncludesCleaning)
                         · @((w.ActualEndTime.HasValue ? SolarApp.Services.SiteTime.ToSiteTime(w.ActualEndTime.Value) : w.ScheduledDate).ToString("dd/MM/yyyy"))
                         · @(w.AssignedToUser?.FullName ?? w.AssignedTeam ?? "—")
                         @if (w.TotalCost > 0) { <span>· ฿@w.TotalCost.ToString("N0")</span> }

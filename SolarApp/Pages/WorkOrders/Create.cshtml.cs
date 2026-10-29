@@ -67,10 +67,31 @@ public class CreateModel : PageModel
     /// <summary>The ticket this order answers, when opened from one.</summary>
     public ServiceTicket? SourceTicket { get; set; }
 
+    /// <summary>
+    /// What the crew did, as they'd say it. Maps onto Type + IncludesCleaning;
+    /// "ล้างแผง + บำรุงรักษา" is the contract visit, recorded once.
+    /// </summary>
+    public static readonly (string Key, string Label, string Icon, WorkOrderType Type, bool Cleaning, bool Common)[] VisitKinds =
+    {
+        ("pm_clean", "ล้างแผง + บำรุงรักษา", "stars", WorkOrderType.PreventiveMaintenance, true, true),
+        ("pm", "บำรุงรักษาอย่างเดียว", "clipboard-check", WorkOrderType.PreventiveMaintenance, false, true),
+        ("clean", "ล้างแผงอย่างเดียว", "droplet", WorkOrderType.PanelCleaning, false, true),
+        ("repair", "ซ่อม / แก้ไข", "tools", WorkOrderType.CorrectiveRepair, false, true),
+        ("inspect", "ตรวจสอบ", "search", WorkOrderType.Inspection, false, true),
+        ("other", "อื่นๆ", "three-dots", WorkOrderType.Other, false, true),
+        ("install", "ติดตั้งใหม่", "box-seam", WorkOrderType.NewInstallation, false, false),
+        ("commission", "เปิดใช้งานระบบ", "power", WorkOrderType.Commissioning, false, false),
+        ("decommission", "ถอนการติดตั้ง", "x-octagon", WorkOrderType.Decommission, false, false),
+    };
+
+    public static string KindFor(WorkOrderType type, bool cleaning) =>
+        VisitKinds.FirstOrDefault(k => k.Type == type && k.Cleaning == cleaning).Key
+        ?? VisitKinds.First(k => k.Type == type).Key;
+
     public class WorkOrderInput
     {
-        [Required(ErrorMessage = "กรุณาเลือกประเภทงาน")]
-        public WorkOrderType Type { get; set; } = WorkOrderType.PanelCleaning;
+        [Required(ErrorMessage = "กรุณาเลือกงานที่ทำ")]
+        public string VisitKind { get; set; } = "pm_clean";
 
         [Required(ErrorMessage = "กรุณากรอกหัวข้องาน")]
         [StringLength(200, ErrorMessage = "หัวข้องานต้องไม่เกิน 200 ตัวอักษร")]
@@ -124,7 +145,7 @@ public class CreateModel : PageModel
     }
 
     public async Task<IActionResult> OnGetAsync(int? installationId = null, string? type = null,
-        int? ticketId = null, bool done = false)
+        int? ticketId = null, bool? done = null)
     {
         await LoadDropdownsAsync();
         await LoadTypeDefaultsAsync();
@@ -137,6 +158,13 @@ public class CreateModel : PageModel
             LockedSite = await _context.Installations.AsNoTracking()
                 .Include(i => i.Customer)
                 .FirstOrDefaultAsync(i => i.Id == installationId.Value);
+
+            // Start from what this site's contract covers.
+            if (LockedSite != null)
+                Input.VisitKind = LockedSite.IncludesPreventiveMaintenance && LockedSite.HasCleaningInScope ? "pm_clean"
+                                : LockedSite.IncludesPreventiveMaintenance ? "pm"
+                                : LockedSite.HasCleaningInScope ? "clean"
+                                : "repair";
         }
 
         if (ticketId.HasValue)
@@ -150,16 +178,21 @@ public class CreateModel : PageModel
                 Input.ServiceTicketId = ticket.Id;
                 Input.InstallationId = ticket.InstallationId;
                 LockedSite = ticket.Installation;
-                Input.Type = WorkOrderType.CorrectiveRepair;
+                Input.VisitKind = "repair";
                 Input.Title = $"แจ้งซ่อม {ticket.TicketNumber}: {ticket.Subject}";
                 Input.Description = ticket.Description;
             }
         }
 
         if (Enum.TryParse<WorkOrderType>(type, true, out var woType))
-            Input.Type = woType;
+            Input.VisitKind = KindFor(woType, false);
+        else if (VisitKinds.Any(k => k.Key == type))
+            Input.VisitKind = type!;
 
-        Input.MarkCompleted = done;
+        // Most visits are written up after the crew is back; booking ahead is
+        // the exception, and the links that mean it pass done=false. A ticket
+        // is usually booked first.
+        Input.MarkCompleted = done ?? (ticketId == null);
 
         // Client-side JS fills Title + ChecklistItems from per-type defaults
         // when they are empty, so a ticket's title above is kept.
@@ -173,6 +206,10 @@ public class CreateModel : PageModel
 
     public async Task<IActionResult> OnPostAsync()
     {
+        var kind = VisitKinds.FirstOrDefault(k => k.Key == Input.VisitKind);
+        if (kind.Key == null)
+            ModelState.AddModelError("Input.VisitKind", "กรุณาเลือกงานที่ทำ");
+
         if (Input.ScheduledDate.Date < SolarApp.Services.SiteTime.Today.AddDays(-MaxBackdateDays))
             ModelState.AddModelError("Input.ScheduledDate",
                 $"วันที่ย้อนหลังได้ไม่เกิน {MaxBackdateDays} วัน");
@@ -238,7 +275,8 @@ public class CreateModel : PageModel
         var wo = new WorkOrder
         {
             WorkOrderNumber = await WorkOrderCompletion.NextNumberAsync(_context, now),
-            Type = Input.Type,
+            Type = kind.Type,
+            IncludesCleaning = kind.Cleaning,
             Status = !string.IsNullOrWhiteSpace(Input.AssignedToUserId)
                 ? WorkOrderStatus.Assigned : WorkOrderStatus.Scheduled,
             Title = Input.Title.Trim(),
@@ -316,9 +354,21 @@ public class CreateModel : PageModel
         if (uploaded || ticket != null || Input.MarkCompleted)
             await _context.SaveChangesAsync();
 
+        if (Input.MarkCompleted && wo.InstallationId.HasValue)
+        {
+            // A visit written up afterwards is finished business: back to the
+            // site, where it now shows in the history, rather than into an
+            // order screen full of buttons for work that's already done.
+            TempData["StatusMessage"] =
+                $"บันทึกการเข้าบริการแล้ว: {UiLabels.Label(wo.Type, wo.IncludesCleaning)} ({wo.ScheduledDate:dd/MM/yyyy})"
+                + (wo.CountsAsCleaning ? " · นับครั้งล้างแผงและตั้งรอบถัดไปให้แล้ว" : "")
+                + $" · ใบงาน {wo.WorkOrderNumber}";
+            return RedirectToPage("/Installations/Detail", new { id = wo.InstallationId });
+        }
+
         TempData["StatusMessage"] = Input.MarkCompleted
             ? $"บันทึกงาน {wo.WorkOrderNumber} เป็นเสร็จแล้ว"
-            : $"สร้างใบสั่งงาน {wo.WorkOrderNumber} แล้ว";
+            : $"นัดงาน {wo.WorkOrderNumber} แล้ว";
         return RedirectToPage("Detail", new { id = wo.Id });
     }
 

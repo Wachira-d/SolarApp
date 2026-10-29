@@ -688,6 +688,8 @@ public class Startup
              Sql: "ALTER TABLE [CleaningRecords] ADD [AfterPhotos] nvarchar(max) NULL"),
             (Table: "WorkOrders", Column: "ReminderSentAt",
              Sql: "ALTER TABLE [WorkOrders] ADD [ReminderSentAt] datetime2 NULL"),
+            (Table: "WorkOrders", Column: "IncludesCleaning",
+             Sql: "ALTER TABLE [WorkOrders] ADD [IncludesCleaning] bit NOT NULL DEFAULT 0"),
 
             // Service-scope flags. Defaults preserve existing behaviour: every
             // legacy row becomes Full O&M with all five services enabled.
@@ -948,6 +950,7 @@ BEGIN
         [CustomerFeedback] nvarchar(max) NULL,
         [ServiceTicketId] int NULL,
         [ReminderSentAt] datetime2 NULL,
+        [IncludesCleaning] bit NOT NULL DEFAULT 0,
         [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
         [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
     );
