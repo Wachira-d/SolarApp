@@ -81,6 +81,8 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             var (session, loginError) = await LoginWithDetailAsync(credentials);
             if (session == null)
                 return (false, $"Login failed: {loginError}");
+            // Same key LoginAsync uses, so this test shares the per-account caches.
+            session.AccountKey = $"{credentials.Username}|{credentials.Password?.Length ?? 0}";
 
             if (!string.IsNullOrEmpty(credentials.PlantId))
             {
