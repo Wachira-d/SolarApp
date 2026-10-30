@@ -258,6 +258,12 @@ public class SystemHealthMonitorJob
             .Where(a => a.AlertType == AlertType.Offline
                 && a.ResolvedAt == null
                 && a.Installation.Status == InstallationStatus.Active
+                // Recovered means the cloud has been contacted since the alert
+                // was raised. API-side outages leave the site Active (the
+                // inverter may be fine), so status alone would close the
+                // alert on the next run and re-raise it the run after: page,
+                // all-clear, page, every few minutes.
+                && a.Installation.LastOnlineAt > a.OccurredAt
                 && (a.Title.StartsWith(ApiLostTitlePrefix) || a.Title.StartsWith(DeviceOfflineTitlePrefix)))
             .ToListAsync();
 
