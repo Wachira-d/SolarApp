@@ -206,5 +206,13 @@
                 <i class="bi bi-box-arrow-right"></i> ออกจากระบบ
             </button>
         </form>
+        @* Which build this server is running — compare with the latest commit
+           when a screenshot shows behaviour that has already been fixed. *@
+        @if (User.IsInRole("Admin"))
+        {
+            <div class="text-white-50 mt-2 text-center" style="font-size:.7rem" title="เวอร์ชันที่กำลังรัน (commit · เวลา build)">
+                <i class="bi bi-git"></i> @SolarApp.Services.BuildInfo.Label
+            </div>
+        }
     </div>
 </nav>
