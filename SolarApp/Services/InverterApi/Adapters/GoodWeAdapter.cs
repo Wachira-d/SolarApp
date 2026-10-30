@@ -237,9 +237,10 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                     var id = FirstString(item, "powerstation_id", "powerStationId", "powerstationId", "stationId", "id");
                     if (string.IsNullOrEmpty(id) || results.Any(r => StationIdMatches(r.Id, id))) continue;
                     var name = FirstString(item, "stationname", "station_name", "stationName", "name") ?? "(unnamed)";
-                    int? status = item.TryGetProperty("status", out var st) ? ToInt(st) : null;
+                    var status = ReadStationStatus(item);
                     results.Add(new StationRow(id, name, status,
-                        FirstDecimal(item, "pac", "out_pac", "currentPower", "current_power"),
+                        FirstDecimal(item, "pac", "out_pac", "currentPower", "current_power", "pv_power", "pvPower",
+                            "power_now", "powerNow", "realPower", "real_power", "outputPower", "generationPower"),
                         FirstDecimal(item, "eday", "today_power", "todayPower", "power", "eDay"),
                         FirstDecimal(item, "etotal", "total_power", "totalPower", "eTotal"),
                         FirstDecimal(item, "capacity", "installedCapacity"),
@@ -252,6 +253,29 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             if (results.Count > 0) return results;
         }
         return results;
+    }
+
+    /// <summary>
+    /// Station status from a list row: numeric (-1 offline, 0 waiting,
+    /// 1 generating, 2 fault, 3 offline) or SEMS+ text ("Running", "Offline",
+    /// "Fault", "Waiting"), under several key names.
+    /// </summary>
+    private static int? ReadStationStatus(JsonElement item)
+    {
+        foreach (var key in new[] { "status", "stationStatus", "station_status", "plantStatus", "runStatus", "run_status", "statusName", "status_name" })
+        {
+            if (!item.TryGetProperty(key, out var v)) continue;
+            if (v.ValueKind == JsonValueKind.Number || v.ValueKind == JsonValueKind.True || v.ValueKind == JsonValueKind.False)
+                return ToInt(v);
+            var t = v.ValueKind == JsonValueKind.String ? v.GetString()?.Trim().ToLowerInvariant() : null;
+            if (string.IsNullOrEmpty(t)) continue;
+            if (int.TryParse(t, out var n)) return n;
+            if (t.Contains("offline") || t.Contains("离线") || t.Contains("disconnect")) return -1;
+            if (t.Contains("fault") || t.Contains("故障") || t.Contains("alarm")) return 2;
+            if (t.Contains("wait") || t.Contains("standby")) return 0;
+            if (t.Contains("run") || t.Contains("normal") || t.Contains("generat") || t.Contains("online") || t.Contains("在线")) return 1;
+        }
+        return null;
     }
 
     /// <summary>

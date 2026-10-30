@@ -57,27 +57,32 @@ public class HuaweiAdapter : IInverterApiAdapter
     /// <summary>
     /// Maps Huawei NBI station-level real_health_state to our normalised
     /// HealthState + IsOnline pair.
-    /// Reference: FusionSolar NBI v6 docs.
-    ///   0 = disconnect   (no cloud comm at all → Disconnected / not online)
-    ///   1 = faulty       (Grid Loss / Insulation / OverTemp → Faulty / NOT online)
-    ///   2 = healthy      (Healthy / online)
-    ///   3 = offline      (expected at night / sleep → OfflineNight / not online)
+    /// Reference: FusionSolar Northbound Interface Reference, getStationRealKpi —
+    /// real_health_state: 1 = disconnected, 2 = faulty, 3 = healthy.
+    ///
+    /// This used to read 2 as healthy and 3 as "offline". Every Huawei site
+    /// on the account then spent a week logged as offline while producing
+    /// daily — none was ever recorded ONLINE — and the moment the daytime
+    /// silence check started working it raised "Configuration Issue" on all
+    /// of them. The code at 1 ("empirically grid loss or comms loss" in the
+    /// sync job) fits "disconnected", not "faulty".
+    ///
+    /// A station with energy produced today, in daylight, is treated as
+    /// running whatever the code says, so a document mismatch can never
+    /// again turn a working plant into an outage.
     /// </summary>
     private static (HealthState Health, bool IsOnline) MapHuaweiHealth(decimal raw, decimal dayPowerKwh = 0)
     {
         var code = (int)Math.Round(raw);
         var mapped = code switch
         {
-            2 => (HealthState.Healthy,      true),
-            1 => (HealthState.Faulty,       false), // NOT online for KPI purposes — needs attention
-            3 => (HealthState.OfflineNight, false),
+            3 => (HealthState.Healthy,      true),
+            2 => (HealthState.Faulty,       true),   // communicating, reporting a fault
+            1 => (HealthState.Disconnected, false),
             0 => (HealthState.Disconnected, false),
             _ => (HealthState.Unknown,      false),
         };
-        // The published meaning of state 3 differs between NBI document
-        // versions ("offline" vs "healthy"). A station that has produced
-        // energy today, in daylight, is running whatever the code says.
-        if (code == 3 && dayPowerKwh > 0)
+        if (!mapped.Item2 && dayPowerKwh > 0)
         {
             var hour = SolarApp.Services.SiteTime.Now.Hour;
             if (hour >= 7 && hour < 18) return (HealthState.Healthy, true);
@@ -492,7 +497,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                 IsOnline = isOnline,
                 Health = mappedHealth,
                 FaultReason = mappedHealth == HealthState.Faulty
-                    ? "Huawei reports station faulty (real_health_state=1). Open FusionSolar to view the specific alarm — the actual alarm code/name will be ingested via getAlarmList on the next sync round and surfaced as its own alert."
+                    ? $"Huawei reports station faulty (real_health_state={health:0}). Open FusionSolar to view the specific alarm — the actual alarm code/name will be ingested via getAlarmList on the next sync round and surfaced as its own alert."
                     : null
             };
         }
@@ -675,7 +680,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                     IsOnline = isOnline,
                     Health = mappedHealth,
                     FaultReason = mappedHealth == HealthState.Faulty
-                        ? "Huawei reports station faulty (real_health_state=1). Open FusionSolar to view the specific alarm — the actual alarm code/name will be ingested via getAlarmList on the next sync round and surfaced as its own alert."
+                        ? $"Huawei reports station faulty (real_health_state={health:0}). Open FusionSolar to view the specific alarm — the actual alarm code/name will be ingested via getAlarmList on the next sync round and surfaced as its own alert."
                         : null
                 };
             }

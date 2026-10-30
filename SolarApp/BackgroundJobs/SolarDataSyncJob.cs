@@ -433,6 +433,36 @@ public class SolarDataSyncJob
                 }
 
                 var realtime = realtimeResult.Data!;
+
+                // Production is the one signal every vendor agrees on. If
+                // today's energy has risen since the last reading, the plant
+                // is running — whatever the status field was called, or
+                // whether it was sent at all. This is what kept GoodWe SEMS+
+                // sites (no readable status) and Huawei sites (status code
+                // meaning differs between document versions) reading OFFLINE
+                // while they were visibly producing.
+                if (realtimeResult.Kind == Services.InverterApi.Models.ApiResultKind.DeviceOffline
+                    && realtime.TodayEnergyKwh > 0)
+                {
+                    var todayStartUtc = SolarApp.Services.SiteTime.TodayStartUtc;
+                    var previousToday = await _context.EnergyData.AsNoTracking()
+                        .Where(e => e.InstallationId == installation.Id
+                                    && e.Granularity == DataGranularity.Realtime
+                                    && e.Timestamp >= todayStartUtc)
+                        .OrderByDescending(e => e.Timestamp)
+                        .Select(e => (decimal?)e.EnergyGenerationKwh)
+                        .FirstOrDefaultAsync();
+                    if (previousToday.HasValue && realtime.TodayEnergyKwh > previousToday.Value + 0.05m)
+                    {
+                        realtime.IsOnline = true;
+                        if (realtime.Health != Services.InverterApi.Models.HealthState.Faulty)
+                            realtime.Health = Services.InverterApi.Models.HealthState.Healthy;
+                        realtimeResult = ApiResult<RealtimeData>.Ok(realtime,
+                            $"Device online — energy rising ({previousToday.Value:0.0} → {realtime.TodayEnergyKwh:0.0} kWh)",
+                            realtimeResult.Duration);
+                    }
+                }
+
                 var isDeviceOnline = realtimeResult.Kind == Services.InverterApi.Models.ApiResultKind.Success;
 
                 _context.EnergyData.Add(new EnergyData
@@ -519,10 +549,10 @@ public class SolarDataSyncJob
                         : installation.SyncIntervalMinutes;
                     var persistenceThreshold = TimeSpan.FromMinutes(syncMin * 2);
 
-                    var commsMessage = $"[{installation.InverterBrand}] {installation.SiteName} รายงานสถานะผิดปกติ (real_health_state=1). " +
+                    var commsMessage = $"[{installation.InverterBrand}] {installation.SiteName} รายงานสถานะผิดปกติ ({realtime.FaultReason ?? "station health abnormal"}). " +
                         "อาจเป็นปัญหาที่ inverter, ฝั่งไฟฟ้า, หรือ comms ระหว่าง inverter↔cloud — " +
                         "ต้องดูจากรหัส alarm ใน FusionSolar เพื่อระบุสาเหตุที่แท้จริง";
-                    var commsRca = "⚠ STATION-LEVEL ABNORMAL STATE detected via Huawei NBI real_health_state=1.\n" +
+                    var commsRca = "⚠ STATION-LEVEL ABNORMAL STATE reported by the vendor cloud.\n" +
                         "Cloud API ตอบกลับได้ปกติ แต่ Huawei รายงานว่าไซต์อยู่ในสถานะผิดปกติ\n" +
                         "สถานะนี้ครอบคลุมหลายกรณี ห้ามเดาจากตัวอย่าง — ต้องอ่านชื่อ alarm จริง:\n" +
                         "  • ความผิดปกติของ inverter เอง (hardware fault)\n" +

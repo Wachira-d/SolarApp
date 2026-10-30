@@ -365,6 +365,23 @@ public class SystemHealthMonitorJob
             if (totalCount < 3) continue; // not enough syncs to be sure
             if (offlineCount < totalCount) continue; // inverter reported at least once — skip
 
+            // The readings must come from daylight. Right after sunrise the
+            // 3-hour window is still the night, where "offline" is normal —
+            // that is how every Huawei site got a "Configuration Issue" at
+            // 07:00 on the first morning the check worked.
+            var daylightStart = SolarApp.Services.SiteTime.ToUtc(SolarApp.Services.SiteTime.Today.AddHours(7.5));
+            if (windowStart < daylightStart) continue;
+
+            // A plant whose today-energy rose during the window is producing,
+            // whatever its status field said — not silent, not misconfigured.
+            var energyInWindow = await _context.EnergyData.AsNoTracking()
+                .Where(e => e.InstallationId == inst.Id
+                            && e.Granularity == DataGranularity.Realtime
+                            && e.Timestamp >= windowStart)
+                .Select(e => e.EnergyGenerationKwh)
+                .ToListAsync();
+            if (energyInWindow.Count >= 2 && energyInWindow.Max() > energyInWindow.Min() + 0.05m) continue;
+
             // ─── Sanity check: has this site EVER been online in the last 7 days? ───
             // If there's no [ONLINE]-tagged log in 7 days, this is NOT a real outage —
             // it's a configuration error (wrong PlantId, bad credentials, etc.).

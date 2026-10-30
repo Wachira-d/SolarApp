@@ -868,6 +868,28 @@ END"));
         // still read as faults in history, counts and the customer portal).
         // The pattern is exact: the fallback title with a 36-char Guid.
         // Idempotent; nothing references SystemAlerts by id.
+        // Stage 1e: the morning the daytime-silence check first worked, it
+        // raised "Configuration Issue" on every Huawei site, because the
+        // health-state mapping had never recorded them as online. Those
+        // alerts are false. Closing them here, suppressed, so the recovery
+        // step doesn't follow a false alarm with a false all-clear. Runs once.
+        stages.Add(("CloseFalseHuaweiConfigAlerts", @"
+IF NOT EXISTS (SELECT 1 FROM [SystemSettings] WHERE [Key] = N'Migration.CloseFalseHuaweiConfigAlerts')
+BEGIN
+    UPDATE a SET a.[ResolvedAt] = SYSUTCDATETIME(), a.[NotificationSuppressed] = 1
+    FROM [SystemAlerts] a
+    JOIN [Installations] i ON i.[Id] = a.[InstallationId]
+    WHERE a.[ResolvedAt] IS NULL
+      AND i.[InverterBrand] = 1
+      AND (a.[Title] LIKE N'Configuration Issue:%' OR a.[Title] LIKE N'Inverter Silent (Daytime):%')
+      AND a.[OccurredAt] > DATEADD(day, -3, SYSUTCDATETIME());
+
+    INSERT INTO [SystemSettings] ([Key], [Value], [Description], [UpdatedAt])
+    VALUES (N'Migration.CloseFalseHuaweiConfigAlerts', N'done',
+            N'Closed the false Huawei configuration/silence alerts raised before the health-state mapping fix.',
+            SYSUTCDATETIME());
+END"));
+
         stages.Add(("RemovePhantomVendorAlarms", @"
 DELETE FROM [SystemAlerts]
 WHERE [AlertType] = 2
@@ -2441,6 +2463,26 @@ BEGIN {sql}; END");
                     });
                 }
                 var realtime = realtimeResult.Data!;
+
+                // Same rule as the sync job: today's energy rising since the last
+                // reading means the plant is running, whatever the status said.
+                if (!realtime.IsOnline && realtime.TodayEnergyKwh > 0)
+                {
+                    var todayStartUtc = SolarApp.Services.SiteTime.TodayStartUtc;
+                    var previousToday = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                        .FirstOrDefaultAsync(db.EnergyData.AsNoTracking()
+                            .Where(e => e.InstallationId == installation.Id
+                                        && e.Granularity == Models.Enums.DataGranularity.Realtime
+                                        && e.Timestamp >= todayStartUtc)
+                            .OrderByDescending(e => e.Timestamp)
+                            .Select(e => (decimal?)e.EnergyGenerationKwh));
+                    if (previousToday.HasValue && realtime.TodayEnergyKwh > previousToday.Value + 0.05m)
+                    {
+                        realtime.IsOnline = true;
+                        if (realtime.Health != Services.InverterApi.Models.HealthState.Faulty)
+                            realtime.Health = Services.InverterApi.Models.HealthState.Healthy;
+                    }
+                }
 
                 // 1. Save realtime snapshot
                 db.EnergyData.Add(new Models.EnergyData
