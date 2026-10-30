@@ -93,7 +93,8 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                     var why = TakeDiag() ?? "ไม่ทราบสาเหตุ";
                     // The station is in the account's list with live figures:
                     // monitoring works, just without the per-inverter detail.
-                    var fromList = await RealtimeFromListAsync(session, credentials.PlantId);
+                    var fromList = RealtimeFromRow((await ListStationRowsAsync(session))
+                        .FirstOrDefault(r => StationIdMatches(r.Id, credentials.PlantId)));
                     if (fromList != null)
                         return (true, $"Connected — ใช้ข้อมูลจากรายการสถานี (สถานะ/กำลังผลิต/ผลิตวันนี้) " +
                                       $"เพราะ SEMS ไม่ส่งรายละเอียดสถานีนี้ให้บัญชีนี้ — ไม่มีข้อมูลรายอินเวอร์เตอร์/กริด. ({why})");
@@ -272,12 +273,10 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         if (session == null) { SetDiag("เข้าสู่ระบบ SEMS ไม่สำเร็จ"); return null; }
 
         var detail = await GetStationDetailAsync(session, credentials.PlantId);
-        if (detail != null) return ParseRealtime(detail.Value.Data);
-
-        var fromList = await RealtimeFromListAsync(session, credentials.PlantId);
-        if (fromList != null)
-            _logger.LogInformation("GoodWe {Sid}: detail empty, using the station list's live figures", credentials.PlantId);
-        return fromList;
+        var why = detail == null ? TakeDiag() : null;
+        var rt = await RealtimeForStationAsync(session, credentials.PlantId, detail?.Data, null);
+        if (rt == null && why != null) SetDiag(why + " — " + (TakeDiag() ?? ""));
+        return rt;
     }
 
     /// <summary>
@@ -294,20 +293,63 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
     /// inverter communicating, the station status, or power being produced —
     /// not from info.status == 1 alone, which some SEMS versions omit.
     /// </summary>
-    private static RealtimeData ParseRealtime(JsonElement data)
+    /// <summary>What ParseRealtime could and could not read from a payload.</summary>
+    private readonly record struct RealtimeParse(RealtimeData Data, bool HasEvidence, string Debug);
+
+    /// <summary>
+    /// Station detail → RealtimeData, reading every spelling SEMS and SEMS+
+    /// are known to use. The v3 plant detail that answers for shared / SEMS+
+    /// stations names its fields differently from the v2 monitor detail
+    /// (kpi.pac / kpi.power / info.status): reading only the v2 names gave
+    /// zeros for everything, and zeros were then reported as OFFLINE on a
+    /// site GoodWe showed running at 86 kW.
+    ///
+    /// HasEvidence is false when no status, power or energy field was found
+    /// at all — the payload is in a shape we don't read yet. That is a parse
+    /// problem to report, not a station that is offline.
+    /// </summary>
+    private static RealtimeParse ParseRealtime(JsonElement data, decimal? capacityHintKw = null)
     {
         var kpi = data.TryGetProperty("kpi", out var k) ? k : default;
         var info = data.TryGetProperty("info", out var i) ? i : default;
         var powerflow = data.TryGetProperty("powerflow", out var pf) ? pf : default;
         var soc = data.TryGetProperty("soc", out var socEl) ? socEl : default;
+        var debug = new List<string>();
 
-        // Station totals first; the per-inverter rows fill any gap.
-        decimal pacW = GetDecimal(kpi, "pac");
-        decimal todayKwh = GetDecimal(kpi, "power");
-        decimal totalKwh = GetDecimal(kpi, "total_power");
+        var capacityKw = capacityHintKw
+                         ?? FirstDecimal(kpi, "capacity", "installedCapacity", "installed_capacity")
+                         ?? FirstDecimal(info, "capacity", "installedCapacity", "installed_capacity");
 
+        // Current power. v2: kpi.pac in W. v3/SEMS+: pac / currentPower /
+        // realTimePower / power, in W or kW depending on the version — so the
+        // unit is decided from the value and the plant's capacity.
+        var (pacRaw, pacKey) = FirstDecimalWithKey(kpi,
+            "pac", "currentPower", "current_power", "realTimePower", "realtime_power", "real_time_power", "pacKw", "pac_kw", "outputPower");
+        if (pacRaw == null) (pacRaw, pacKey) = FirstDecimalWithKey(info, "pac", "currentPower", "current_power", "realTimePower");
+        // The raw element too: a string like "86.03kW" names its own unit.
+        JsonElement pacEl = default;
+        if (pacKey != null)
+        {
+            if (kpi.ValueKind == JsonValueKind.Object && kpi.TryGetProperty(pacKey, out var e1)) pacEl = e1;
+            else if (info.ValueKind == JsonValueKind.Object && info.TryGetProperty(pacKey, out var e2)) pacEl = e2;
+        }
+        decimal pacW = pacRaw.HasValue ? ToWatts(pacRaw.Value, pacKey, pacEl, capacityKw) : 0;
+        if (pacRaw.HasValue) debug.Add($"pac={pacRaw}({pacKey})");
+
+        // Today's and total energy are kWh everywhere SEMS has been seen.
+        // v2 called today "power" and total "total_power"; v3 says eday /
+        // dayPower / todayGeneration and etotal / totalPower / cumulative.
+        var (todayRaw, todayKey) = FirstDecimalWithKey(kpi,
+            "power", "eday", "dayPower", "day_power", "today_power", "todayPower", "todayGeneration", "today_generation", "eDay", "dayEnergy", "day_energy", "energy_today");
+        var (totalRaw, totalKey) = FirstDecimalWithKey(kpi,
+            "total_power", "etotal", "totalPower", "cumulativePower", "cumulative_power", "totalGeneration", "total_generation", "eTotal", "totalEnergy", "total_energy", "energy_total");
+        decimal todayKwh = todayRaw ?? 0, totalKwh = totalRaw ?? 0;
+        if (todayRaw.HasValue) debug.Add($"today={todayRaw}({todayKey})");
+        if (totalRaw.HasValue) debug.Add($"total={totalRaw}({totalKey})");
+
+        // Per-inverter rows fill any gap and decide "communicating".
         decimal invPacW = 0, invToday = 0, invTotal = 0;
-        int invCount = 0, invConnected = 0;
+        int invCount = 0, invConnected = 0, invFaulty = 0;
         if (data.TryGetProperty("inverter", out var invs) && invs.ValueKind == JsonValueKind.Array)
         {
             foreach (var inv in invs.EnumerateArray())
@@ -323,7 +365,9 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                 // SEMS: -1 offline, 0 waiting, 1 generating, 2 fault. Only -1
                 // means the inverter isn't talking to the cloud.
                 if (st.HasValue && st.Value != -1) invConnected++;
+                if (st == 2) invFaulty++;
             }
+            debug.Add($"inverters={invCount}/{invConnected} connected");
         }
         if (pacW <= 0 && invPacW > 0) pacW = invPacW;
         if (todayKwh <= 0 && invToday > 0) todayKwh = invToday;
@@ -351,24 +395,173 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         if (soc.ValueKind == JsonValueKind.Object)
             batterySoc = GetNullableDecimal(soc, "power");  // SEMS puts SOC% in "power"
 
-        int? stationStatus = info.ValueKind == JsonValueKind.Object && info.TryGetProperty("status", out var ss)
-            ? ToInt(ss) : null;
-        var isOnline = invConnected > 0
-                       || (stationStatus.HasValue && stationStatus.Value != -1)
-                       || pacW > 0;
+        // Station status. Numeric: -1 offline, 0 waiting, 1 generating,
+        // 2 fault (some versions: 3 offline). Text: "Running", "Offline",
+        // "Fault", "Waiting", or Chinese equivalents.
+        int? stationStatus = null;
+        string? statusText = null;
+        foreach (var src in new[] { info, kpi, data })
+        {
+            if (src.ValueKind != JsonValueKind.Object) continue;
+            foreach (var key in new[] { "status", "stationStatus", "station_status", "plantStatus", "plant_status", "powerstation_status", "runStatus", "run_status" })
+            {
+                if (!src.TryGetProperty(key, out var sv)) continue;
+                var n = ToInt(sv);
+                if (n.HasValue && sv.ValueKind != JsonValueKind.String) { stationStatus = n; break; }
+                var t = sv.ValueKind == JsonValueKind.String ? sv.GetString()?.Trim() : null;
+                if (int.TryParse(t, out var ni)) { stationStatus = ni; break; }
+                if (!string.IsNullOrEmpty(t)) { statusText = t; break; }
+            }
+            if (stationStatus.HasValue || statusText != null) break;
+        }
+        if (stationStatus.HasValue) debug.Add($"status={stationStatus}");
+        if (statusText != null) debug.Add($"status=\"{statusText}\"");
 
-        return new RealtimeData
+        bool? statusOnline = stationStatus switch
+        {
+            -1 or 3 => false,
+            0 or 1 or 2 => true,
+            _ => null
+        };
+        if (statusOnline == null && statusText != null)
+        {
+            var t = statusText.ToLowerInvariant();
+            if (t.Contains("offline") || t.Contains("离线") || t.Contains("disconnect")) statusOnline = false;
+            else if (t.Contains("run") || t.Contains("normal") || t.Contains("generat") || t.Contains("wait")
+                     || t.Contains("fault") || t.Contains("在线") || t.Contains("正常") || t.Contains("online")) statusOnline = true;
+        }
+        var faulty = stationStatus == 2 || invFaulty > 0
+                     || (statusText?.Contains("fault", StringComparison.OrdinalIgnoreCase) ?? false);
+
+        // Evidence: did the payload say anything about the station at all?
+        var hasEvidence = pacRaw.HasValue || todayRaw.HasValue || totalRaw.HasValue
+                          || invCount > 0 || statusOnline.HasValue
+                          || (powerflow.ValueKind == JsonValueKind.Object && ParseWatts(powerflow, "pv").HasValue);
+
+        var isOnline = invConnected > 0
+                       || statusOnline == true
+                       || pacW > 0
+                       || (statusOnline == null && invCount == 0 && hasEvidence && todayRaw is > 0);
+
+        var health = !hasEvidence ? HealthState.Unknown
+                   : faulty && isOnline ? HealthState.Faulty
+                   : isOnline ? HealthState.Healthy
+                   : HealthState.Disconnected;
+
+        return new RealtimeParse(new RealtimeData
         {
             Timestamp = DateTime.UtcNow,
-            CurrentPowerKw = pacW / 1000m,   // SEMS returns Watts
-            TodayEnergyKwh = todayKwh,       // already kWh
+            CurrentPowerKw = pacW / 1000m,
+            TodayEnergyKwh = todayKwh,
             TotalEnergyKwh = totalKwh,
             GridExportKw = gridExportKw,
             GridImportKw = gridImportKw,
             BatterySocPercent = batterySoc ?? GetNullableDecimal(kpi, "soc"),
             BatteryPowerKw = batteryPowerKw,
             IsOnline = isOnline,
-            Health = isOnline ? HealthState.Healthy : HealthState.Disconnected,
+            Health = health,
+            FaultReason = faulty ? (statusText ?? "SEMS รายงานสถานะ fault") : null,
+        }, hasEvidence, string.Join(", ", debug));
+    }
+
+    /// <summary>
+    /// A power value in watts. SEMS v2 sends W; SEMS+ sends kW in some
+    /// fields. The key name or a unit in the string settles it; otherwise a
+    /// value that could not exceed the plant's capacity in kW is kW, and a
+    /// bare value under 1000 on an unknown plant is taken as kW.
+    /// </summary>
+    private static decimal ToWatts(decimal value, string? key, JsonElement raw, decimal? capacityKw)
+    {
+        var keyLower = key?.ToLowerInvariant() ?? "";
+        var rawText = raw.ValueKind == JsonValueKind.String ? raw.GetString() ?? "" : "";
+        if (keyLower.Contains("kw") || rawText.Contains("kW", StringComparison.OrdinalIgnoreCase)) return value * 1000m;
+        if (rawText.Contains("(W)") || rawText.EndsWith("W", StringComparison.Ordinal)) return value;
+        if (capacityKw is > 0) return Math.Abs(value) <= capacityKw.Value * 1.5m ? value * 1000m : value;
+        return Math.Abs(value) < 1000m ? value * 1000m : value;
+    }
+
+    private static (decimal? Value, string? Key) FirstDecimalWithKey(JsonElement el, params string[] props)
+    {
+        if (el.ValueKind != JsonValueKind.Object) return (null, null);
+        foreach (var p in props)
+            if (el.TryGetProperty(p, out var v) && ToDecimal(v) is { } d) return (d, p);
+        return (null, null);
+    }
+
+    /// <summary>A compact dump of the station payload for the diagnostic when nothing could be read.</summary>
+    private static string RawForDiag(JsonElement data)
+    {
+        var parts = new List<string>();
+        foreach (var name in new[] { "info", "kpi", "powerflow" })
+            if (data.TryGetProperty(name, out var v)) parts.Add($"{name}={Truncate(v.GetRawText(), 600)}");
+        if (parts.Count == 0) parts.Add(Truncate(data.GetRawText(), 900));
+        return string.Join(" ", parts);
+    }
+
+    /// <summary>
+    /// Realtime for a station from its detail, cross-checked with the
+    /// account's station list: list figures fill anything the detail did
+    /// not carry (SEMS+ detail often has status but not power), and when the
+    /// detail carried nothing readable at all the list row stands in.
+    /// Returns null — with the raw payload in the diag — when neither says
+    /// anything about the station.
+    /// </summary>
+    private async Task<RealtimeData?> RealtimeForStationAsync(Session session, string? plantId,
+        JsonElement? detailData, List<StationRow>? listRows)
+    {
+        RealtimeParse? parsed = detailData.HasValue ? ParseRealtime(detailData.Value) : (RealtimeParse?)null;
+        var rows = listRows ?? await ScanStationRowsAsync(session);
+        var row = rows.FirstOrDefault(r => StationIdMatches(r.Id, plantId));
+
+        if (parsed is { HasEvidence: true } p)
+        {
+            var d = p.Data;
+            if (row != null)
+            {
+                if (d.CurrentPowerKw <= 0 && row.PacW is > 0) d.CurrentPowerKw = row.PacW.Value / 1000m;
+                if (d.TodayEnergyKwh <= 0 && row.TodayKwh is > 0) d.TodayEnergyKwh = row.TodayKwh.Value;
+                if (d.TotalEnergyKwh <= 0 && row.TotalKwh is > 0) d.TotalEnergyKwh = row.TotalKwh.Value;
+                // The list says the station is running while the detail had
+                // no status and no power: believe the list.
+                if (!d.IsOnline && row.Status is >= 0 and <= 2 && row.HasLiveData && d.Health == HealthState.Disconnected
+                    && !p.Debug.Contains("status="))
+                {
+                    d.IsOnline = true;
+                    d.Health = HealthState.Healthy;
+                }
+            }
+            return d;
+        }
+
+        var fromList = RealtimeFromRow(row);
+        if (fromList != null)
+        {
+            _logger.LogInformation("GoodWe {Sid}: detail unreadable ({Debug}), using the station list's live figures",
+                plantId, parsed?.Debug ?? "no detail");
+            return fromList;
+        }
+
+        SetDiag(detailData.HasValue
+            ? $"SEMS ส่งข้อมูลสถานีมาในรูปแบบที่ระบบยังอ่านค่าไม่ได้ (ไม่พบสถานะ/กำลังผลิต/พลังงาน) — ข้อมูลดิบ: {RawForDiag(detailData.Value)}"
+              + (row != null ? $" | แถวในรายการสถานี: {row.Raw}" : " | ไม่พบสถานีในรายการสถานี")
+            : "ดึงรายละเอียดสถานีไม่ได้ และรายการสถานีไม่มีค่าสถานะ/กำลังผลิตของสถานีนี้");
+        return null;
+    }
+
+    private static RealtimeData? RealtimeFromRow(StationRow? row)
+    {
+        if (row == null || !row.HasLiveData) return null;
+        var pacW = row.PacW ?? 0;
+        // SEMS list "status": -1 offline, 0 waiting, 1 generating, 2 fault.
+        var online = (row.Status.HasValue && row.Status.Value != -1 && row.Status.Value != 3) || pacW > 0;
+        return new RealtimeData
+        {
+            Timestamp = DateTime.UtcNow,
+            CurrentPowerKw = pacW / 1000m,
+            TodayEnergyKwh = row.TodayKwh ?? 0,
+            TotalEnergyKwh = row.TotalKwh ?? 0,
+            IsOnline = online,
+            Health = row.Status == 2 ? HealthState.Faulty : online ? HealthState.Healthy : HealthState.Disconnected,
         };
     }
 
@@ -472,34 +665,6 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         }
         lock (_sessionCacheLock) _detailEmptyUntil[emptyKey] = DateTime.UtcNow.AddHours(1);
         return (null, string.Join(" | ", errors));
-    }
-
-    /// <summary>
-    /// Live figures from the account's station list, for a station whose
-    /// detail endpoints return nothing. Coarser than the detail (no grid or
-    /// battery split, no per-inverter rows) but it is what SEMS shows in its
-    /// own station list: status, current power, today's and total energy.
-    /// Read fresh — the cached list is for ID resolution, not live values.
-    /// </summary>
-    private async Task<RealtimeData?> RealtimeFromListAsync(Session session, string? plantId,
-        List<StationRow>? freshRows = null)
-    {
-        var rows = freshRows ?? await ScanStationRowsAsync(session);
-        var row = rows.FirstOrDefault(r => StationIdMatches(r.Id, plantId));
-        if (row == null || !row.HasLiveData) return null;
-
-        var pacW = row.PacW ?? 0;
-        // SEMS list "status": -1 offline, 0 waiting, 1 generating, 2 fault.
-        var online = (row.Status.HasValue && row.Status.Value != -1) || pacW > 0;
-        return new RealtimeData
-        {
-            Timestamp = DateTime.UtcNow,
-            CurrentPowerKw = pacW / 1000m,
-            TodayEnergyKwh = row.TodayKwh ?? 0,
-            TotalEnergyKwh = row.TotalKwh ?? 0,
-            IsOnline = online,
-            Health = online ? HealthState.Healthy : HealthState.Disconnected,
-        };
     }
 
     /// <summary>
@@ -842,34 +1007,29 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             {
                 BeginDiag();
                 var detail = await GetStationDetailAsync(session, pid);
-                if (detail == null)
-                {
-                    var rows = await freshList.Value;
-                    var fromList = await RealtimeFromListAsync(session, pid, rows);
-                    if (fromList != null)
-                    {
-                        sw.Stop();
-                        var match = rows.FirstOrDefault(r => StationIdMatches(r.Id, pid));
-                        if (match != null) resolved[pid] = match.Id;
-                        return (pid, fromList.IsOnline
-                            ? ApiResult<RealtimeData>.Ok(fromList, "Device online (station list)", sw.Elapsed)
-                            : ApiResult<RealtimeData>.Offline(fromList, "Station list reports offline", sw.Elapsed));
-                    }
-                }
+                var why = detail == null ? TakeDiag() : null;
+                if (detail != null) resolved[pid] = detail.Value.StationId;
+
+                // The list is read once per round and shared; it both fills
+                // gaps in the detail and stands in when the detail is empty.
+                var rows = await freshList.Value;
+                var match = rows.FirstOrDefault(r => StationIdMatches(r.Id, pid));
+                if (detail == null && match != null) resolved[pid] = match.Id;
+
+                var rt = await RealtimeForStationAsync(session, pid, detail?.Data, rows);
                 sw.Stop();
-                if (detail == null)
+                if (rt == null)
                 {
-                    var why = TakeDiag() ?? "GoodWe API returned no data.";
-                    return (pid, ApiResult<RealtimeData>.Fail(
-                        why.StartsWith("ไม่พบ Station ID") ? ApiResultKind.PlantNotFound : ApiResultKind.CloudServerError,
-                        why, detail: why, duration: sw.Elapsed));
+                    var reason = (why != null ? why + " — " : "") + (TakeDiag() ?? "GoodWe API returned no data.");
+                    var kind = reason.StartsWith("ไม่พบ Station ID") ? ApiResultKind.PlantNotFound
+                             : reason.Contains("อ่านค่าไม่ได้") ? ApiResultKind.ParseError
+                             : ApiResultKind.CloudServerError;
+                    return (pid, ApiResult<RealtimeData>.Fail(kind, reason, detail: reason, duration: sw.Elapsed));
                 }
-                resolved[pid] = detail.Value.StationId;
-                var rt = ParseRealtime(detail.Value.Data);
                 return (pid, rt.IsOnline
                     ? ApiResult<RealtimeData>.Ok(rt, "Device online", sw.Elapsed)
                     : ApiResult<RealtimeData>.Offline(rt,
-                        "GoodWe API connected OK, but every inverter reports offline. Check inverter WiFi.", sw.Elapsed));
+                        "GoodWe API connected OK, but the station reports offline. Check inverter WiFi.", sw.Elapsed));
             }
             catch (Exception ex)
             {
@@ -1651,6 +1811,7 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
                 var why = TakeDiag() ?? "GoodWe API returned no data.";
                 var kind = why.StartsWith("ไม่พบ Station ID") ? ApiResultKind.PlantNotFound
                          : why.StartsWith("เข้าสู่ระบบ") ? ApiResultKind.AuthenticationFailed
+                         : why.Contains("อ่านค่าไม่ได้") ? ApiResultKind.ParseError
                          : ApiResultKind.CloudServerError;
                 return ApiResult<RealtimeData>.Fail(kind, why, detail: why, duration: sw.Elapsed);
             }
