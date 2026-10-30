@@ -369,6 +369,14 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
             }
             debug.Add($"inverters={invCount}/{invConnected} connected");
         }
+        // v2 payloads (they carry powerflow / inverter rows) report kpi.pac in
+        // W. The capacity heuristic alone would read 300 W at dawn on a 330 kW
+        // plant as 300 kW; the payload shape settles it, and the inverter sum
+        // overrides a station figure that is a thousand times off.
+        var looksV2 = powerflow.ValueKind == JsonValueKind.Object || invCount > 0;
+        if (pacRaw.HasValue && pacKey == "pac" && looksV2 && !(pacEl.ValueKind == JsonValueKind.String && (pacEl.GetString() ?? "").Contains("kW", StringComparison.OrdinalIgnoreCase)))
+            pacW = pacRaw.Value;
+        if (invPacW > 0 && (pacW > invPacW * 100m || pacW * 100m < invPacW)) pacW = invPacW;
         if (pacW <= 0 && invPacW > 0) pacW = invPacW;
         if (todayKwh <= 0 && invToday > 0) todayKwh = invToday;
         if (totalKwh <= 0 && invTotal > 0) totalKwh = invTotal;
@@ -510,7 +518,9 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
         JsonElement? detailData, List<StationRow>? listRows)
     {
         RealtimeParse? parsed = detailData.HasValue ? ParseRealtime(detailData.Value) : (RealtimeParse?)null;
-        var rows = listRows ?? await ScanStationRowsAsync(session);
+        // Live figures, so not the 10-minute resolution cache — but not a full
+        // rescan per read either: one scan per account per two minutes.
+        var rows = listRows ?? await LiveStationRowsAsync(session);
         var row = rows.FirstOrDefault(r => StationIdMatches(r.Id, plantId));
 
         if (parsed is { HasEvidence: true } p)
@@ -546,6 +556,22 @@ public class GoodWeAdapter : IInverterApiAdapter, IPlantDiscovery
               + (row != null ? $" | แถวในรายการสถานี: {row.Raw}" : " | ไม่พบสถานีในรายการสถานี")
             : "ดึงรายละเอียดสถานีไม่ได้ และรายการสถานีไม่มีค่าสถานะ/กำลังผลิตของสถานีนี้");
         return null;
+    }
+
+    private static readonly Dictionary<string, (List<StationRow> Rows, DateTime ExpiresAt)> _liveListCache = new();
+
+    private async Task<List<StationRow>> LiveStationRowsAsync(Session session)
+    {
+        lock (_sessionCacheLock)
+        {
+            if (session.AccountKey.Length > 0
+                && _liveListCache.TryGetValue(session.AccountKey, out var hit) && DateTime.UtcNow < hit.ExpiresAt)
+                return hit.Rows;
+        }
+        var rows = await ScanStationRowsAsync(session);
+        if (session.AccountKey.Length > 0)
+            lock (_sessionCacheLock) _liveListCache[session.AccountKey] = (rows, DateTime.UtcNow.AddMinutes(2));
+        return rows;
     }
 
     private static RealtimeData? RealtimeFromRow(StationRow? row)
