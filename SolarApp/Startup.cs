@@ -2580,6 +2580,8 @@ BEGIN {sql}; END");
                         batterySocPercent = realtime.BatterySocPercent,
                         batteryPowerKw = realtime.BatteryPowerKw,
                         isOnline = realtime.IsOnline,
+                        health = realtime.Health.ToString(),
+                        faultReason = realtime.FaultReason,
                         historicalDaysAdded = addedHistorical,
                         alarmsAdded = addedAlarms
                     }

@@ -423,6 +423,12 @@ public class SolarDataSyncJob
                         $"{kindTag} {realtimeResult.Message}" +
                         (realtimeResult.TechnicalDetail != null ? $" | {realtimeResult.TechnicalDetail}" : "") +
                         $" | Duration: {realtimeResult.Duration.TotalMilliseconds:0}ms");
+                    // Adapters catch their own exceptions and return them as
+                    // results, so these never reached the breaker: a dead
+                    // endpoint was polled at full rate forever and the
+                    // "เชื่อมต่อคลาวด์ไม่สำเร็จ" alert was unreachable.
+                    if (Services.InverterApi.Common.SyncCircuitBreaker.RecordFailure(installation.Id))
+                        RaiseApiFailureAlert(installation, $"{kindTag} {realtimeResult.Message}");
                     continue;
                 }
 
@@ -565,7 +571,11 @@ public class SolarDataSyncJob
                     }
                     else if (!hasConfirmingAlarm
                              && existingFault.Severity == AlertSeverity.Medium
-                             && (DateTime.UtcNow - existingFault.OccurredAt) >= persistenceThreshold)
+                             && (DateTime.UtcNow - existingFault.OccurredAt) >= persistenceThreshold
+                             // A station that is still producing is not off / cut
+                             // off; a warning on one inverter (GoodWe status 2)
+                             // used to become a "power loss" LINE message.
+                             && realtime.CurrentPowerKw <= 0)
                     {
                         // Two-or-more sync rounds with real_health_state=1 and
                         // still no alarm to explain it.  Empirically this is

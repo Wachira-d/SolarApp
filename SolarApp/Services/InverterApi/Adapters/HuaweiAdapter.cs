@@ -63,10 +63,10 @@ public class HuaweiAdapter : IInverterApiAdapter
     ///   2 = healthy      (Healthy / online)
     ///   3 = offline      (expected at night / sleep → OfflineNight / not online)
     /// </summary>
-    private static (HealthState Health, bool IsOnline) MapHuaweiHealth(decimal raw)
+    private static (HealthState Health, bool IsOnline) MapHuaweiHealth(decimal raw, decimal dayPowerKwh = 0)
     {
         var code = (int)Math.Round(raw);
-        return code switch
+        var mapped = code switch
         {
             2 => (HealthState.Healthy,      true),
             1 => (HealthState.Faulty,       false), // NOT online for KPI purposes — needs attention
@@ -74,6 +74,15 @@ public class HuaweiAdapter : IInverterApiAdapter
             0 => (HealthState.Disconnected, false),
             _ => (HealthState.Unknown,      false),
         };
+        // The published meaning of state 3 differs between NBI document
+        // versions ("offline" vs "healthy"). A station that has produced
+        // energy today, in daylight, is running whatever the code says.
+        if (code == 3 && dayPowerKwh > 0)
+        {
+            var hour = SolarApp.Services.SiteTime.Now.Hour;
+            if (hour >= 7 && hour < 18) return (HealthState.Healthy, true);
+        }
+        return mapped;
     }
 
     public async Task<(bool Success, string Message)> TestConnectionAsync(ApiCredentials credentials)
@@ -473,7 +482,7 @@ public class HuaweiAdapter : IInverterApiAdapter
             // calls /getDevList + /getDevRealKpi would exhaust the quota.
             // CurrentPowerKw is left at 0 — Dashboard can derive approximate power
             // from day_power delta between sync cycles.
-            var (mappedHealth, isOnline) = MapHuaweiHealth(health);
+            var (mappedHealth, isOnline) = MapHuaweiHealth(health, SafeGetDecimal(kpi, "day_power"));
             return new RealtimeData
             {
                 Timestamp = DateTime.UtcNow,
@@ -656,7 +665,7 @@ public class HuaweiAdapter : IInverterApiAdapter
                     || kpi.ValueKind != JsonValueKind.Object) continue;
 
                 var health = SafeGetDecimal(kpi, "real_health_state");
-                var (mappedHealth, isOnline) = MapHuaweiHealth(health);
+                var (mappedHealth, isOnline) = MapHuaweiHealth(health, SafeGetDecimal(kpi, "day_power"));
                 result.Stations[originalPlantId] = new RealtimeData
                 {
                     Timestamp = DateTime.UtcNow,

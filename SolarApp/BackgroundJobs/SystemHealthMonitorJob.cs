@@ -80,12 +80,24 @@ public class SystemHealthMonitorJob
         // site that didn't clear the failure gate on its first pass, or was
         // suppressed overnight "until the morning check", was never looked at
         // again and never alerted at all.
-        var offlineInstallations = await _context.Installations
-            .Where(i => (i.Status == InstallationStatus.Active || i.Status == InstallationStatus.Offline)
-                && i.IncludesMonitoring
-                && i.LastOnlineAt != null
-                && i.LastOnlineAt < threshold)
-            .ToListAsync();
+        // Per-site threshold: at least two of the site's own sync intervals
+        // plus slack. A fixed 45 minutes flagged every site on an hourly (or
+        // longer) interval as Offline between syncs — and the effective
+        // cadence is slower than the configured one, since each site's next
+        // sync is scheduled from when the previous one finished.
+        var offlineInstallations = (await _context.Installations
+                .Where(i => (i.Status == InstallationStatus.Active || i.Status == InstallationStatus.Offline)
+                    && i.IncludesMonitoring
+                    && i.LastOnlineAt != null
+                    && i.LastOnlineAt < threshold)
+                .ToListAsync())
+            .Where(i =>
+            {
+                var interval = i.SyncIntervalMinutes <= 0 ? 15 : i.SyncIntervalMinutes;
+                var effective = Math.Max(offlineThreshold, interval * 2 + 10);
+                return i.LastOnlineAt < DateTime.UtcNow.AddMinutes(-effective);
+            })
+            .ToList();
 
         // ─── Part B: Device offline during daytime (API still works, but
         // device hasn't produced anything for 3+ hours of daytime) ───
@@ -93,7 +105,24 @@ public class SystemHealthMonitorJob
 
         foreach (var installation in offlineInstallations)
         {
-            installation.Status = InstallationStatus.Offline;
+            // What the recent failures say decides both the status and the
+            // alert. When the cloud (or our parsing of it) is the problem, the
+            // inverter may well be running: the site is NOT marked Offline —
+            // the dashboard would show a healthy plant as down — and the
+            // alert is the API one, not "Device Offline".
+            var latestFailures = await _context.InverterApiLogs
+                .Where(l => l.InstallationId == installation.Id && !l.IsSuccess)
+                .OrderByDescending(l => l.RequestTime)
+                .Take(5)
+                .ToListAsync();
+            var apiSideFailure = latestFailures.Count > 0 && latestFailures.All(l =>
+                l.ErrorMessage != null
+                && (l.ErrorMessage.Contains("[PARSE ERROR]") || l.ErrorMessage.Contains("[CLOUD 5xx]")
+                    || l.ErrorMessage.Contains("[TIMEOUT]") || l.ErrorMessage.Contains("[NETWORK ERROR]")
+                    || l.ErrorMessage.Contains("[AUTH FAILED]") || l.ErrorMessage.Contains("[PLANT NOT FOUND]")
+                    || l.ErrorMessage.Contains("[API FAILURE]") || l.ErrorMessage.Contains("[CIRCUIT OPEN]")));
+            if (!apiSideFailure)
+                installation.Status = InstallationStatus.Offline;
 
             // Gate alert by consecutive API failures in recent window (noise reduction).
             // A single failed call shouldn't page on-call — wait for sustained failure.
@@ -121,13 +150,7 @@ public class SystemHealthMonitorJob
                 continue;
             }
 
-            var recentLogs = await _context.InverterApiLogs
-                .Where(l => l.InstallationId == installation.Id && !l.IsSuccess)
-                .OrderByDescending(l => l.RequestTime)
-                .Take(5)
-                .ToListAsync();
-
-            var rootCause = AnalyzeRootCause(recentLogs);
+            var rootCause = AnalyzeRootCause(latestFailures);
 
             var existingAlert = await _context.SystemAlerts
                 .AnyAsync(a => a.InstallationId == installation.Id
@@ -157,9 +180,11 @@ public class SystemHealthMonitorJob
             // defers calls without firing failure logs, so RATE LIMITED here
             // would only mean a one-off 407 from the server, not a sustained
             // problem worth waking ops up over.
-            var isApiIssue = rootCause.Contains("API CONNECTION") || rootCause.Contains("TIMEOUT")
+            var isApiIssue = apiSideFailure
+                || rootCause.Contains("API CONNECTION") || rootCause.Contains("TIMEOUT")
                 || rootCause.Contains("NETWORK") || rootCause.Contains("AUTHENTICATION")
-                || rootCause.Contains("CLOUD SERVER");
+                || rootCause.Contains("CLOUD SERVER") || rootCause.Contains("UNREADABLE")
+                || rootCause.Contains("NOT FOUND");
 
             // ─── Severity determination ───
             // API connectivity issues: Critical (our infrastructure problem)
@@ -312,17 +337,20 @@ public class SystemHealthMonitorJob
             if (IsLikelyNighttime(inst)) continue;
 
             // Count recent [DEVICE OFFLINE]-tagged successful API calls
+            // Realtime reads only: the hourly alarm fetch also logs a success,
+            // which made "every call said offline" never true.
             var offlineCount = await _context.InverterApiLogs
                 .Where(l => l.InstallationId == inst.Id
+                            && l.Endpoint == "GetRealtimeData"
                             && l.RequestTime >= windowStart
                             && l.IsSuccess
                             && l.ErrorMessage != null
                             && l.ErrorMessage.Contains("[DEVICE OFFLINE]"))
                 .CountAsync();
 
-            // Count total successful API calls in the window
             var totalCount = await _context.InverterApiLogs
                 .Where(l => l.InstallationId == inst.Id
+                            && l.Endpoint == "GetRealtimeData"
                             && l.RequestTime >= windowStart
                             && l.IsSuccess)
                 .CountAsync();
@@ -1279,6 +1307,31 @@ public class SystemHealthMonitorJob
                    "  • Data logger (e.g. DTSU/WiFi stick) disconnected\n" +
                    "ACTION: If daytime, physically check the inverter and its network connection.\n" +
                    $"Last contact: {latestTime:dd/MM/yyyy HH:mm:ss}";
+
+        // ─── Tags the sync job writes for result-type failures ───
+        if (errors.Any(e => e.Contains("[PARSE ERROR]")))
+            return "✕ CLOUD DATA UNREADABLE (not an inverter issue)\n" +
+                   "The cloud answered, but in a shape SolarApp could not read — the inverter may be running normally.\n" +
+                   "POSSIBLE CAUSES:\n" +
+                   "  • Vendor changed their API response format\n" +
+                   "  • Station is shared / on a newer portal tier that answers differently\n" +
+                   "ACTION: Open Diagnostics on the site; the raw fields are in the message. Send them to the developer.\n" +
+                   $"Latest: {latestError}";
+        if (errors.Any(e => e.Contains("[CLOUD 5xx]")))
+            return "✕ CLOUD SERVER ERROR\n" +
+                   "The cloud platform returned an error. This is the vendor's issue, not SolarApp or the inverter.\n" +
+                   "ACTION: Wait and retry. Check the vendor's status page.\n" +
+                   $"Latest: {latestError}";
+        if (errors.Any(e => e.Contains("[AUTH FAILED]")))
+            return "✕ AUTHENTICATION FAILED\n" +
+                   "Cloud API rejected the credentials.\n" +
+                   "ACTION: Re-enter API credentials in Installation settings.\n" +
+                   $"Latest: {latestError}";
+        if (errors.Any(e => e.Contains("[PLANT NOT FOUND]")))
+            return "✕ PLANT / STATION NOT FOUND\n" +
+                   "The configured Plant ID / Station Code is not on this cloud account.\n" +
+                   "ACTION: Use \"ดึงรายการ\" next to the Station ID to pick the right one.\n" +
+                   $"Latest: {latestError}";
 
         // ─── Check for [API FAILURE] tag ───
         if (errors.Any(e => e.Contains("[API FAILURE]")))

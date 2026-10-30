@@ -625,7 +625,13 @@
 
                     // Row 1: Status + Today's Production
                     html += '<div class="row mt-3 g-2">';
-                    html += '<div class="col-md-2"><small class="text-muted">สถานะ</small><br/><span class="badge bg-' + (d.isOnline ? 'success' : 'secondary') + '">' + (d.isOnline ? 'ONLINE' : 'OFFLINE') + '</span></div>';
+                    // Health, not just the online bit: a station that answers but
+                    // reports a fault is "ต้องตรวจสอบ", not OFFLINE.
+                    const st = d.health === 'Faulty' ? ['warning text-dark', 'ต้องตรวจสอบ']
+                             : d.isOnline ? ['success', 'ONLINE']
+                             : d.health === 'OfflineNight' ? ['secondary', 'OFFLINE (กลางคืน)']
+                             : ['secondary', 'OFFLINE'];
+                    html += '<div class="col-md-2"><small class="text-muted">สถานะ</small><br/><span class="badge bg-' + st[0] + '" title="' + (d.faultReason || '') + '">' + st[1] + '</span></div>';
                     html += '<div class="col-md-2"><small class="text-muted">กำลังผลิตขณะนี้</small><br/><strong>' + (d.currentPowerKw || 0).toFixed(2) + ' kW</strong></div>';
                     html += '<div class="col-md-2"><small class="text-muted">วันนี้</small><br/><strong class="text-warning">' + (d.todayEnergyKwh || 0).toFixed(2) + ' kWh</strong></div>';
                     html += '<div class="col-md-2"><small class="text-muted">สะสมทั้งหมด</small><br/><strong>' + (d.totalEnergyKwh || 0).toFixed(0) + ' kWh</strong></div>';
