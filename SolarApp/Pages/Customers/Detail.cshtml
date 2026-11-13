@@ -27,12 +27,17 @@
             }
         </h4>
     </div>
-    @if (Model.IsAdmin)
-    {
-        <a asp-page="/Admin/Users" class="btn btn-outline-warning btn-sm">
-            <i class="bi bi-pencil"></i> แก้ไขข้อมูลลูกค้า
+    <div class="d-flex flex-wrap gap-2">
+        <a asp-page="/Customers/Notifications" asp-route-id="@c.Id" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-bell"></i> ศูนย์แจ้งเตือน
         </a>
-    }
+        @if (Model.IsAdmin)
+        {
+            <a asp-page="/Admin/Users" class="btn btn-outline-warning btn-sm">
+                <i class="bi bi-pencil"></i> แก้ไขข้อมูลลูกค้า
+            </a>
+        }
+    </div>
 </div>
 
 <!-- ═══ SUMMARY ═══ -->

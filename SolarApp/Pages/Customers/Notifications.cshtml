@@ -1,0 +1,350 @@
+@page "{id:int}"
+@using SolarApp.Models.Enums
+@model SolarApp.Pages.Customers.NotificationsModel
+@{
+    var c = Model.Customer;
+    ViewData["Title"] = "ศูนย์แจ้งเตือน";
+    var shareText = (string url) => Uri.EscapeDataString($"ลิงก์ผูก LINE เพื่อรับแจ้งเตือนระบบโซลาร์เซลล์ของคุณ{c.FirstName}\n{url}");
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+        <a asp-page="/Customers/Detail" asp-route-id="@c.Id" class="text-decoration-none small">
+            <i class="bi bi-arrow-left"></i> กลับไปหน้าลูกค้า
+        </a>
+        <h4 class="mb-0 mt-1"><i class="bi bi-bell-fill text-warning"></i> ศูนย์แจ้งเตือน</h4>
+        <div class="text-muted">@c.FullName · @Model.Sites.Count ไซต์</div>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle"></i> @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        @* ═══ (a) RECIPIENTS ═══ *@
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-people-fill text-primary"></i> ผู้รับแจ้งเตือน</h6>
+                <span class="badge bg-secondary">@Model.Recipients.Count</span>
+            </div>
+            <div class="list-group list-group-flush">
+                @if (!string.IsNullOrWhiteSpace(c.LineUserId))
+                {
+                    <div class="list-group-item bg-light small">
+                        <i class="bi bi-line text-success"></i>
+                        <strong>LINE หลักของลูกค้า</strong>
+                        <code class="ms-1">@(c.LineUserId.Length > 14 ? c.LineUserId[..14] + "…" : c.LineUserId)</code>
+                        <div class="text-muted">ได้รับแจ้งเตือนตามสวิตช์ของแต่ละไซต์ (แก้ได้ในตารางด้านล่าง)</div>
+                    </div>
+                }
+                @foreach (var r in Model.Recipients)
+                {
+                    var isLine = r.Channel == NotificationChannel.Line;
+                    <div class="list-group-item @(r.IsEnabled ? "" : "opacity-75")">
+                        <div class="d-flex align-items-start gap-2">
+                            <i class="bi @(isLine ? "bi-line text-success" : "bi-envelope-fill text-primary") fs-4"></i>
+                            <div class="flex-grow-1 text-break">
+                                <div class="fw-bold">
+                                    @(r.DisplayName ?? (isLine ? "LINE" : r.Address))
+                                    @if (!r.IsEnabled) { <span class="badge bg-secondary ms-1">ปิดอยู่</span> }
+                                </div>
+                                <div class="small text-muted font-monospace">@(isLine && r.Address.Length > 14 ? r.Address[..14] + "…" : r.Address)</div>
+                                <div class="small mt-1">
+                                    <span class="badge bg-light text-dark border">@Model.SiteNameFor(r.InstallationId)</span>
+                                    @if (r.VerifiedAt.HasValue)
+                                    {
+                                        <span class="badge bg-success-subtle text-success-emphasis border">ยืนยันแล้ว</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning-subtle text-warning-emphasis border">ยังไม่ยืนยัน</span>
+                                    }
+                                    @if (r.LastSentAt.HasValue)
+                                    {
+                                        <span class="text-muted">ส่งล่าสุด @SolarApp.Services.SiteTime.ToSiteTime(r.LastSentAt.Value).ToString("dd/MM HH:mm")</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-1 mt-2">
+                            <form method="post" asp-page-handler="Toggle" asp-route-id="@c.Id" class="d-inline">
+                                <input type="hidden" name="recipientId" value="@r.Id" />
+                                <button class="btn btn-sm @(r.IsEnabled ? "btn-outline-secondary" : "btn-outline-success")">
+                                    <i class="bi @(r.IsEnabled ? "bi-pause-circle" : "bi-play-circle")"></i> @(r.IsEnabled ? "ปิด" : "เปิด")
+                                </button>
+                            </form>
+                            <form method="post" asp-page-handler="Test" asp-route-id="@c.Id" class="d-inline">
+                                <input type="hidden" name="recipientId" value="@r.Id" />
+                                <button class="btn btn-sm btn-outline-primary"><i class="bi bi-send"></i> ส่งทดสอบ</button>
+                            </form>
+                            <form method="post" asp-page-handler="Scope" asp-route-id="@c.Id" class="d-inline">
+                                <input type="hidden" name="recipientId" value="@r.Id" />
+                                <select name="siteId" class="form-select form-select-sm d-inline-block w-auto" onchange="this.form.submit()" aria-label="ขอบเขตไซต์">
+                                    @if (Model.IsAdmin || r.InstallationId == null)
+                                    {
+                                        <option value="" selected="@(r.InstallationId == null)">ทุกไซต์</option>
+                                    }
+                                    @foreach (var s in Model.Sites)
+                                    {
+                                        <option value="@s.Id" selected="@(r.InstallationId == s.Id)">@s.SiteName</option>
+                                    }
+                                </select>
+                            </form>
+                            <form method="post" asp-page-handler="Delete" asp-route-id="@c.Id" class="d-inline ms-auto"
+                                  onsubmit="return confirm('ลบผู้รับนี้?');">
+                                <input type="hidden" name="recipientId" value="@r.Id" />
+                                <button class="btn btn-sm btn-outline-danger" title="ลบ"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </div>
+                    </div>
+                }
+                @if (!Model.Recipients.Any())
+                {
+                    <div class="list-group-item text-muted small text-center py-3">
+                        ยังไม่มีผู้รับเพิ่มเติม — สร้างลิงก์ผูก LINE หรือเพิ่มอีเมลด้านล่าง
+                    </div>
+                }
+            </div>
+            <div class="card-body border-top">
+                <h6 class="small fw-bold mb-2"><i class="bi bi-envelope-plus"></i> เพิ่มผู้รับอีเมล</h6>
+                @if (!Model.EmailConfigured)
+                {
+                    <div class="alert alert-warning small py-2">
+                        ยังไม่ได้ตั้งค่า SMTP — อีเมลจะยังไม่ถูกส่ง
+                        @if (Model.IsAdmin) { <a asp-page="/Admin/EmailSettings">ตั้งค่าอีเมล</a> }
+                    </div>
+                }
+                <form method="post" asp-page-handler="AddEmail" asp-route-id="@c.Id">
+                    <div class="row g-2">
+                        <div class="col-12 col-md-7">
+                            <input type="email" name="email" required maxlength="254" class="form-control" placeholder="name@example.com" aria-label="อีเมล" />
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <input type="text" name="label" maxlength="100" class="form-control" placeholder="ชื่อเรียก (ไม่บังคับ)" aria-label="ชื่อเรียก" />
+                        </div>
+                        <div class="col-12 col-md-7">
+                            <select name="siteId" class="form-select" aria-label="ขอบเขตไซต์">
+                                @if (Model.IsAdmin) { <option value="">ทุกไซต์</option> }
+                                @foreach (var s in Model.Sites) { <option value="@s.Id">@s.SiteName</option> }
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-5 d-grid">
+                            <button class="btn btn-primary"><i class="bi bi-plus-lg"></i> เพิ่มอีเมล</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        @* ═══ (b) LINE BINDING LINK ═══ *@
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-link-45deg text-success"></i> ผูก LINE ด้วยลิงก์</h6>
+            </div>
+            <div class="card-body">
+                @if (Model.BasicId == null)
+                {
+                    <div class="alert alert-warning small py-2">
+                        ยังไม่ได้ตั้งค่า LINE Basic ID — หน้าลิงก์จะยังไม่มีปุ่มเพิ่มเพื่อน
+                        @if (Model.IsAdmin) { <a asp-page="/Admin/LineSettings">ตั้งค่า LINE</a> }
+                    </div>
+                }
+                <p class="small text-muted mb-2">
+                    ส่งลิงก์ให้ลูกค้า → ลูกค้ากด "เพิ่มเพื่อน" และ "ส่งรหัสยืนยัน" → ระบบผูก LINE ให้อัตโนมัติ
+                    (ใช้ได้ครั้งเดียว ภายใน 7 วัน)
+                </p>
+                <form method="post" asp-page-handler="CreateLink" asp-route-id="@c.Id" class="row g-2">
+                    <div class="col-12 col-md-7">
+                        <select name="siteId" class="form-select" aria-label="ไซต์ที่จะรับแจ้งเตือน">
+                            @if (Model.IsAdmin) { <option value="">ทุกไซต์ของลูกค้า</option> }
+                            @foreach (var s in Model.Sites) { <option value="@s.Id">@s.SiteName</option> }
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-5 d-grid">
+                        <button class="btn btn-success"><i class="bi bi-qr-code"></i> สร้างลิงก์ผูก LINE</button>
+                    </div>
+                </form>
+
+                @foreach (var code in Model.PendingCodes)
+                {
+                    var url = Model.LinkFor(code.Code);
+                    var isNew = code.Code == Model.NewCode;
+                    var inputId = $"link-{code.Id}";
+                    <div class="border rounded p-2 mt-3 @(isNew ? "border-success border-2" : "")">
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span>
+                                <strong class="font-monospace">@code.Code</strong>
+                                · @Model.SiteNameFor(code.InstallationId)
+                                @if (isNew) { <span class="badge bg-success">ใหม่</span> }
+                            </span>
+                            <span class="text-muted">หมดอายุ @SolarApp.Services.SiteTime.ToSiteTime(code.ExpiresAt).ToString("dd/MM HH:mm")</span>
+                        </div>
+                        <div class="input-group input-group-sm mb-2">
+                            <input id="@inputId" type="text" readonly class="form-control font-monospace" value="@url" />
+                            <button type="button" class="btn btn-outline-secondary" onclick="copyLink('@inputId', this)">
+                                <i class="bi bi-clipboard"></i> คัดลอก
+                            </button>
+                        </div>
+                        <div class="d-flex flex-wrap gap-1">
+                            <a class="btn btn-sm btn-success" target="_blank" rel="noopener"
+                               href="https://line.me/R/share?text=@shareText(url)">
+                                <i class="bi bi-share"></i> แชร์ทาง LINE
+                            </a>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse"
+                                    data-bs-target="#qr-@code.Id" aria-expanded="@(isNew ? "true" : "false")">
+                                <i class="bi bi-qr-code"></i> QR
+                            </button>
+                            <form method="post" asp-page-handler="RevokeCode" asp-route-id="@c.Id" class="ms-auto"
+                                  onsubmit="return confirm('ยกเลิกลิงก์นี้?');">
+                                <input type="hidden" name="codeId" value="@code.Id" />
+                                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-x-circle"></i> ยกเลิก</button>
+                            </form>
+                        </div>
+                        <div class="collapse @(isNew ? "show" : "") text-center mt-2" id="qr-@code.Id">
+                            <div class="d-inline-block p-2 bg-white" data-qr="@url"></div>
+                        </div>
+                    </div>
+                }
+                @if (Model.PendingCodes.Any())
+                {
+                    <div class="small text-muted mt-2">
+                        เมื่อลูกค้าส่งรหัสแล้ว ลิงก์จะหายจากรายการนี้และชื่อ LINE จะขึ้นใน "ผู้รับแจ้งเตือน" (รีเฟรชหน้า)
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        @* ═══ (c) EVENT MATRIX ═══ *@
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-ui-checks-grid text-warning"></i> เรื่องที่จะแจ้ง</h6>
+            </div>
+            <form method="post" asp-page-handler="SavePrefs" asp-route-id="@c.Id">
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                            <tr><th>เรื่อง</th><th class="text-center" style="width:70px">LINE</th><th class="text-center" style="width:70px">อีเมล</th></tr>
+                        </thead>
+                        <tbody>
+                            @for (var i = 0; i < Model.Matrix.Count; i++)
+                            {
+                                var row = Model.Matrix[i];
+                                <tr>
+                                    <td>
+                                        @row.Label
+                                        @if (row.IsDefault) { <span class="badge bg-light text-muted border ms-1" title="ยังไม่เคยแก้ — ใช้ค่าจากสวิตช์ของไซต์">ค่าเริ่มต้น</span> }
+                                        <input type="hidden" name="prefs[@i].EventType" value="@((int)row.Event)" />
+                                    </td>
+                                    <td class="text-center">
+                                        <div class="form-check form-switch d-inline-block m-0">
+                                            <input class="form-check-input" type="checkbox" name="prefs[@i].Line" value="true"
+                                                   checked="@row.Line" aria-label="LINE: @row.Label" />
+                                        </div>
+                                        <input type="hidden" name="prefs[@i].Line" value="false" />
+                                    </td>
+                                    <td class="text-center">
+                                        <div class="form-check form-switch d-inline-block m-0">
+                                            <input class="form-check-input" type="checkbox" name="prefs[@i].Email" value="true"
+                                                   checked="@row.Email" aria-label="อีเมล: @row.Label" />
+                                        </div>
+                                        <input type="hidden" name="prefs[@i].Email" value="false" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-body border-top">
+                    <div class="small text-muted mb-2">
+                        ใช้กับทุกไซต์ของลูกค้า · ช่อง LINE จะปรับสวิตช์ "แจ้งเตือนลูกค้า" ในหน้าแก้ไขไซต์ให้ตรงกันด้วย
+                        · "กลับมาทำงานปกติ" ส่งเฉพาะผู้ที่ได้รับแจ้งตอนระบบดับ
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-warning"><i class="bi bi-save"></i> บันทึก</button>
+                        @if (Model.HasPreferenceRows)
+                        {
+                            <button type="submit" formaction="?handler=ResetPrefs" class="btn btn-outline-secondary ms-auto"
+                                    onclick="return confirm('กลับไปใช้ค่าตามสวิตช์ของแต่ละไซต์?');">
+                                <i class="bi bi-arrow-counterclockwise"></i> ใช้ค่าตามไซต์
+                            </button>
+                        }
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        @* ═══ (d) QUIET HOURS ═══ *@
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-moon-stars text-secondary"></i> ช่วงงดแจ้งเตือน</h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">
+                    ไม่ส่งแจ้งเตือนในช่วงเวลานี้ (เวลาไทย) — ยกเว้นเหตุ <strong>วิกฤต</strong>
+                    และข้อความ "กลับมาทำงานปกติ" · ใช้กับทุกไซต์ (@Model.Sites.Count)
+                </p>
+                @if (Model.QuietHoursMixed)
+                {
+                    <div class="alert alert-info small py-2">แต่ละไซต์ตั้งเวลาไว้ไม่เท่ากัน — บันทึกแล้วจะใช้เวลาเดียวกันทุกไซต์</div>
+                }
+                <form method="post" asp-page-handler="QuietHours" asp-route-id="@c.Id">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-6">
+                            <label class="form-label small" for="quietStart">เริ่ม</label>
+                            <input id="quietStart" type="time" name="quietStart" class="form-control" value="@(Model.QuietStart ?? "22:00")" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small" for="quietEnd">สิ้นสุด</label>
+                            <input id="quietEnd" type="time" name="quietEnd" class="form-control" value="@(Model.QuietEnd ?? "07:00")" />
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        <button class="btn btn-warning"><i class="bi bi-save"></i> บันทึก</button>
+                        @if (Model.QuietStart != null)
+                        {
+                            <button type="submit" name="clear" value="true" class="btn btn-outline-secondary ms-auto">
+                                <i class="bi bi-bell"></i> ไม่งดแจ้งเตือน
+                            </button>
+                        }
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script>
+        function copyLink(id, btn) {
+            var el = document.getElementById(id);
+            var done = function () { btn.innerHTML = '<i class="bi bi-check2"></i> คัดลอกแล้ว'; };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(el.value).then(done);
+            } else {
+                el.select(); document.execCommand('copy'); done();
+            }
+        }
+        (function () {
+            if (!window.QRCode) return;
+            document.querySelectorAll('[data-qr]').forEach(function (el) {
+                new QRCode(el, { text: el.getAttribute('data-qr'), width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
+            });
+        })();
+    </script>
+}

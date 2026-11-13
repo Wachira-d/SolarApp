@@ -1,0 +1,128 @@
+@page
+@model SolarApp.Pages.Admin.EmailSettingsModel
+@{
+    ViewData["Title"] = "ตั้งค่าอีเมล";
+}
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle"></i> @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<h4 class="mb-3"><i class="bi bi-envelope-at text-warning"></i> อีเมล (SMTP)</h4>
+<p class="text-muted small">
+    ใช้ส่งแจ้งเตือนทางอีเมลให้ผู้รับที่เพิ่มไว้ใน <strong>ศูนย์แจ้งเตือน</strong> ของลูกค้าแต่ละราย
+    — เนื้อหาเดียวกับข้อความ LINE
+</p>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white d-flex justify-content-between">
+                <h6 class="mb-0">การตั้งค่า SMTP</h6>
+                <span class="badge @(Model.IsConfigured ? "bg-success" : "bg-warning text-dark")">
+                    @(Model.IsConfigured ? "ตั้งค่าแล้ว" : "ยังไม่ได้ตั้งค่า")
+                </span>
+            </div>
+            <div class="card-body">
+                <form method="post" asp-page-handler="Save" autocomplete="off">
+                    <div class="row g-2">
+                        <div class="col-8">
+                            <label asp-for="SmtpHost" class="form-label fw-bold">SMTP Host</label>
+                            <input asp-for="SmtpHost" class="form-control font-monospace" placeholder="smtp.gmail.com" />
+                        </div>
+                        <div class="col-4">
+                            <label asp-for="SmtpPort" class="form-label fw-bold">พอร์ต</label>
+                            <input asp-for="SmtpPort" type="number" min="1" max="65535" class="form-control" />
+                        </div>
+                    </div>
+                    <div class="form-check form-switch my-2">
+                        <input asp-for="UseSsl" class="form-check-input" />
+                        <label asp-for="UseSsl" class="form-check-label">ใช้การเข้ารหัส (TLS)</label>
+                        <div class="small text-muted">พอร์ต 465 = SSL ตั้งแต่ต้น, พอร์ตอื่น (เช่น 587) = STARTTLS</div>
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Username" class="form-label fw-bold">ชื่อผู้ใช้</label>
+                        <input asp-for="Username" class="form-control" autocomplete="off" />
+                    </div>
+                    <div class="mb-2">
+                        <label asp-for="Password" class="form-label fw-bold">รหัสผ่าน</label>
+                        <input asp-for="Password" type="password" class="form-control" autocomplete="new-password"
+                               value="" placeholder="@(Model.HasPassword ? "•••••• (ตั้งค่าแล้ว — เว้นว่าง = ใช้ค่าเดิม)" : "")" />
+                        <div class="small text-muted">เก็บแบบเข้ารหัส · Gmail ต้องใช้ App Password</div>
+                        @if (Model.HasPassword)
+                        {
+                            <div class="form-check mt-1">
+                                <input asp-for="ClearPassword" class="form-check-input" />
+                                <label asp-for="ClearPassword" class="form-check-label small">ลบรหัสผ่านที่บันทึกไว้</label>
+                            </div>
+                        }
+                    </div>
+                    <hr />
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-7">
+                            <label asp-for="FromAddress" class="form-label fw-bold">อีเมลผู้ส่ง</label>
+                            <input asp-for="FromAddress" type="email" class="form-control" placeholder="noreply@example.com" />
+                        </div>
+                        <div class="col-md-5">
+                            <label asp-for="FromName" class="form-label fw-bold">ชื่อผู้ส่ง</label>
+                            <input asp-for="FromName" class="form-control" placeholder="SolarApp" />
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-save"></i> บันทึกการตั้งค่า
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white"><h6 class="mb-0"><i class="bi bi-send-check"></i> ส่งอีเมลทดสอบ</h6></div>
+            <div class="card-body">
+                <form method="post" asp-page-handler="Test">
+                    <div class="input-group">
+                        <input asp-for="TestAddress" type="email" class="form-control" placeholder="you@example.com" />
+                        <button type="submit" class="btn btn-outline-success"><i class="bi bi-send"></i> ส่ง</button>
+                    </div>
+                    <div class="small text-muted mt-1">บันทึกการตั้งค่าก่อน แล้วจึงส่งทดสอบ</div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white"><h6 class="mb-0">ประวัติการส่งอีเมล (20 รายการล่าสุด)</h6></div>
+    <div class="list-group list-group-flush">
+        @foreach (var n in Model.RecentEmails)
+        {
+            <div class="list-group-item small">
+                <div class="d-flex justify-content-between gap-2">
+                    <span class="text-truncate"><strong>@n.RecipientLineId</strong> · @n.Title</span>
+                    <span class="badge @(n.Status == SolarApp.Models.Enums.NotificationStatus.Sent ? "bg-success" : n.Status == SolarApp.Models.Enums.NotificationStatus.Failed ? "bg-danger" : "bg-secondary")">@n.Status</span>
+                </div>
+                <div class="text-muted">@SolarApp.Services.SiteTime.ToSiteTime(n.CreatedAt).ToString("dd/MM HH:mm")</div>
+                @if (!string.IsNullOrEmpty(n.ErrorMessage))
+                {
+                    <div class="text-danger text-break">@(n.ErrorMessage.Length > 160 ? n.ErrorMessage[..160] + "…" : n.ErrorMessage)</div>
+                }
+            </div>
+        }
+        @if (!Model.RecentEmails.Any())
+        {
+            <div class="list-group-item text-center text-muted py-4">ยังไม่มีประวัติการส่ง</div>
+        }
+    </div>
+</div>
