@@ -276,6 +276,8 @@ public class Startup
         builder.Services.AddSingleton<Services.Telemetry.ITelemetryStore, Services.Telemetry.SqlServerTelemetryStore>();
         builder.Services.AddScoped<Services.Telemetry.TelemetryGatewayService>();
         builder.Services.AddScoped<Services.Telemetry.TelemetryIngestService>();
+        builder.Services.AddScoped<BackgroundJobs.TelemetryRollupJob>();
+        builder.Services.AddScoped<BackgroundJobs.TelemetryRetentionJob>();
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
         builder.Services.AddScoped<BackgroundJobs.DataRetentionJob>();
         builder.Services.AddScoped<BackgroundJobs.MonthlyReportJob>();
@@ -394,6 +396,15 @@ public class Startup
         var contractCron = GetSetting(ctx, "Schedule.ContractExpiry", "0 1 * * *");
         RecurringJob.AddOrUpdate<BackgroundJobs.ContractExpiryJob>(
             "contract-expiry", job => job.ExecuteAsync(), contractCron);
+
+        // Telemetry (DESIGN.md §5.3): rollups every 5 min; retention at
+        // 20:30 UTC = 03:30 Thailand, after the 01:00 data-retention sweep.
+        var telemetryRollupCron = GetSetting(ctx, "Schedule.TelemetryRollup", "*/5 * * * *");
+        RecurringJob.AddOrUpdate<BackgroundJobs.TelemetryRollupJob>(
+            "telemetry-rollup", job => job.ExecuteAsync(), telemetryRollupCron);
+        var telemetryRetentionCron = GetSetting(ctx, "Schedule.TelemetryRetention", "30 20 * * *");
+        RecurringJob.AddOrUpdate<BackgroundJobs.TelemetryRetentionJob>(
+            "telemetry-retention", job => job.ExecuteAsync(), telemetryRetentionCron);
     }
 
     /// <summary>

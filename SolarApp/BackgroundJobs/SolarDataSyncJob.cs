@@ -9,6 +9,7 @@ using SolarApp.Services.InverterApi;
 using SolarApp.Services.InverterApi.Adapters;
 using SolarApp.Services.InverterApi.Models;
 using SolarApp.Services.Security;
+using SolarApp.Services.Telemetry;
 
 namespace SolarApp.BackgroundJobs;
 
@@ -50,8 +51,14 @@ public class SolarDataSyncJob
             .Where(i => i.Status != InstallationStatus.Inactive
                         && i.IncludesMonitoring
                         && i.PlantId != null && i.PlantId != ""
+                        // Local-gateway sites push to us; there is nothing to poll.
+                        && i.TelemetrySource != TelemetrySource.LocalGateway
                         && (i.NextSyncDueAt == null || i.NextSyncDueAt <= now))
             .ToListAsync();
+
+        // Hybrid sites are still polled (vendor alarms matter), but while
+        // their gateway is pushing it owns EnergyData — see TelemetrySourcePolicy.
+        var gatewaySeen = await GatewayLastSeenAsync(installations);
 
         _logger.LogInformation("Solar data sync: starting for {Count} installations", installations.Count);
 
@@ -464,20 +471,25 @@ public class SolarDataSyncJob
                 }
 
                 var isDeviceOnline = realtimeResult.Kind == Services.InverterApi.Models.ApiResultKind.Success;
+                var cloudWritesEnergy = TelemetrySourcePolicy.CloudWritesEnergyData(installation.TelemetrySource,
+                    gatewaySeen.GetValueOrDefault(installation.Id), DateTime.UtcNow);
 
-                _context.EnergyData.Add(new EnergyData
+                if (cloudWritesEnergy)
                 {
-                    InstallationId = installation.Id,
-                    Timestamp = DateTime.UtcNow,
-                    Granularity = DataGranularity.Realtime,
-                    PowerGenerationKw = realtime.CurrentPowerKw,
-                    EnergyGenerationKwh = realtime.TodayEnergyKwh,
-                    GridExportKwh = realtime.GridExportKw ?? 0,
-                    GridImportKwh = realtime.GridImportKw ?? 0,
-                    SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - (realtime.GridExportKw ?? 0)),
-                    BatterySocPercent = realtime.BatterySocPercent
-                });
-                totalRealtime++;
+                    _context.EnergyData.Add(new EnergyData
+                    {
+                        InstallationId = installation.Id,
+                        Timestamp = DateTime.UtcNow,
+                        Granularity = DataGranularity.Realtime,
+                        PowerGenerationKw = realtime.CurrentPowerKw,
+                        EnergyGenerationKwh = realtime.TodayEnergyKwh,
+                        GridExportKwh = realtime.GridExportKw ?? 0,
+                        GridImportKwh = realtime.GridImportKw ?? 0,
+                        SelfConsumptionKwh = Math.Max(0, realtime.TodayEnergyKwh - (realtime.GridExportKw ?? 0)),
+                        BatterySocPercent = realtime.BatterySocPercent
+                    });
+                    totalRealtime++;
+                }
 
                 // IMPORTANT: LastOnlineAt = "last time we successfully contacted the cloud",
                 // NOT "last time device was producing". The API call succeeded here (kind
@@ -728,6 +740,8 @@ public class SolarDataSyncJob
                     // Skip the daily upsert below; preserve any existing row
                     goto SkipDailyUpsert;
                 }
+
+                if (!cloudWritesEnergy) goto SkipDailyUpsert;   // the gateway owns today's row
 
                 var todayRecord = await _context.EnergyData.FirstOrDefaultAsync(e =>
                     e.InstallationId == installation.Id
@@ -1104,6 +1118,27 @@ public class SolarDataSyncJob
     /// the operator would have to clear by hand a problem that fixed itself,
     /// and the dashboard count would never come down.
     /// </summary>
+    /// <summary>Latest push of an active gateway per Hybrid site (other sites need no lookup).</summary>
+    private async Task<Dictionary<int, DateTime?>> GatewayLastSeenAsync(List<Installation> installations)
+    {
+        var hybridIds = installations.Where(i => i.TelemetrySource == TelemetrySource.Hybrid).Select(i => i.Id).ToList();
+        if (hybridIds.Count == 0) return new();
+        try
+        {
+            return await _context.TelemetryGateways.AsNoTracking()
+                .Where(g => hybridIds.Contains(g.InstallationId) && g.RevokedAt == null)
+                .GroupBy(g => g.InstallationId)
+                .Select(g => new { g.Key, Last = g.Max(x => x.LastSeenAt) })
+                .ToDictionaryAsync(x => x.Key, x => x.Last);
+        }
+        catch (Exception ex)
+        {
+            // No gateway table yet → behave as Cloud (the pre-telemetry behaviour).
+            _logger.LogDebug(ex, "Gateway last-seen lookup failed; Hybrid sites treated as cloud-fed this cycle");
+            return new();
+        }
+    }
+
     private async Task ResolveApiFailureAlertsAsync(Installation installation)
     {
         var open = await _context.SystemAlerts

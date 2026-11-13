@@ -1,0 +1,377 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.GatewayModel
+@using SolarApp.Models.Enums
+@using SolarApp.Pages.Installations
+@{
+    ViewData["Title"] = $"เชื่อมต่อ Home Assistant - {Model.Installation.SiteName}";
+    var inst = Model.Installation;
+    var activeGateways = Model.Gateways.Count(g => g.RevokedAt == null);
+    var unmapped = Model.Channels.Where(c => c.IsUnmapped).ToList();
+    var mappedEntities = Model.Maps.Select(m => m.EntityId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+}
+
+@if (TempData["FlashSuccess"] is string flashSuccess)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="bi bi-check-circle-fill"></i> @flashSuccess
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+@if (TempData["FlashWarning"] is string flashWarning)
+{
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle-fill"></i> @flashWarning
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-router"></i> เชื่อมต่อ Home Assistant / Local API</h4>
+        <small class="text-muted">@inst.SiteName · @inst.InverterBrand</small>
+    </div>
+    <a asp-page="Detail" asp-route-id="@inst.Id" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> กลับ
+    </a>
+</div>
+
+@* ── New token: shown once, on this response only ── *@
+@if (Model.NewToken != null)
+{
+    <div class="card border-warning border-2 shadow-sm mb-3">
+        <div class="card-body">
+            <h6 class="text-warning-emphasis"><i class="bi bi-key-fill"></i> โทเค็นของ "@Model.NewTokenGatewayName"</h6>
+            <div class="alert alert-warning small py-2 mb-2">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <strong>แสดงครั้งเดียวเท่านั้น</strong> — คัดลอกไปใส่ใน <code>secrets.yaml</code> ของ Home Assistant ตอนนี้
+                ระบบเก็บไว้แค่ค่าแฮช ถ้าทำหายต้องสร้างเกตเวย์ใหม่และยกเลิกอันเดิม
+            </div>
+            <div class="input-group">
+                <input id="newToken" type="text" class="form-control font-monospace" value="@Model.NewToken" readonly
+                       onclick="this.select()" autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn btn-warning" data-copy="newToken">
+                    <i class="bi bi-clipboard"></i> คัดลอก
+                </button>
+            </div>
+            <small class="text-muted d-block mt-2">โค้ดตั้งค่า HA ด้านล่างใส่โทเค็นนี้ให้แล้วในหน้านี้ (ครั้งเดียว)</small>
+        </div>
+    </div>
+}
+
+@* ── (a) Data source ── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <h6 class="mb-2"><i class="bi bi-diagram-3"></i> แหล่งข้อมูลของไซต์</h6>
+        <form method="post" asp-page-handler="Source" asp-route-id="@inst.Id">
+            <div class="row g-2">
+                @foreach (var s in new[] { TelemetrySource.Cloud, TelemetrySource.LocalGateway, TelemetrySource.Hybrid })
+                {
+                    var hint = s switch
+                    {
+                        TelemetrySource.LocalGateway => "รับข้อมูลจาก Home Assistant อย่างเดียว ไม่ดึงจากคลาวด์",
+                        TelemetrySource.Hybrid => "ใช้ข้อมูลจากเกตเวย์เป็นหลัก ยังดึงคลาวด์เพื่อรับแจ้งเตือนจากผู้ผลิต และใช้แทนเมื่อเกตเวย์เงียบเกิน 10 นาที",
+                        _ => "ดึงข้อมูลจากคลาวด์ของผู้ผลิตตามเดิม",
+                    };
+                    <div class="col-12 col-md-4">
+                        <label class="border rounded p-2 d-flex gap-2 h-100 @(inst.TelemetrySource == s ? "border-primary bg-primary-subtle" : "")">
+                            <input class="form-check-input mt-1" type="radio" name="source" value="@s" checked="@(inst.TelemetrySource == s)" />
+                            <span>
+                                <span class="fw-semibold d-block">@GatewayModel.SourceLabel(s)</span>
+                                <small class="text-muted">@hint</small>
+                            </span>
+                        </label>
+                    </div>
+                }
+            </div>
+            @if (inst.TelemetrySource != TelemetrySource.Cloud && activeGateways == 0)
+            {
+                <div class="alert alert-warning small py-2 mt-2 mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> ยังไม่มีเกตเวย์ที่ใช้งานได้ — สร้างเกตเวย์ด้านล่างเพื่อเริ่มรับข้อมูล
+                </div>
+            }
+            <button type="submit" class="btn btn-primary btn-sm mt-2"><i class="bi bi-save"></i> บันทึกแหล่งข้อมูล</button>
+        </form>
+    </div>
+</div>
+
+@* ── (b) Gateways ── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <h6 class="mb-2"><i class="bi bi-hdd-network"></i> เกตเวย์ (โทเค็นสำหรับส่งข้อมูล)</h6>
+        @if (Model.Gateways.Count == 0)
+        {
+            <p class="text-muted small mb-2">ยังไม่มีเกตเวย์</p>
+        }
+        else
+        {
+            <div class="list-group mb-2">
+                @foreach (var g in Model.Gateways)
+                {
+                    <div class="list-group-item @(g.RevokedAt != null ? "text-muted bg-body-tertiary" : "")">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                            <div>
+                                <span class="fw-semibold">@g.Name</span>
+                                <code class="small ms-1">@(g.TokenPrefix)…</code>
+                                @if (g.RevokedAt != null)
+                                {
+                                    <span class="badge bg-secondary ms-1">ยกเลิกแล้ว</span>
+                                }
+                                else
+                                {
+                                    <span class="badge @GatewayModel.FreshnessClass(g.LastSeenAt) ms-1">@GatewayModel.Ago(g.LastSeenAt)</span>
+                                }
+                                <div class="small text-muted">
+                                    สร้าง @SolarApp.Services.SiteTime.ToSiteTime(g.CreatedAt).ToString("dd/MM/yy HH:mm")
+                                    · รับแล้ว @g.SamplesAccepted.ToString("N0") ค่า
+                                    @if (!string.IsNullOrEmpty(g.LastSeenIp))
+                                    {
+                                        <span>· IP @g.LastSeenIp</span>
+                                    }
+                                    @if (g.RevokedAt != null)
+                                    {
+                                        <span>· ยกเลิก @SolarApp.Services.SiteTime.ToSiteTime(g.RevokedAt.Value).ToString("dd/MM/yy HH:mm")</span>
+                                    }
+                                </div>
+                            </div>
+                            @if (g.RevokedAt == null)
+                            {
+                                <form method="post" asp-page-handler="RevokeGateway" asp-route-id="@inst.Id"
+                                      onsubmit="return confirm('ยกเลิกโทเค็นของ @g.Name? Home Assistant ที่ใช้โทเค็นนี้จะส่งข้อมูลไม่ได้อีก');">
+                                    <input type="hidden" name="gatewayId" value="@g.Id" />
+                                    <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-octagon"></i> ยกเลิก</button>
+                                </form>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        <form method="post" asp-page-handler="CreateGateway" asp-route-id="@inst.Id" class="d-flex gap-2">
+            <input type="text" name="name" class="form-control form-control-sm" maxlength="100" placeholder="ชื่อ เช่น Home Assistant บ้านลูกค้า" />
+            <button type="submit" class="btn btn-success btn-sm text-nowrap"><i class="bi bi-plus-lg"></i> สร้างเกตเวย์</button>
+        </form>
+    </div>
+</div>
+
+@* ── (c) Ingest health ── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <h6 class="mb-0"><i class="bi bi-activity"></i> ข้อมูลที่ได้รับ (@Model.Channels.Count ช่อง)</h6>
+            <small class="text-muted">ความครบถ้วน = ค่าที่ได้รับใน 24 ชม. ÷ 1 ค่า/นาที</small>
+        </div>
+        @if (unmapped.Count > 0)
+        {
+            <div class="alert alert-warning small py-2">
+                <i class="bi bi-question-circle"></i> มี <strong>@unmapped.Count</strong> entity ที่ยังไม่ได้จับคู่ (<code>ha.*</code>) —
+                ข้อมูลถูกเก็บไว้แต่รายงานยังไม่ใช้ กด "จับคู่" เพื่อกำหนดช่องข้อมูล
+            </div>
+        }
+        @if (Model.Channels.Count == 0)
+        {
+            <p class="text-muted small mb-0">ยังไม่มีข้อมูลเข้ามา — ตั้งค่า Home Assistant ตามด้านล่าง แล้วรอ 1–2 นาที</p>
+        }
+        else
+        {
+            @foreach (var group in Model.Channels.GroupBy(c => c.IsUnmapped ? TelemetryDeviceKind.Other : c.Kind).OrderBy(g => g.Key == TelemetryDeviceKind.Other ? 99 : (int)g.Key))
+            {
+                <div class="small fw-semibold text-muted mt-2">@GatewayModel.KindLabel(group.Key)</div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-1 small">
+                        <tbody>
+                        @foreach (var c in group)
+                        {
+                            <tr class="@(c.IsUnmapped ? "table-warning" : "")">
+                                <td class="text-break">
+                                    <code>@c.Key</code>
+                                    @if (!string.IsNullOrEmpty(c.SourceEntityId) && c.SourceEntityId != c.Key)
+                                    {
+                                        <div class="text-muted">@c.SourceEntityId</div>
+                                    }
+                                </td>
+                                <td class="text-end text-nowrap">@c.LastValue.ToString("0.###") @c.Unit</td>
+                                <td class="text-nowrap"><span class="badge @GatewayModel.FreshnessClass(c.LastTs)">@GatewayModel.Ago(c.LastTs)</span></td>
+                                <td class="text-nowrap d-none d-sm-table-cell">
+                                    @if (c.Coverage24hPct is double pct)
+                                    {
+                                        <span class="@(pct >= 90 ? "text-success" : pct >= 50 ? "text-warning" : "text-danger")">~@pct.ToString("0")%</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">–</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    @if (c.IsUnmapped && !string.IsNullOrEmpty(c.SourceEntityId) && !mappedEntities.Contains(c.SourceEntityId))
+                                    {
+                                        <a asp-page="Gateway" asp-route-id="@inst.Id" asp-route-mapEntity="@c.SourceEntityId" asp-fragment="mapping"
+                                           class="btn btn-outline-primary btn-sm py-0">จับคู่</a>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@* ── (d) Entity mapping ── *@
+<div class="card border-0 shadow-sm mb-3" id="mapping">
+    <div class="card-body">
+        <h6 class="mb-1"><i class="bi bi-arrow-left-right"></i> จับคู่ entity ของ Home Assistant</h6>
+        <p class="small text-muted mb-2">
+            ค่าที่เก็บ = (ค่าจาก HA × ตัวคูณ + ค่าชดเชย) × (−1 ถ้ากลับเครื่องหมาย).
+            ตัวอย่าง: เซนเซอร์เป็น kW → ตัวคูณ 1000 สำหรับช่อง <code>_w</code>;
+            กริดต้องเป็น <strong>+ ซื้อไฟ / − ขายไฟ</strong>, แบตเตอรี่ <strong>+ ชาร์จ / − คายประจุ</strong>.
+            มีผลกับข้อมูลที่เข้ามาหลังบันทึกเท่านั้น
+        </p>
+
+        <form method="post" asp-page-handler="SaveMap" asp-route-id="@inst.Id" class="border rounded p-2 mb-3 bg-body-tertiary">
+            <input type="hidden" asp-for="Map.Id" />
+            <div asp-validation-summary="ModelOnly" class="text-danger small"></div>
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <label asp-for="Map.EntityId" class="form-label small mb-0">Entity id (HA)</label>
+                    <input asp-for="Map.EntityId" class="form-control form-control-sm font-monospace" placeholder="sensor.inverter_pv_power" autocomplete="off" />
+                    <span asp-validation-for="Map.EntityId" class="text-danger small"></span>
+                </div>
+                <div class="col-12 col-md-4">
+                    <label asp-for="Map.Key" class="form-label small mb-0">ช่องข้อมูล (canonical key)</label>
+                    <input asp-for="Map.Key" class="form-control form-control-sm font-monospace" list="canonicalKeys" placeholder="pv.power_w" autocomplete="off" />
+                    <span asp-validation-for="Map.Key" class="text-danger small"></span>
+                </div>
+                <div class="col-4 col-md-1">
+                    <label asp-for="Map.Scale" class="form-label small mb-0">ตัวคูณ</label>
+                    <input asp-for="Map.Scale" type="number" step="any" class="form-control form-control-sm" />
+                </div>
+                <div class="col-4 col-md-1">
+                    <label asp-for="Map.Offset" class="form-label small mb-0">ชดเชย</label>
+                    <input asp-for="Map.Offset" type="number" step="any" class="form-control form-control-sm" />
+                </div>
+                <div class="col-4 col-md-2 d-flex align-items-end">
+                    <div class="form-check mb-1">
+                        <input asp-for="Map.Invert" class="form-check-input" />
+                        <label asp-for="Map.Invert" class="form-check-label small">กลับเครื่องหมาย</label>
+                    </div>
+                </div>
+            </div>
+            <span asp-validation-for="Map.Scale" class="text-danger small d-block"></span>
+            <div class="d-flex gap-2 mt-2">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> @(Model.Map.Id != null ? "บันทึกการแก้ไข" : "เพิ่มการจับคู่")</button>
+                @if (Model.Map.Id != null || !string.IsNullOrEmpty(Model.Map.EntityId))
+                {
+                    <a asp-page="Gateway" asp-route-id="@inst.Id" asp-fragment="mapping" class="btn btn-outline-secondary btn-sm">ยกเลิก</a>
+                }
+            </div>
+            <datalist id="canonicalKeys">
+                @foreach (var k in GatewayModel.CanonicalKeys)
+                {
+                    <option value="@k"></option>
+                }
+            </datalist>
+        </form>
+
+        @if (Model.Maps.Count == 0)
+        {
+            <p class="text-muted small mb-0">ยังไม่มีการจับคู่</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm align-middle small mb-0">
+                    <thead><tr><th>Entity</th><th>ช่องข้อมูล</th><th class="text-end">แปลงค่า</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var m in Model.Maps)
+                    {
+                        <tr>
+                            <td class="text-break font-monospace">@m.EntityId</td>
+                            <td class="text-break"><code>@m.Key</code></td>
+                            <td class="text-end text-nowrap">
+                                @if (m.Scale != 1) { <span>&times;@(m.Scale.ToString("0.######"))</span> }
+                                @if (m.Offset != 0) { <span>@(m.Offset > 0 ? "+" : "")@m.Offset.ToString("0.######")</span> }
+                                @if (m.Invert) { <span class="badge bg-info text-dark">±</span> }
+                                @if (m.Scale == 1 && m.Offset == 0 && !m.Invert) { <span class="text-muted">–</span> }
+                            </td>
+                            <td class="text-end text-nowrap">
+                                <a asp-page="Gateway" asp-route-id="@inst.Id" asp-route-editMap="@m.Id" asp-fragment="mapping"
+                                   class="btn btn-outline-secondary btn-sm py-0"><i class="bi bi-pencil"></i></a>
+                                <form method="post" asp-page-handler="DeleteMap" asp-route-id="@inst.Id" class="d-inline"
+                                      onsubmit="return confirm('ลบการจับคู่ @m.EntityId?');">
+                                    <input type="hidden" name="mapId" value="@m.Id" />
+                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@* ── (e) Home Assistant setup ── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <h6 class="mb-1"><i class="bi bi-house-gear"></i> ตั้งค่า Home Assistant</h6>
+        <ol class="small text-muted ps-3 mb-2">
+            <li>ใส่โทเค็นใน <code>secrets.yaml</code> (ขั้นที่ 1)</li>
+            <li>วางโค้ดขั้นที่ 2 ใน <code>configuration.yaml</code> แล้วรีสตาร์ท Home Assistant</li>
+            <li>ทดสอบด้วยคำสั่ง curl (ขั้นที่ 3) แล้วดูตาราง "ข้อมูลที่ได้รับ" ด้านบนภายใน 1–2 นาที</li>
+        </ol>
+        @if (Model.HaConfig.Included.Count == 0)
+        {
+            <div class="alert alert-info small py-2"><i class="bi bi-info-circle"></i> ยังไม่มี entity ที่จับคู่ — เพิ่มการจับคู่ก่อน แล้วโค้ดด้านล่างจะใส่ entity ให้อัตโนมัติ</div>
+        }
+        @if (Model.HaConfig.Skipped.Count > 0)
+        {
+            <div class="alert alert-warning small py-2">
+                <i class="bi bi-exclamation-triangle"></i> ข้าม @Model.HaConfig.Skipped.Count รายการที่ไม่ใช่ entity id ของ HA:
+                @string.Join(", ", Model.HaConfig.Skipped)
+            </div>
+        }
+
+        @{
+            var snippets = new[]
+            {
+                ("haSecrets", "1. secrets.yaml", Model.HaConfig.SecretsYaml),
+                ("haConfig", "2. configuration.yaml", Model.HaConfig.ConfigurationYaml),
+                ("haPing", "3. ทดสอบโทเค็น (ping)", Model.HaConfig.PingCurl),
+                ("haPush", "ทดสอบส่งค่า (ไม่บังคับ)", Model.HaConfig.PushCurl),
+            };
+        }
+        @foreach (var (elId, title, text) in snippets)
+        {
+            <div class="d-flex justify-content-between align-items-center mt-2">
+                <span class="small fw-semibold">@title</span>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0" data-copy="@elId"><i class="bi bi-clipboard"></i> คัดลอก</button>
+            </div>
+            <pre id="@elId" class="bg-dark text-light p-2 rounded small mb-0" style="white-space:pre;overflow-x:auto;max-height:24rem">@text</pre>
+        }
+        @if (Model.NewToken == null)
+        {
+            <small class="text-muted d-block mt-2">
+                โทเค็นจริงไม่ถูกเก็บไว้ จึงแสดงเป็นตัวแทน — ใช้โทเค็นที่คัดลอกไว้ตอนสร้างเกตเวย์
+            </small>
+        }
+        <small class="text-muted d-block mt-1">ปลายทาง: <code>@(Model.BaseUrl)@SolarApp.Services.Telemetry.HomeAssistantConfigGenerator.IngestPath</code></small>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Copy buttons: copies the text of the element named in data-copy.
+        document.querySelectorAll('[data-copy]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var el = document.getElementById(btn.getAttribute('data-copy'));
+                var text = el.value !== undefined ? el.value : el.textContent;
+                navigator.clipboard.writeText(text).then(function () {
+                    btn.innerHTML = '<i class="bi bi-check2"></i> คัดลอกแล้ว';
+                });
+            });
+        });
+    </script>
+}
