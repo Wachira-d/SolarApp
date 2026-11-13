@@ -247,6 +247,25 @@ A sample that arrives behind the watermark (an HA box that was offline for a
 day and replays its buffer) records a dirty range; the next rollup run
 recomputes exactly those buckets (delete + insert) and everything above them.
 
+**Reading a counter's energy** (`TelemetryRollup`): for `IsCumulative`
+channels, the energy in any bucket at any resolution is `Last − First`
+(`TelemetryRollup.Increase`). `First` is the *opening* reading — the last
+good reading before the bucket (2 h look-back), so the step between two
+buckets is not lost — and `Last = First + bridged increase`: a drop larger
+than jitter (1 % / 0.05) is a reset and counts the new reading; a drop that
+recovers within 10 minutes is a bad read and is ignored. Parents sum their
+children's increases, so a day equals the sum of its hours. Min/Max/Avg stay
+real readings. Work per site per run is capped at one day for each of the
+dirty and the normal pass, so a backlog catches up gradually.
+
+`EnergyDailyBridge` upserts today's and yesterday's EnergyData Daily row for
+LocalGateway/Hybrid sites from 1-hour counter aggregates, else from 5-minute
+power aggregates split by sign; figures never decrease (ingest's inverter
+"today" counter may be fresher). `SolarDataSyncJob` skips LocalGateway sites
+and, for Hybrid sites whose gateway pushed in the last 10 minutes, keeps
+polling for alarms but writes no realtime/daily EnergyData
+(`TelemetrySourcePolicy`).
+
 ### 5.4 `ITelemetryStore`
 
 ```csharp
