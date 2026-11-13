@@ -64,6 +64,9 @@ docker run -d --name timescaledb --restart unless-stopped \
 1. ติดตั้ง PostgreSQL 17 จากตัวติดตั้งของ EDB
 2. ดาวน์โหลดไฟล์ zip ของ TimescaleDB สำหรับ Windows ที่ตรงกับ PostgreSQL 17 แตกไฟล์ แล้วรัน `setup.exe` แบบ Administrator
 3. ตอบ "yes" เมื่อถามให้แก้ `postgresql.conf` แล้วรีสตาร์ท service `postgresql-x64-17`
+4. ถ้าข้ามขั้นแก้ไฟล์ไป หรือ `CREATE EXTENSION` ขึ้นว่า "must be preloaded" ให้เปิด Notepad แบบ Administrator
+   แก้ไฟล์ `C:\Program Files\PostgreSQL\<รุ่น>\data\postgresql.conf` บรรทัด `#shared_preload_libraries = ''`
+   เป็น `shared_preload_libraries = 'timescaledb'` (ลบ `#` ออก) แล้วรัน `Restart-Service postgresql-x64-<รุ่น>` ใน PowerShell แบบ Administrator
 
 ## 3. สร้างฐานข้อมูลและผู้ใช้
 
@@ -170,6 +173,8 @@ FROM hypertable_compression_stats('telemetry_raw');
 SELECT pg_size_pretty(hypertable_size('telemetry_raw'))     AS raw,
        pg_size_pretty(hypertable_size('telemetry_agg_5m'))  AS agg_5m;
 ```
+
+TimescaleDB รุ่นใหม่เปลี่ยนชื่อฟังก์ชันนี้ ถ้าขึ้นว่าไม่มีฟังก์ชัน ให้ใช้ `hypertable_columnstore_stats('telemetry_raw')` แทน
 
 นำตัวเลขจริงไปคำนวณขนาดดิสก์ตามจำนวนไซต์
 

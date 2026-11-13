@@ -326,20 +326,59 @@ CREATE INDEX IF NOT EXISTS ix_telemetry_agg_5m_ts_brin ON {Agg(AggregateResoluti
     private async Task HypertableAsync(NpgsqlConnection conn, string table, string timeColumn, string chunk,
         string? segmentBy, string? orderBy, TimeSpan? compressAfter, CancellationToken ct)
     {
-        await ExecAsync(conn,
+        // TimescaleDB renamed parts of this API over 2.x (by_range in 2.13,
+        // "columnstore" names in 2.18): try the current form, then the older one.
+        await FirstThatWorksAsync(conn, ct, $"hypertable {table}",
+            $"SELECT create_hypertable('{table}', by_range('{timeColumn}', INTERVAL '{chunk}'), " +
+            "if_not_exists => TRUE, migrate_data => TRUE);",
             $"SELECT create_hypertable('{table}', '{timeColumn}', chunk_time_interval => INTERVAL '{chunk}', " +
-            "if_not_exists => TRUE, migrate_data => TRUE);", ct);
+            "if_not_exists => TRUE, migrate_data => TRUE);");
         if (segmentBy == null || compressAfter == null) return;
 
-        var alreadyCompressed = await ScalarAsync<bool>(conn,
-            "SELECT EXISTS (SELECT 1 FROM timescaledb_information.compression_settings " +
-            $"WHERE format('%I.%I', hypertable_schema, hypertable_name)::regclass = '{table}'::regclass)", ct);
-        if (!alreadyCompressed)
-            await ExecAsync(conn,
+        var configured = await TryScalarAsync<bool>(conn, ct,
+                             "SELECT EXISTS (SELECT 1 FROM timescaledb_information.hypertable_compression_settings " +
+                             $"WHERE hypertable = '{table}'::regclass)")
+                         ?? await TryScalarAsync<bool>(conn, ct,
+                             "SELECT EXISTS (SELECT 1 FROM timescaledb_information.compression_settings " +
+                             $"WHERE format('%I.%I', hypertable_schema, hypertable_name)::regclass = '{table}'::regclass)")
+                         ?? false;
+        if (!configured)
+            await FirstThatWorksAsync(conn, ct, $"compression settings {table}",
+                $"ALTER TABLE {table} SET (timescaledb.enable_columnstore = true, timescaledb.segmentby = '{segmentBy}', " +
+                $"timescaledb.orderby = '{orderBy} DESC');",
                 $"ALTER TABLE {table} SET (timescaledb.compress, timescaledb.compress_segmentby = '{segmentBy}', " +
-                $"timescaledb.compress_orderby = '{orderBy} DESC');", ct);
-        await ExecAsync(conn,
-            $"SELECT add_compression_policy('{table}', INTERVAL '{(int)compressAfter.Value.TotalDays} days', if_not_exists => TRUE);", ct);
+                $"timescaledb.compress_orderby = '{orderBy} DESC');");
+
+        var days = (int)compressAfter.Value.TotalDays;
+        await FirstThatWorksAsync(conn, ct, $"compression policy {table}",
+            $"CALL add_columnstore_policy('{table}', after => INTERVAL '{days} days', if_not_exists => TRUE);",
+            $"SELECT add_compression_policy('{table}', INTERVAL '{days} days', if_not_exists => TRUE);");
+    }
+
+    /// <summary>Run the first statement that succeeds; throw the last error when none does.</summary>
+    private async Task FirstThatWorksAsync(NpgsqlConnection conn, CancellationToken ct, string what, params string[] statements)
+    {
+        PostgresException? last = null;
+        foreach (var sql in statements)
+        {
+            try
+            {
+                await ExecAsync(conn, sql, ct);
+                return;
+            }
+            catch (PostgresException ex)
+            {
+                last = ex;
+                _logger?.LogDebug("Telemetry store: {What} form failed ({Message}); trying the next form", what, ex.MessageText);
+            }
+        }
+        throw new InvalidOperationException($"TimescaleDB setup failed for {what}: {last?.MessageText}", last);
+    }
+
+    private static async Task<T?> TryScalarAsync<T>(NpgsqlConnection conn, CancellationToken ct, string sql) where T : struct
+    {
+        try { return await ScalarAsync<T>(conn, sql, ct); }
+        catch (PostgresException) { return null; }
     }
 
     /// <summary>On-disk size per table and how much TimescaleDB compression saved — for the admin status line and sizing.</summary>
