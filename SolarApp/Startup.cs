@@ -271,6 +271,11 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.SystemHealthMonitorJob>();
         builder.Services.AddScoped<BackgroundJobs.WorkOrderReminderJob>();
         builder.Services.AddScoped<BackgroundJobs.DailySummaryJob>();
+
+        // Telemetry platform (docs/telemetry-platform/DESIGN.md)
+        builder.Services.AddSingleton<Services.Telemetry.ITelemetryStore, Services.Telemetry.SqlServerTelemetryStore>();
+        builder.Services.AddScoped<Services.Telemetry.TelemetryGatewayService>();
+        builder.Services.AddScoped<Services.Telemetry.TelemetryIngestService>();
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
         builder.Services.AddScoped<BackgroundJobs.DataRetentionJob>();
         builder.Services.AddScoped<BackgroundJobs.MonthlyReportJob>();
@@ -741,6 +746,14 @@ public class Startup
             // Battery storage opt-in.  Default 0 (no battery); a backfill
             // stage below flips it on for legacy rows that already carry
             // battery metadata so we don't lose existing hybrid sites.
+            (Table: "Installations", Column: "TelemetrySource",
+             Sql: "ALTER TABLE [Installations] ADD [TelemetrySource] int NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "BatteryWarrantyYears",
+             Sql: "ALTER TABLE [Installations] ADD [BatteryWarrantyYears] int NULL"),
+            (Table: "Installations", Column: "BatteryWarrantyThroughputMwh",
+             Sql: "ALTER TABLE [Installations] ADD [BatteryWarrantyThroughputMwh] decimal(10,3) NULL"),
+            (Table: "Installations", Column: "BatteryWarrantyMinCapacityPct",
+             Sql: "ALTER TABLE [Installations] ADD [BatteryWarrantyMinCapacityPct] decimal(5,2) NULL"),
             (Table: "Installations", Column: "HasBattery",
              Sql: "ALTER TABLE [Installations] ADD [HasBattery] bit NOT NULL DEFAULT 0"),
 
@@ -1109,6 +1122,242 @@ BEGIN
     CREATE INDEX IX_NotificationRoutes_IsEnabled ON [NotificationRoutes]([IsEnabled]);
 END"));
 
+        // ── Telemetry platform (docs/telemetry-platform/DESIGN.md §5) ──
+        // One stage per table so a failure in one (e.g. columnstore on an old
+        // SQL Server) leaves the others created.
+        stages.Add(("CreateTable:TelemetryRaw", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TelemetryRaw')
+BEGIN
+    CREATE TABLE [TelemetryRaw] (
+        [ChannelId] int NOT NULL,
+        [Ts] datetime2(0) NOT NULL,
+        [Value] real NOT NULL
+    );
+    -- Columnstore: ~10x smaller than rowstore for append-only time series and
+    -- available in every edition from SQL Server 2016 SP1. Older servers get
+    -- a rowstore clustered index instead.
+    BEGIN TRY
+        CREATE CLUSTERED COLUMNSTORE INDEX [CCI_TelemetryRaw] ON [TelemetryRaw];
+    END TRY
+    BEGIN CATCH
+        CREATE CLUSTERED INDEX [CX_TelemetryRaw] ON [TelemetryRaw]([ChannelId],[Ts]) WITH (DATA_COMPRESSION = PAGE);
+    END CATCH
+END"));
+
+        stages.Add(("CreateTable:TelemetryAggregates", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TelemetryAggregates')
+BEGIN
+    CREATE TABLE [TelemetryAggregates] (
+        [ChannelId] int NOT NULL,
+        [Resolution] tinyint NOT NULL,
+        [BucketStart] datetime2(0) NOT NULL,
+        [Min] real NOT NULL,
+        [Max] real NOT NULL,
+        [Avg] real NOT NULL,
+        [First] real NOT NULL,
+        [Last] real NOT NULL,
+        [Count] int NOT NULL,
+        CONSTRAINT [PK_TelemetryAggregates] PRIMARY KEY CLUSTERED ([ChannelId],[Resolution],[BucketStart])
+            WITH (DATA_COMPRESSION = PAGE)
+    );
+    CREATE INDEX [IX_TelemetryAggregates_Res_Bucket] ON [TelemetryAggregates]([Resolution],[BucketStart]);
+END"));
+
+        stages.Add(("CreateTable:TelemetryGateways", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TelemetryGateways')
+BEGIN
+    CREATE TABLE [TelemetryGateways] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [Name] nvarchar(100) NOT NULL,
+        [TokenHash] nvarchar(64) NOT NULL,
+        [TokenPrefix] nvarchar(16) NOT NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [CreatedByUserId] nvarchar(max) NULL,
+        [LastSeenAt] datetime2 NULL,
+        [LastSeenIp] nvarchar(64) NULL,
+        [SamplesAccepted] bigint NOT NULL DEFAULT 0,
+        [RevokedAt] datetime2 NULL,
+        CONSTRAINT FK_TelemetryGateways_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id]) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX [IX_TelemetryGateways_TokenHash] ON [TelemetryGateways]([TokenHash]);
+    CREATE INDEX [IX_TelemetryGateways_InstallationId] ON [TelemetryGateways]([InstallationId]);
+END"));
+
+        stages.Add(("CreateTable:TelemetryChannels", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TelemetryChannels')
+BEGIN
+    CREATE TABLE [TelemetryChannels] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [Key] nvarchar(100) NOT NULL,
+        [Kind] int NOT NULL,
+        [DeviceIndex] int NOT NULL,
+        [SubIndex] int NOT NULL,
+        [Quantity] int NOT NULL,
+        [Unit] nvarchar(16) NULL,
+        [IsCumulative] bit NOT NULL,
+        [SourceEntityId] nvarchar(255) NULL,
+        [FirstTs] datetime2 NOT NULL,
+        [LastTs] datetime2 NOT NULL,
+        [LastValue] float NOT NULL,
+        CONSTRAINT FK_TelemetryChannels_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id]) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX [IX_TelemetryChannels_InstallationId_Key] ON [TelemetryChannels]([InstallationId],[Key]);
+END"));
+
+        stages.Add(("CreateTable:TelemetryEntityMaps", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TelemetryEntityMaps')
+BEGIN
+    CREATE TABLE [TelemetryEntityMaps] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [EntityId] nvarchar(255) NOT NULL,
+        [Key] nvarchar(100) NOT NULL,
+        [Scale] float NOT NULL DEFAULT 1,
+        [Offset] float NOT NULL DEFAULT 0,
+        [Invert] bit NOT NULL DEFAULT 0,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_TelemetryEntityMaps_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id]) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX [IX_TelemetryEntityMaps_InstallationId_EntityId] ON [TelemetryEntityMaps]([InstallationId],[EntityId]);
+END"));
+
+        stages.Add(("CreateTable:TelemetryDirtyRanges", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TelemetryDirtyRanges')
+BEGIN
+    CREATE TABLE [TelemetryDirtyRanges] (
+        [Id] bigint IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [FromUtc] datetime2 NOT NULL,
+        [ToUtc] datetime2 NOT NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX [IX_TelemetryDirtyRanges_InstallationId] ON [TelemetryDirtyRanges]([InstallationId]);
+END"));
+
+        stages.Add(("CreateTable:TelemetryRollupStates", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TelemetryRollupStates')
+BEGIN
+    CREATE TABLE [TelemetryRollupStates] (
+        [InstallationId] int NOT NULL PRIMARY KEY,
+        [WatermarkUtc] datetime2 NOT NULL,
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+END"));
+
+        stages.Add(("CreateTable:DeviceEvents", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'DeviceEvents')
+BEGIN
+    CREATE TABLE [DeviceEvents] (
+        [Id] bigint IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [TsUtc] datetime2 NOT NULL,
+        [Source] nvarchar(64) NOT NULL,
+        [EventKind] nvarchar(16) NOT NULL,
+        [Code] bigint NOT NULL,
+        [Decoded] nvarchar(300) NOT NULL,
+        [Severity] int NOT NULL,
+        [Message] nvarchar(500) NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_DeviceEvents_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id]) ON DELETE CASCADE
+    );
+    CREATE INDEX [IX_DeviceEvents_InstallationId_TsUtc] ON [DeviceEvents]([InstallationId],[TsUtc]);
+END"));
+
+        stages.Add(("CreateTable:SiteAnalyticsDaily", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'SiteAnalyticsDaily')
+BEGIN
+    CREATE TABLE [SiteAnalyticsDaily] (
+        [Id] bigint IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [Date] datetime2 NOT NULL,
+        [Kind] nvarchar(32) NOT NULL,
+        [Json] nvarchar(max) NOT NULL,
+        [ComputedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE UNIQUE INDEX [IX_SiteAnalyticsDaily_Site_Date_Kind] ON [SiteAnalyticsDaily]([InstallationId],[Date],[Kind]);
+END"));
+
+        stages.Add(("CreateTable:TariffPlans", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'TariffPlans')
+BEGIN
+    CREATE TABLE [TariffPlans] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [InstallationId] int NOT NULL,
+        [Name] nvarchar(100) NOT NULL,
+        [Kind] int NOT NULL,
+        [IsCurrent] bit NOT NULL,
+        [ConfigJson] nvarchar(max) NOT NULL,
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_TariffPlans_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id]) ON DELETE CASCADE
+    );
+    CREATE INDEX [IX_TariffPlans_InstallationId] ON [TariffPlans]([InstallationId]);
+END"));
+
+        stages.Add(("CreateTable:CustomerNotificationRecipients", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'CustomerNotificationRecipients')
+BEGIN
+    CREATE TABLE [CustomerNotificationRecipients] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [CustomerId] int NOT NULL,
+        [InstallationId] int NULL,
+        [Channel] int NOT NULL,
+        [Address] nvarchar(255) NOT NULL,
+        [DisplayName] nvarchar(100) NULL,
+        [IsEnabled] bit NOT NULL DEFAULT 1,
+        [VerifiedAt] datetime2 NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [LastSentAt] datetime2 NULL,
+        CONSTRAINT FK_CustomerNotificationRecipients_Customers FOREIGN KEY ([CustomerId])
+            REFERENCES [Customers]([Id]) ON DELETE CASCADE,
+        CONSTRAINT FK_CustomerNotificationRecipients_Installations FOREIGN KEY ([InstallationId])
+            REFERENCES [Installations]([Id])
+    );
+    CREATE INDEX [IX_CustomerNotificationRecipients_Customer] ON [CustomerNotificationRecipients]([CustomerId],[Channel],[Address]);
+END"));
+
+        stages.Add(("CreateTable:CustomerNotificationPreferences", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'CustomerNotificationPreferences')
+BEGIN
+    CREATE TABLE [CustomerNotificationPreferences] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [CustomerId] int NOT NULL,
+        [EventType] int NOT NULL,
+        [LineEnabled] bit NOT NULL DEFAULT 1,
+        [EmailEnabled] bit NOT NULL DEFAULT 0,
+        [UpdatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT FK_CustomerNotificationPreferences_Customers FOREIGN KEY ([CustomerId])
+            REFERENCES [Customers]([Id]) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX [IX_CustomerNotificationPreferences_Customer_Event] ON [CustomerNotificationPreferences]([CustomerId],[EventType]);
+END"));
+
+        stages.Add(("CreateTable:LineBindingCodes", @"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'LineBindingCodes')
+BEGIN
+    CREATE TABLE [LineBindingCodes] (
+        [Id] int IDENTITY(1,1) PRIMARY KEY,
+        [Code] nvarchar(16) NOT NULL,
+        [CustomerId] int NOT NULL,
+        [InstallationId] int NULL,
+        [CreatedByUserId] nvarchar(max) NULL,
+        [CreatedAt] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
+        [ExpiresAt] datetime2 NOT NULL,
+        [UsedAt] datetime2 NULL,
+        [UsedByLineUserId] nvarchar(64) NULL,
+        CONSTRAINT FK_LineBindingCodes_Customers FOREIGN KEY ([CustomerId])
+            REFERENCES [Customers]([Id]) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX [IX_LineBindingCodes_Code] ON [LineBindingCodes]([Code]);
+END"));
+
         // Stage 3: ancillary indexes — one stage PER INDEX.  CREATE INDEX on a
         // table with real data can genuinely take tens of seconds on SQL
         // Express; batching them meant one slow index timed out the whole
@@ -1445,6 +1694,8 @@ BEGIN {sql}; END");
 
     public static void MapApiEndpoints(WebApplication app)
     {
+        Services.Telemetry.TelemetryEndpoints.Map(app);
+
         // ─── Health / keep-alive endpoint ───
         // Safe for anonymous access: returns app status + DB connectivity + last
         // Hangfire job run. External uptime monitors (UptimeRobot, Windows

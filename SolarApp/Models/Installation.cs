@@ -72,6 +72,20 @@ public class Installation : ISoftDeletable
     public decimal? BatteryCapacityKwh { get; set; }
     public int? BatteryCount { get; set; }
 
+    /// <summary>Battery warranty term in years (e.g. FoxESS EP11: 10).</summary>
+    public int? BatteryWarrantyYears { get; set; }
+    /// <summary>Warranted energy throughput in MWh (EP11: 33.4) — whichever of years/MWh comes first.</summary>
+    public decimal? BatteryWarrantyThroughputMwh { get; set; }
+    /// <summary>Capacity the warranty guarantees at end of term, % of nominal (usually 70).</summary>
+    public decimal? BatteryWarrantyMinCapacityPct { get; set; }
+
+    /// <summary>
+    /// Total nominal battery energy in kWh. BatteryCapacityKwh is entered per
+    /// unit on some sites and per system on others; the count decides.
+    /// </summary>
+    public decimal? BatteryNominalKwhTotal =>
+        BatteryCapacityKwh is > 0 ? BatteryCapacityKwh * Math.Max(1, BatteryCount ?? 1) : null;
+
     // Dates
     /// <summary>
     /// Handover date — the day the job was signed off and the warranty clock
@@ -311,6 +325,12 @@ public class Installation : ISoftDeletable
 
     /// <summary>How we authenticate to the brand's cloud (see BrandCapabilities for what each brand supports).</summary>
     public ConnectionMethod ConnectionMethod { get; set; } = ConnectionMethod.OfficialApi;
+
+    /// <summary>
+    /// Where live data comes from: the vendor cloud, a local gateway (Home
+    /// Assistant pushing Modbus readings), or both. See TelemetrySource.
+    /// </summary>
+    public TelemetrySource TelemetrySource { get; set; } = TelemetrySource.Cloud;
 
     /// <summary>
     /// How often the background sync job should hit this site's cloud API.

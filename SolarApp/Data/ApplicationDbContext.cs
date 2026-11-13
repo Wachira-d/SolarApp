@@ -33,6 +33,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ServiceContract> ServiceContracts => Set<ServiceContract>();
     public DbSet<ContractInvoice> ContractInvoices => Set<ContractInvoice>();
 
+    // Telemetry platform (docs/telemetry-platform/DESIGN.md). Raw samples and
+    // aggregates are not EF entities — ITelemetryStore owns those tables.
+    public DbSet<Models.Telemetry.TelemetryGateway> TelemetryGateways => Set<Models.Telemetry.TelemetryGateway>();
+    public DbSet<Models.Telemetry.TelemetryChannel> TelemetryChannels => Set<Models.Telemetry.TelemetryChannel>();
+    public DbSet<Models.Telemetry.TelemetryEntityMap> TelemetryEntityMaps => Set<Models.Telemetry.TelemetryEntityMap>();
+    public DbSet<Models.Telemetry.TelemetryDirtyRange> TelemetryDirtyRanges => Set<Models.Telemetry.TelemetryDirtyRange>();
+    public DbSet<Models.Telemetry.TelemetryRollupState> TelemetryRollupStates => Set<Models.Telemetry.TelemetryRollupState>();
+    public DbSet<Models.Telemetry.DeviceEvent> DeviceEvents => Set<Models.Telemetry.DeviceEvent>();
+    public DbSet<Models.Telemetry.SiteAnalyticsDaily> SiteAnalyticsDaily => Set<Models.Telemetry.SiteAnalyticsDaily>();
+    public DbSet<Models.Telemetry.TariffPlan> TariffPlans => Set<Models.Telemetry.TariffPlan>();
+    public DbSet<Models.Notifications.CustomerNotificationRecipient> CustomerNotificationRecipients => Set<Models.Notifications.CustomerNotificationRecipient>();
+    public DbSet<Models.Notifications.CustomerNotificationPreference> CustomerNotificationPreferences => Set<Models.Notifications.CustomerNotificationPreference>();
+    public DbSet<Models.Notifications.LineBindingCode> LineBindingCodes => Set<Models.Notifications.LineBindingCode>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -352,6 +366,8 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         });
 
         // ── AlertRule ──
+        ConfigureTelemetry(builder);
+
         builder.Entity<AlertRule>(entity =>
         {
             entity.HasOne(r => r.Installation)
@@ -466,6 +482,89 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(p => new { p.WorkOrderId, p.Category, p.Timing });
+        });
+    }
+
+    /// <summary>Telemetry and notification-center entities (DESIGN.md §5, §9).</summary>
+    private static void ConfigureTelemetry(ModelBuilder builder)
+    {
+        builder.Entity<Models.Telemetry.TelemetryGateway>(e =>
+        {
+            e.HasOne(g => g.Installation).WithMany().HasForeignKey(g => g.InstallationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(g => g.Name).HasMaxLength(100);
+            e.Property(g => g.TokenHash).HasMaxLength(64);
+            e.Property(g => g.TokenPrefix).HasMaxLength(16);
+            e.Property(g => g.LastSeenIp).HasMaxLength(64);
+            e.HasIndex(g => g.TokenHash).IsUnique();
+            e.HasIndex(g => g.InstallationId);
+        });
+
+        builder.Entity<Models.Telemetry.TelemetryChannel>(e =>
+        {
+            e.HasOne(c => c.Installation).WithMany().HasForeignKey(c => c.InstallationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(c => c.Key).HasMaxLength(100);
+            e.Property(c => c.Unit).HasMaxLength(16);
+            e.Property(c => c.SourceEntityId).HasMaxLength(255);
+            e.HasIndex(c => new { c.InstallationId, c.Key }).IsUnique();
+        });
+
+        builder.Entity<Models.Telemetry.TelemetryEntityMap>(e =>
+        {
+            e.HasOne(m => m.Installation).WithMany().HasForeignKey(m => m.InstallationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(m => m.EntityId).HasMaxLength(255);
+            e.Property(m => m.Key).HasMaxLength(100);
+            e.HasIndex(m => new { m.InstallationId, m.EntityId }).IsUnique();
+        });
+
+        builder.Entity<Models.Telemetry.TelemetryDirtyRange>(e => e.HasIndex(d => d.InstallationId));
+        builder.Entity<Models.Telemetry.TelemetryRollupState>(e => e.HasKey(r => r.InstallationId));
+
+        builder.Entity<Models.Telemetry.DeviceEvent>(e =>
+        {
+            e.HasOne(d => d.Installation).WithMany().HasForeignKey(d => d.InstallationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(d => d.Source).HasMaxLength(64);
+            e.Property(d => d.EventKind).HasMaxLength(16);
+            e.Property(d => d.Decoded).HasMaxLength(300);
+            e.Property(d => d.Message).HasMaxLength(500);
+            e.HasIndex(d => new { d.InstallationId, d.TsUtc });
+        });
+
+        builder.Entity<Models.Telemetry.SiteAnalyticsDaily>(e =>
+        {
+            e.Property(a => a.Kind).HasMaxLength(32);
+            e.HasIndex(a => new { a.InstallationId, a.Date, a.Kind }).IsUnique();
+        });
+
+        builder.Entity<Models.Telemetry.TariffPlan>(e =>
+        {
+            e.HasOne(t => t.Installation).WithMany().HasForeignKey(t => t.InstallationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(t => t.Name).HasMaxLength(100);
+            e.HasIndex(t => t.InstallationId);
+        });
+
+        builder.Entity<Models.Notifications.CustomerNotificationRecipient>(e =>
+        {
+            e.HasOne(r => r.Customer).WithMany().HasForeignKey(r => r.CustomerId).OnDelete(DeleteBehavior.Cascade);
+            // NoAction: SQL Server rejects two cascade paths from Installations
+            // (via Customer and directly); site deletes are soft anyway.
+            e.HasOne(r => r.Installation).WithMany().HasForeignKey(r => r.InstallationId).OnDelete(DeleteBehavior.NoAction);
+            e.Property(r => r.Address).HasMaxLength(255);
+            e.Property(r => r.DisplayName).HasMaxLength(100);
+            e.HasIndex(r => new { r.CustomerId, r.Channel, r.Address });
+        });
+
+        builder.Entity<Models.Notifications.CustomerNotificationPreference>(e =>
+        {
+            e.HasOne(p => p.Customer).WithMany().HasForeignKey(p => p.CustomerId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(p => new { p.CustomerId, p.EventType }).IsUnique();
+        });
+
+        builder.Entity<Models.Notifications.LineBindingCode>(e =>
+        {
+            e.HasOne(c => c.Customer).WithMany().HasForeignKey(c => c.CustomerId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(c => c.Code).HasMaxLength(16);
+            e.Property(c => c.UsedByLineUserId).HasMaxLength(64);
+            e.HasIndex(c => c.Code).IsUnique();
         });
     }
 }
