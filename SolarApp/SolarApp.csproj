@@ -39,6 +39,7 @@
 
     <!-- Report Export -->
     <PackageReference Include="ClosedXML" Version="0.102.3" />
+    <PackageReference Include="Npgsql" Version="8.0.5" />
     <PackageReference Include="QuestPDF" Version="2024.10.2" />
 
     <!-- Argon2id for Hoymiles V3 login (matches S-Miles Cloud spec) -->

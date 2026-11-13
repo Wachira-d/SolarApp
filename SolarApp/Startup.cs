@@ -276,7 +276,13 @@ public class Startup
         builder.Services.AddScoped<BackgroundJobs.DailySummaryJob>();
 
         // Telemetry platform (docs/telemetry-platform/DESIGN.md)
-        builder.Services.AddSingleton<Services.Telemetry.ITelemetryStore, Services.Telemetry.SqlServerTelemetryStore>();
+        // Telemetry store (DESIGN.md §5.5): SQL Server by default; "Postgres"
+        // moves raw samples and aggregates to PostgreSQL/TimescaleDB
+        // (ConnectionStrings:TelemetryPostgres). Business data stays here.
+        if (Services.Telemetry.TelemetryStoreSelector.UsePostgres(builder.Configuration))
+            builder.Services.AddSingleton<Services.Telemetry.ITelemetryStore, Services.Telemetry.PostgresTelemetryStore>();
+        else
+            builder.Services.AddSingleton<Services.Telemetry.ITelemetryStore, Services.Telemetry.SqlServerTelemetryStore>();
         builder.Services.AddScoped<Services.Telemetry.TelemetryGatewayService>();
         builder.Services.AddScoped<Services.Telemetry.TelemetryIngestService>();
         builder.Services.AddScoped<BackgroundJobs.TelemetryRollupJob>();

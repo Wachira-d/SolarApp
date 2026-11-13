@@ -31,10 +31,10 @@ public class SiteAnalyticsServiceTests
     private const int Days = 5;
     private static readonly TimeSpan Step = TimeSpan.FromMinutes(5);
 
-    internal sealed record Fixture(ApplicationDbContext Db, InMemoryTelemetryStore Store, Installation Site,
+    internal sealed record Fixture(ApplicationDbContext Db, ITelemetryStore Store, Installation Site,
         SiteAnalyticsService Service, SiteAnalyticsLoader Loader);
 
-    internal static Fixture Build(bool hasBattery = true, bool fullSet = true, string? dbName = null)
+    internal static Fixture Build(bool hasBattery = true, bool fullSet = true, string? dbName = null, ITelemetryStore? telemetryStore = null)
     {
         var db = TestDb.Create(dbName);
         var (_, site) = TestDb.SeedSite(db, hasBattery: hasBattery);
@@ -76,7 +76,7 @@ public class SiteAnalyticsServiceTests
         db.TelemetryChannels.AddRange(channels.Values);
         db.SaveChanges();
 
-        var store = new InMemoryTelemetryStore();
+        var store = telemetryStore ?? new InMemoryTelemetryStore();
         var raw = new List<RawSample>();
         double importKwh = 1000;
         for (var t = from; t < Now; t += Step)

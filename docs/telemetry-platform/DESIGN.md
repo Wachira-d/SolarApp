@@ -291,6 +291,29 @@ implementation of the same interface.
 
 ---
 
+### 5.5 PostgreSQL / TimescaleDB store
+
+`PostgresTelemetryStore` implements `ITelemetryStore` on PostgreSQL. It is
+selected with `Telemetry:Store` = `TimescaleDB` (extension required, startup
+fails without it) or `Postgres` (plain tables, for tests), connection string
+`ConnectionStrings:TelemetryPostgres`. Business data, Hangfire and
+`SiteAnalyticsDaily` stay in SQL Server.
+
+* Tables: `telemetry_raw` (channel_id, ts, value), and one aggregate table per
+  resolution (`telemetry_agg_5m`, `_1h`, `_1d`) keyed (channel_id, bucket_start).
+* TimescaleDB: hypertables (raw 1-day chunks, 5-min 7-day chunks), compression
+  segmented by channel_id ordered by time (raw after 7 days, 5-min after 45 days,
+  1-hour after 120 days), retention by `drop_chunks` from the existing retention
+  job. Requires TimescaleDB ≥ 2.11 (late data writes into compressed chunks).
+* Writes use binary COPY; aggregate upserts stage then `INSERT … ON CONFLICT`.
+* Measured on plain PostgreSQL 16 (15 M raw / 14 M 5-min rows): ~80 bytes per raw
+  row and ~95 per 5-min row, which is why plain PostgreSQL is not a production
+  option. Query times: one channel 24 h raw 2–8 ms, one site 40 channels × 120
+  days of 5-min ≈ 1 s.
+* Same behaviour contract as the other stores (`TelemetryStoreContractTests`;
+  set `SOLARAPP_TEST_POSTGRES` to run it against a database).
+* Setup steps: `TIMESCALEDB-SETUP.md`.
+
 ## 6. Site capabilities (what each report shows)
 
 `SiteCapabilities` is computed from the site's channel catalog plus the

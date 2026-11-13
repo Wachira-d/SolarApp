@@ -45,7 +45,7 @@ public class AnalyticsPageRenderTests
         }
     }
 
-    private static async Task<(HttpClient Client, IHost Host)> StartAsync(string dbName, InMemoryTelemetryStore store)
+    private static async Task<(HttpClient Client, IHost Host)> StartAsync(string dbName, ITelemetryStore store)
     {
         var contentRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "SolarApp"));
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
