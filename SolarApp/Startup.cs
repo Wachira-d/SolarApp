@@ -261,6 +261,9 @@ public class Startup
         builder.Services.AddScoped<Services.AlertRules.IAlertRulesEngine, Services.AlertRules.AlertRulesEngine>();
         builder.Services.AddScoped<Services.LineApi.ILineMessagingService, Services.LineApi.LineMessagingService>();
         builder.Services.AddScoped<Services.Notifications.INotificationRouteService, Services.Notifications.NotificationRouteService>();
+        builder.Services.AddScoped<Services.Notifications.ICustomerEmailSender, Services.Notifications.SmtpCustomerEmailSender>();
+        builder.Services.AddScoped<Services.Notifications.ILineBindingService, Services.Notifications.LineBindingService>();
+        builder.Services.AddScoped<Services.Notifications.ICustomerNotificationService, Services.Notifications.CustomerNotificationService>();
         builder.Services.AddScoped<Services.Weather.IWeatherService, Services.Weather.WeatherService>();
         builder.Services.AddMemoryCache();
         builder.Services.AddValidatorsFromAssemblyContaining<Startup>();

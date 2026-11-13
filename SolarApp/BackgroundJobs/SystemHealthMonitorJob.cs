@@ -24,6 +24,7 @@ public class SystemHealthMonitorJob
     private readonly IAlertRulesEngine _rulesEngine;
     private readonly AlertDiagnosticsEnricher _diagnosticsEnricher;
     private readonly INotificationRouteService _routes;
+    private readonly ICustomerNotificationService _customerNotifications;
 
     public SystemHealthMonitorJob(
         ApplicationDbContext context,
@@ -32,7 +33,8 @@ public class SystemHealthMonitorJob
         IConfiguration configuration,
         IAlertRulesEngine rulesEngine,
         AlertDiagnosticsEnricher diagnosticsEnricher,
-        INotificationRouteService routes)
+        INotificationRouteService routes,
+        ICustomerNotificationService customerNotifications)
     {
         _context = context;
         _lineService = lineService;
@@ -41,6 +43,7 @@ public class SystemHealthMonitorJob
         _rulesEngine = rulesEngine;
         _diagnosticsEnricher = diagnosticsEnricher;
         _routes = routes;
+        _customerNotifications = customerNotifications;
     }
 
     [DisableConcurrentExecution(timeoutInSeconds: 600)]
@@ -877,6 +880,22 @@ public class SystemHealthMonitorJob
                 sentInThisCycle++;
             }
 
+            // 2b. Notification-center recipients of the customer (LINE ids
+            //     bound by link, e-mail addresses), each per its own event
+            //     preferences. After step 2 so the customer's own LINE id is
+            //     not messaged twice; it adds whoever it reaches to
+            //     reachedLineIds, so the route fan-out below skips them too.
+            var customerEvt = CustomerNotificationEvents.EventFor(alert);
+            if (customerEvt != null && sentInThisCycle < maxSendsPerCycle)
+            {
+                var centerSent = await _customerNotifications.DeliverAlertAsync(
+                    alert, alert.Installation, customerEvt.Value,
+                    SolarApp.Services.LineApi.CustomerAlertMessageBuilder.Build(alert, alert.Installation),
+                    reachedLineIds);
+                succeeded += centerSent;
+                sentInThisCycle += centerSent;
+            }
+
             // 3. Notify partner users via LINE (from preloaded dict, no N+1)
             if (alert.Installation.PartnerId.HasValue
                 && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var partnerLineIds))
@@ -1098,6 +1117,23 @@ public class SystemHealthMonitorJob
                 }
             }
 
+            // 2b. Notification-center recipients — same all-clear text, gated
+            //     by their Recovery preference AND the down-event preference
+            //     (only people told about the outage hear it is over). The
+            //     service remembers whom it sent to, so the 24-hour re-scan
+            //     never repeats a recovery.
+            var centerReached = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(alertGroupId)) centerReached.Add(alertGroupId.Trim());
+            if (!string.IsNullOrWhiteSpace(customerLineId) && customerNotifyAllowed)
+                centerReached.Add(customerLineId.Trim());
+            if (sent < 100)
+            {
+                sent += await _customerNotifications.DeliverAlertAsync(
+                    alert, alert.Installation, Models.Enums.NotificationEventType.Recovery,
+                    SolarApp.Services.LineApi.CustomerAlertMessageBuilder.BuildRecovery(alert, alert.Installation, causes),
+                    centerReached);
+            }
+
             // 3. Partner staff (technical, same as alert group)
             if (alert.Installation.PartnerId.HasValue
                 && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var pIds))
@@ -1114,6 +1150,7 @@ public class SystemHealthMonitorJob
                 var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (!string.IsNullOrWhiteSpace(alertGroupId)) exclude.Add(alertGroupId.Trim());
                 if (!string.IsNullOrWhiteSpace(customerLineId)) exclude.Add(customerLineId!.Trim());
+                exclude.UnionWith(centerReached);
                 if (alert.Installation.PartnerId.HasValue
                     && partnerUsersLookup.TryGetValue(alert.Installation.PartnerId.Value, out var pIds2))
                     foreach (var lid in pIds2) exclude.Add(lid.Trim());

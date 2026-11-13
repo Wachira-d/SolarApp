@@ -141,6 +141,17 @@
                         </small>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">
+                            <i class="bi bi-qr-code text-success"></i> LINE Basic ID (สำหรับลิงก์ผูก LINE ของลูกค้า)
+                        </label>
+                        <input asp-for="BasicId" class="form-control font-monospace" placeholder="@@123abcd" />
+                        <small class="text-muted">
+                            ดูได้ที่ LINE Official Account Manager → บัญชี (ขึ้นต้นด้วย <code>@@</code>) —
+                            ใช้สร้างปุ่ม "เพิ่มเพื่อน" และ "ส่งรหัสยืนยัน" ในหน้า ศูนย์แจ้งเตือน ของลูกค้า
+                        </small>
+                    </div>
+
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-warning">
                             <i class="bi bi-save"></i> บันทึกการตั้งค่า

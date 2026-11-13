@@ -12,6 +12,7 @@
     var inSetup = currentPage.StartsWith("/admin/workordertemplates")
         || currentPage.StartsWith("/admin/schedule")
         || currentPage.StartsWith("/admin/linesettings")
+        || currentPage.StartsWith("/admin/emailsettings")
         || currentPage.StartsWith("/admin/notificationroutes")
         || currentPage.StartsWith("/admin/externalauth");
     var inDiag = currentPage.StartsWith("/admin/connectionhealth")
@@ -144,6 +145,11 @@
                     <li class="nav-item">
                         <a class="nav-link text-white @ActiveClass("/admin/linesettings")" asp-page="/Admin/LineSettings">
                             <i class="bi bi-chat-dots me-2"></i>ตั้งค่า LINE
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-white @ActiveClass("/admin/emailsettings")" asp-page="/Admin/EmailSettings">
+                            <i class="bi bi-envelope-at me-2"></i>ตั้งค่าอีเมล
                         </a>
                     </li>
                     <li class="nav-item">

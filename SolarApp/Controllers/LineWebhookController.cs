@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SolarApp.Data;
 using SolarApp.Models.Enums;
+using SolarApp.Services.Notifications;
 
 namespace SolarApp.Controllers;
 
@@ -36,6 +37,7 @@ public class LineWebhookController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<LineWebhookController> _logger;
+    private readonly ILineBindingService _binding;
 
     private const string ReplyUrl = "https://api.line.me/v2/bot/message/reply";
 
@@ -43,12 +45,14 @@ public class LineWebhookController : ControllerBase
         ApplicationDbContext context,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
-        ILogger<LineWebhookController> logger)
+        ILogger<LineWebhookController> logger,
+        ILineBindingService binding)
     {
         _context = context;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _binding = binding;
     }
 
     [HttpPost]
@@ -136,7 +140,67 @@ public class LineWebhookController : ControllerBase
             if (!msg.TryGetProperty("type", out var mt) || mt.GetString() != "text") continue;
 
             var text = (msg.TryGetProperty("text", out var txt) ? txt.GetString() : null)?.Trim() ?? "";
-            await ReplyAsync(replyToken, await BuildReplyAsync(text, userId, groupId));
+            // A binding code from the "ผูก LINE" link comes first: a code can
+            // contain letters the substring matching below would read as a
+            // command ("ID", "help").
+            var bindReply = await TryBindByCodeAsync(text, userId, groupId);
+            await ReplyAsync(replyToken, bindReply ?? await BuildReplyAsync(text, userId, groupId));
+        }
+    }
+
+    /// <summary>
+    /// Binds the sender to a customer when the message carries a binding code.
+    /// Returns null to fall through to the normal replies: a code-shaped word
+    /// that matches nothing, sent without "ผูก", is just a message.
+    /// </summary>
+    private async Task<string?> TryBindByCodeAsync(string text, string? userId, string? groupId)
+    {
+        var code = LineBindingService.ExtractCode(text);
+        var intent = LineBindingService.HasBindIntent(text);
+        if (code == null)
+        {
+            return text.Contains("ผูกบัญชี")
+                ? "กรุณาส่งข้อความพร้อมรหัส 8 หลัก เช่น \"ผูกบัญชี ABCD2345\"\n"
+                  + "(กดปุ่ม \"ส่งรหัสยืนยัน\" ในลิงก์ที่ได้รับจากผู้ดูแลระบบ)"
+                : null;
+        }
+
+        // Bind a person, never a group: the user id on a group event is
+        // whoever typed, who would then get alerts privately by surprise.
+        if (groupId != null || userId == null)
+            return intent ? "กรุณาส่งรหัสผูกบัญชีในแชทส่วนตัวกับบอท (ไม่ใช่ในกลุ่ม) ครับ" : null;
+
+        if (!intent && (await _binding.LookupAsync(code)).Status == LineCodeStatus.NotFound)
+            return null;
+
+        var result = await _binding.BindAsync(code, userId, () => GetProfileDisplayNameAsync(userId));
+        return LineBindingService.BuildReply(result);
+    }
+
+    /// <summary>
+    /// The sender's LINE display name, so the operator sees "สมชาย" on the
+    /// recipient list instead of a 33-character id. Best effort only.
+    /// </summary>
+    private async Task<string?> GetProfileDisplayNameAsync(string userId)
+    {
+        var token = await GetSettingAsync("Line.ChannelAccessToken", "LineMessaging:ChannelAccessToken");
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"https://api.line.me/v2/bot/profile/{Uri.EscapeDataString(userId)}");
+            req.Headers.Add("Authorization", $"Bearer {token}");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var resp = await client.SendAsync(req, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cts.Token));
+            return doc.RootElement.TryGetProperty("displayName", out var dn) ? dn.GetString() : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "LINE profile lookup failed");
+            return null;
         }
     }
 

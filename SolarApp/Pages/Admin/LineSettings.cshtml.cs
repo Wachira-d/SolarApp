@@ -36,6 +36,8 @@ public class LineSettingsModel : PageModel
     [BindProperty] public string? TestLineUserId { get; set; }
     /// <summary>Public base URL (https://…) used for tappable deep-links in LINE messages.</summary>
     [BindProperty] public string? AppBaseUrl { get; set; }
+    /// <summary>The OA's basic id ("@123abcd") — the "ผูก LINE" landing page builds its add-friend and send-code buttons from it.</summary>
+    [BindProperty] public string? BasicId { get; set; }
 
     public bool IsTokenConfigured { get; set; }
     public string TokenSource { get; set; } = "Not set";
@@ -87,6 +89,9 @@ public class LineSettingsModel : PageModel
             : _configuration["App:BaseUrl"];
         AppBaseUrl = dbBaseUrl?.Value;
 
+        BasicId = await Services.Notifications.NotificationSettings.GetAsync(_context,
+            Services.Notifications.NotificationSettings.LineBasicIdKey);
+
         var currentUser = await _userManager.GetUserAsync(User);
         if (!string.IsNullOrEmpty(currentUser?.LineUserId))
             TestLineUserId = currentUser.LineUserId;
@@ -120,6 +125,11 @@ public class LineSettingsModel : PageModel
         // Normalise: strip trailing slash so "{base}/Admin/Alerts" is clean.
         await UpsertSettingAsync("App.BaseUrl", AppBaseUrl?.Trim().TrimEnd('/') ?? "",
             "Public base URL (https://…) for tappable links in LINE messages");
+
+        // Stored with its "@" so line.me URLs can use it as-is.
+        await UpsertSettingAsync(Services.Notifications.NotificationSettings.LineBasicIdKey,
+            Services.Notifications.NotificationSettings.NormalizeBasicId(BasicId) ?? "",
+            "LINE OA basic id (@xxxxxxx) for the customer add-friend / binding link");
 
         StatusMessage = "LINE settings saved!";
         return RedirectToPage();
