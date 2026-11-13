@@ -510,3 +510,24 @@ capability rules.
 | 1 | Schema, store, ingestion API, gateway tokens, key parser, capabilities, HA setup page; analytics engine with unit tests; notification center with LINE link + e-mail; rollup/retention jobs; analytics page (battery, PV/strings, TOU, quality, events) |
 | 2 | Expected-PV model weekly job tuned on real data; per-cell views; customer-portal analytics tab; PDF report |
 | 3 | Optional Timescale/Influx store; partitioning on SQL Server Standard; Grafana data source endpoint |
+
+---
+
+## 12. Implementation notes (analytics wiring)
+
+* **Loader** — `Services/Analytics/SiteAnalyticsLoader.cs`. Windows up to 2 days read raw
+  rows; longer windows read 5-minute aggregates plus the raw tail after the last closed
+  bucket. Counters and codes use the bucket's last value, `*_max` channels the maximum,
+  `*_min` channels and `grid.status` the minimum, everything else the mean.
+  `SiteAnalyticsInputs` maps channel keys to analyzer inputs (pure, unit-tested).
+* **Service and job** — `SiteAnalyticsService.ComputeSiteAsync` computes each section the
+  site's devices allow and stores JSON in `SiteAnalyticsDaily` under these kinds:
+  `battery`, `battery-day` (one row per day, kept forever: the long history chart),
+  `pv-model` (retrained when older than 7 days), `pv`, `curtailment`, `strings`, `grid`,
+  `thermal`, `quality` (yesterday and today), `tou`. `SiteAnalyticsJob` runs it for every
+  site with telemetry daily (`Schedule.SiteAnalytics`, default `15 21 * * *` UTC = 04:15
+  Thailand). The page's "คำนวณใหม่" button recomputes one site on demand.
+* **Page** — `/Installations/Analytics/{id}` (Admin, Partner). Tabs follow §8 and
+  `SiteCapabilities`; hidden tabs are listed with their reason. Overview and savings come
+  from Daily `EnergyData`, so cloud-only sites get them too. Tariff plans (`TariffPlans`)
+  and the battery warranty fields are edited on the page.

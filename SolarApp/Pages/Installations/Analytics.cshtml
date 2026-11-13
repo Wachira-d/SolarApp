@@ -1,0 +1,1056 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.AnalyticsModel
+@using SolarApp.Models.Enums
+@using SolarApp.Pages.Installations
+@using SolarApp.Services.Analytics
+@{
+    ViewData["Title"] = $"วิเคราะห์ระบบ - {Model.Installation.SiteName}";
+    var inst = Model.Installation;
+    var caps = Model.Caps;
+    var tab = Model.ActiveTab;
+    var hiddenTabs = Model.Tabs.Where(t => !t.Available).ToList();
+}
+
+<style>
+    .an-tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: thin; }
+    .an-tabs .nav-link { white-space: nowrap; }
+    .an-kpi { border-radius: .75rem; }
+    .an-kpi .v { font-size: 1.45rem; font-weight: 600; line-height: 1.1; }
+    .an-kpi .l { font-size: .8rem; color: var(--bs-secondary-color); }
+    .an-chart { position: relative; height: 300px; }
+    .an-chart.sm { height: 220px; }
+    .an-table td, .an-table th { white-space: nowrap; font-size: .85rem; }
+    .an-table.an-wrap td:last-child { white-space: normal; }
+    .an-heat { width: 100%; display: block; }
+    .an-legend-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; }
+    @@media (max-width: 576px) { .an-chart { height: 260px; } .an-kpi .v { font-size: 1.2rem; } }
+</style>
+
+@if (TempData["FlashSuccess"] is string flashSuccess)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="bi bi-check-circle-fill"></i> @flashSuccess
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+@if (TempData["FlashWarning"] is string flashWarning)
+{
+    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle-fill"></i> @flashWarning
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+    <div>
+        <h4 class="mb-0"><i class="bi bi-graph-up-arrow"></i> วิเคราะห์ระบบ</h4>
+        <small class="text-muted">
+            @inst.SiteName · @inst.InverterBrand · @inst.SystemCapacityKw.ToString("0.##") kWp
+            @if (caps.HasBattery && inst.BatteryNominalKwhTotal is decimal bk) { <span> · แบตเตอรี่ @bk.ToString("0.##") kWh</span> }
+        </small>
+    </div>
+    <div class="d-flex gap-2">
+        @if (caps.HasTelemetry)
+        {
+            <form method="post" asp-page-handler="Recompute" asp-route-id="@inst.Id" asp-route-tab="@tab"
+                  onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<span class=\'spinner-border spinner-border-sm\'></span> กำลังคำนวณ…';">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-arrow-repeat"></i> คำนวณใหม่</button>
+            </form>
+        }
+        <a asp-page="Detail" asp-route-id="@inst.Id" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> กลับ</a>
+    </div>
+</div>
+
+@if (caps.HasTelemetry)
+{
+    <div class="small text-muted mb-2">
+        <i class="bi bi-clock-history"></i>
+        @(Model.LastComputedAt is DateTime lc ? $"คำนวณล่าสุด {AnalyticsModel.Local(lc)} · ระบบคำนวณอัตโนมัติทุกวันเวลา 04:15 น." : "ยังไม่เคยคำนวณ — กด \"คำนวณใหม่\" เพื่อเริ่ม")
+    </div>
+}
+else
+{
+    <div class="alert alert-info small py-2">
+        <i class="bi bi-info-circle"></i>
+        ไซต์นี้ใช้ข้อมูลจากคลาวด์ของผู้ผลิตเท่านั้น จึงแสดงได้เฉพาะภาพรวมและความคุ้มค่า
+        หากต้องการวิเคราะห์แบตเตอรี่ สตริง และคุณภาพไฟฟ้า ให้
+        <a asp-page="Gateway" asp-route-id="@inst.Id">เชื่อมต่อ Home Assistant / Local API</a>
+    </div>
+}
+
+<ul class="nav nav-pills an-tabs mb-2 pb-1 border-bottom">
+    @foreach (var t in Model.Tabs.Where(t => t.Available))
+    {
+        <li class="nav-item">
+            <a class="nav-link py-1 px-3 @(t.Key == tab ? "active" : "")" asp-route-id="@inst.Id" asp-route-tab="@t.Key" asp-route-range="@Model.Range">
+                <i class="bi @t.Icon"></i> @t.Title
+            </a>
+        </li>
+    }
+</ul>
+@if (hiddenTabs.Count > 0)
+{
+    <details class="small text-muted mb-3">
+        <summary>หัวข้อที่ไม่แสดงสำหรับไซต์นี้ (@hiddenTabs.Count)</summary>
+        <ul class="mb-0 mt-1">
+            @foreach (var t in hiddenTabs) { <li><strong>@t.Title</strong> — @t.Reason</li> }
+        </ul>
+    </details>
+}
+
+@* ═══════════════════════════ ภาพรวม ═══════════════════════════ *@
+@if (tab == "overview")
+{
+    @if (!Model.HasEnergyData)
+    {
+        <div class="alert alert-secondary">ยังไม่มีข้อมูลพลังงานรายวันของไซต์นี้</div>
+    }
+    else
+    {
+        var life = Model.Lifetime!;
+        var last = Model.Months.LastOrDefault();
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">ประหยัดสะสม</div><div class="v text-success">฿@AnalyticsModel.N(last?.CumulativeSavingsThb, "N0")</div>
+                <div class="l">30 วันล่าสุด ฿@AnalyticsModel.N(Model.Last30?.SavingsThb, "N0")</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">คืนทุนแล้ว</div><div class="v">@(last?.CumulativePaybackPct is double pp ? $"{pp:0.#} %" : "–")</div>
+                <div class="l">@(inst.ContractValue is > 0 ? $"จากมูลค่าสัญญา ฿{inst.ContractValue:N0}" : "ยังไม่ได้กรอกมูลค่าสัญญา")</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">พึ่งพาตัวเอง (30 วัน)</div><div class="v">@(Model.Last30?.SelfSufficiencyPct is double ss ? $"{ss:0} %" : "–")</div>
+                <div class="l">ใช้ไฟจากโซลาร์เอง @(Model.Last30?.SelfConsumptionPct is double sc ? $"{sc:0} %" : "–")</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">ลด CO₂ สะสม</div><div class="v">@AnalyticsModel.N(life.Co2Kg / 1000, "N1") ตัน</div>
+                <div class="l">เท่ากับปลูกต้นไม้ @AnalyticsModel.N(life.Trees, "N0") ต้น</div>
+            </div></div></div>
+        </div>
+
+        <div class="row g-3">
+            <div class="col-lg-7">
+                <div class="card h-100"><div class="card-body">
+                    <h6 class="card-title">ค่าไฟที่ประหยัดได้รายเดือน และการพึ่งพาตัวเอง</h6>
+                    <div class="an-chart"><canvas id="chMonthly"></canvas></div>
+                </div></div>
+            </div>
+            <div class="col-lg-5">
+                <div class="card h-100"><div class="card-body">
+                    <h6 class="card-title">การไหลของพลังงาน 30 วันล่าสุด</h6>
+                    @if (Model.Flow30 is { Total: > 0 })
+                    {
+                        <div class="an-chart"><canvas id="chSankey"></canvas></div>
+                        <small class="text-muted">ค่าประมาณจากยอดรายวัน (kWh)</small>
+                    }
+                    else { <p class="text-muted small mb-0">ยังไม่มีข้อมูล 30 วันล่าสุด</p> }
+                </div></div>
+            </div>
+        </div>
+
+        <div class="card mt-3"><div class="card-body">
+            <h6 class="card-title">เทียบปีต่อปี และรายละเอียดรายเดือน</h6>
+            <div class="table-responsive">
+                <table class="table table-sm an-table mb-0">
+                    <thead><tr><th>เดือน</th><th class="text-end">ผลิต kWh</th><th class="text-end">ซื้อ kWh</th><th class="text-end">ขาย kWh</th>
+                        <th class="text-end">ประหยัด ฿</th><th class="text-end">พึ่งพาตัวเอง</th><th class="text-end">ผลิต YoY</th><th class="text-end">ประหยัด YoY</th><th class="text-end">คืนทุน</th></tr></thead>
+                    <tbody>
+                    @foreach (var m in Enumerable.Reverse(Model.Months).Take(24))
+                    {
+                        var me = Model.MonthEnergy.GetValueOrDefault((m.Year, m.Month));
+                        <tr>
+                            <td>@($"{m.Month:00}/{m.Year}")</td>
+                            <td class="text-end">@AnalyticsModel.N(me?.PvKwh, "N0")</td>
+                            <td class="text-end">@AnalyticsModel.N(me?.ImportKwh, "N0")</td>
+                            <td class="text-end">@AnalyticsModel.N(me?.ExportKwh, "N0")</td>
+                            <td class="text-end">@AnalyticsModel.N(m.Result.SavingsThb, "N0")</td>
+                            <td class="text-end">@(m.Result.SelfSufficiencyPct is double s ? $"{s:0}%" : "–")</td>
+                            <td class="text-end @(m.PvYoYPct < 0 ? "text-danger" : "")">@(m.PvYoYPct is double py ? $"{py:+0;-0}%" : "–")</td>
+                            <td class="text-end @(m.SavingsYoYPct < 0 ? "text-danger" : "")">@(m.SavingsYoYPct is double sy ? $"{sy:+0;-0}%" : "–")</td>
+                            <td class="text-end">@(m.CumulativePaybackPct is double cp ? $"{cp:0.#}%" : "–")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <small class="text-muted">คิดที่อัตรา ฿@inst.ElectricityRatePerKwh.ToString("0.##")/kWh @(inst.FeedInTariffRate is > 0 ? $"· ขายคืน ฿{inst.FeedInTariffRate:0.##}/kWh" : "") · CO₂ 0.5 kg/kWh · ต้นไม้ 1 ต้นดูดซับ 9 kg/ปี</small>
+        </div></div>
+    }
+}
+
+@* ═══════════════════════════ แบตเตอรี่ ═══════════════════════════ *@
+@if (tab == "battery")
+{
+    var b = Model.Battery;
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <span class="small text-muted">ช่วงเวลากราฟประวัติ:</span>
+        <div class="btn-group btn-group-sm" role="group">
+            @foreach (var r in AnalyticsModel.Ranges)
+            {
+                <a class="btn @(Model.Range == r ? "btn-secondary" : "btn-outline-secondary")" asp-route-id="@inst.Id" asp-route-tab="battery" asp-route-range="@r">
+                    @(r == "all" ? "ทั้งหมด" : r == "365" ? "1 ปี" : r + " วัน")
+                </a>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-3"><div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between">
+            <h6 class="card-title mb-1">ทั้งหมดในภาพเดียว — ชาร์จ / คายประจุ / SOC</h6>
+            <small class="text-muted">@(Model.History.Resolution == "week" ? "แสดงรายสัปดาห์ (ช่วงเกิน 1 ปี)" : "แสดงรายวัน") · @Model.HistoryDays วันที่มีข้อมูล</small>
+        </div>
+        @if (Model.History.Buckets.Count == 0)
+        {
+            <p class="text-muted small mb-0">ยังไม่มีประวัติ — ต้องมีข้อมูล battery.soc_pct และ battery.power_w แล้วกด "คำนวณใหม่"</p>
+        }
+        else
+        {
+            <div class="an-chart"><canvas id="chHistory"></canvas></div>
+            <div class="small text-muted mt-1">
+                <span class="an-legend-swatch" style="background:#2e9e5b"></span> kWh ที่ชาร์จ (บน)
+                <span class="an-legend-swatch ms-2" style="background:#f08c2e"></span> kWh ที่จ่าย (ล่าง)
+                <span class="an-legend-swatch ms-2" style="background:rgba(66,133,244,.25)"></span> ช่วง SOC ต่ำสุด–สูงสุดของวัน (แกนขวา)
+                <span class="ms-2 text-danger">▼</span> วันที่ไฟดับ
+            </div>
+        }
+    </div></div>
+
+    @if (b == null)
+    {
+        <div class="alert alert-secondary">ยังไม่มีรายงานแบตเตอรี่ — กด "คำนวณใหม่" (ต้องมีข้อมูลอย่างน้อยหนึ่งวัน)</div>
+    }
+    else
+    {
+        var cap = b.Capacity;
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100 border-@AnalyticsModel.OverallClass(b.Overall.Grade) border-2"><div class="card-body p-2">
+                <div class="l">เกรดสุขภาพแบตเตอรี่</div>
+                <div class="v text-@AnalyticsModel.OverallClass(b.Overall.Grade)">@b.Overall.Grade <small class="fs-6">@b.Overall.Label</small></div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">ความจุวัดจริง (มัธยฐาน 30 วัน)</div>
+                <div class="v">@(cap.MedianPct is double mp ? $"{mp:0} %" : "–")
+                    @if (cap.Trend == "up") { <small class="text-success">▲</small> } else if (cap.Trend == "down") { <small class="text-danger">▼</small> }
+                </div>
+                <div class="l">@AnalyticsModel.N(cap.MedianKwh) kWh · @cap.MedianErrorPct % · @(cap.ChangePct is double cpct ? $"{cpct:+0.0;-0.0}% เทียบ 90 วันก่อน" : "")</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">ประสิทธิภาพชาร์จ-จ่าย</div>
+                <div class="v text-@AnalyticsModel.EfficiencyClass(b.Efficiency.Grade)">@(b.Efficiency.MedianPct is double ep ? $"{ep:0.#} %" : "–")</div>
+                <div class="l">@AnalyticsModel.EfficiencyText(b.Efficiency.Grade)</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">รอบการใช้งาน (EFC)</div>
+                <div class="v">@AnalyticsModel.N(b.Efc, "N1")</div>
+                <div class="l">จ่าย @AnalyticsModel.N(b.TotalDischargedKwh, "N0") kWh ÷ @AnalyticsModel.N(b.NominalCapacityKwh, "0.##") kWh</div>
+            </div></div></div>
+        </div>
+
+        @if (b.Overall.Reasons.Count > 0 || cap.SohGapFlag || b.Alerts.Count > 0)
+        {
+            <div class="alert alert-light border small">
+                @foreach (var r in b.Overall.Reasons) { <div><i class="bi bi-dot"></i>@r</div> }
+                @if (cap.SohGapFlag)
+                {
+                    <div class="text-warning-emphasis"><i class="bi bi-exclamation-triangle"></i>
+                        ความจุวัดจริงต่างจาก SOH ของ BMS (@AnalyticsModel.N(cap.BmsSohPct, "0") %) เกิน 5 จุด (@AnalyticsModel.N(cap.GapToSohPts, "+0.0;-0.0") จุด) — ควรตรวจสอบ</div>
+                }
+                @foreach (var a in b.Alerts.OrderByDescending(a => a.TsUtc).Take(5))
+                {
+                    <div class="text-danger"><i class="bi bi-thermometer-high"></i> @AnalyticsModel.Local(a.TsUtc) · @a.Message</div>
+                }
+            </div>
+        }
+
+        <div class="row g-3 mb-3">
+            <div class="col-lg-6"><div class="card h-100"><div class="card-body">
+                <h6 class="card-title">นับรอบ 4 แบบ</h6>
+                <div class="table-responsive">
+                <table class="table table-sm an-table an-wrap mb-0">
+                    <tbody>
+                        <tr><th>Session (ชาร์จ / จ่าย)</th><td class="text-end">@b.Sessions.ChargeCount / @b.Sessions.DischargeCount ครั้ง</td>
+                            <td class="text-muted small">±300 W นานกว่า 3 นาที รวมช่วงพักสั้น</td></tr>
+                        <tr><th>Full cycle (≥ 98 % → ต่ำสุด)</th><td class="text-end">@b.Cycles.Items.Count รอบ</td>
+                            <td class="small">ลึก @b.Cycles.Deep · กลาง @b.Cycles.Mid · ตื้น @b.Cycles.Shallow</td></tr>
+                        <tr><th>EFC</th><td class="text-end">@AnalyticsModel.N(b.Efc, "N1")</td><td class="text-muted small">kWh จ่าย ÷ ความจุรวม</td></tr>
+                        <tr><th>Rainflow</th><td class="text-end">@AnalyticsModel.N(b.DodHistogram.TotalCycles, "N1") รอบ</td><td class="text-muted small">นับตามขนาดการแกว่งของ SOC</td></tr>
+                    </tbody>
+                </table>
+                </div>
+                <div class="small text-muted mt-1">ช่วงข้อมูล: @(b.FromUtc is DateTime f ? AnalyticsModel.Local(f, "d MMM yy") : "–") – @(b.ToUtc is DateTime t2 ? AnalyticsModel.Local(t2, "d MMM yy") : "–")</div>
+            </div></div></div>
+            <div class="col-lg-6"><div class="card h-100"><div class="card-body">
+                <h6 class="card-title">ความลึกของการคายประจุ (DoD) — Rainflow</h6>
+                <div class="an-chart sm"><canvas id="chDod"></canvas></div>
+            </div></div></div>
+        </div>
+
+        @if (b.Warranty is { } w)
+        {
+            <div class="card mb-3"><div class="card-body">
+                <h6 class="card-title">ประกันแบตเตอรี่ (นับตามพลังงานที่จ่าย)</h6>
+                <div class="d-flex justify-content-between small"><span>ใช้ไปแล้ว @AnalyticsModel.N(w.ThroughputMwh, "N2") / @AnalyticsModel.N(w.WarrantyMwh, "N1") MWh</span><strong>@AnalyticsModel.N(w.ThroughputUsedPct, "N1") %</strong></div>
+                <div class="progress my-1" style="height:10px"><div class="progress-bar @(w.ThroughputUsedPct > 80 ? "bg-danger" : w.ThroughputUsedPct > 50 ? "bg-warning" : "bg-success")" style="width:@(Math.Min(100, w.ThroughputUsedPct).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></div></div>
+                <div class="small text-muted">
+                    อายุประกันเหลือ @AnalyticsModel.N(w.YearsLeft, "N1") ปี ·
+                    ถ้าใช้งานแบบ 12 เดือนล่าสุด (@AnalyticsModel.N(w.TrailingYearMwh, "N2") MWh/ปี@(w.TrailingYearAnnualised ? " ประมาณจากข้อมูลที่มี" : "")) จะครบ MWh ในอีก @AnalyticsModel.N(w.YearsLeftByThroughput, "N1") ปี ·
+                    <strong>คาดว่าเหลือ @AnalyticsModel.N(w.ExpectedRemainingYears, "N1") ปี</strong> @(w.LimitedBy != null ? $"(จำกัดโดย{w.LimitedBy})" : "") ·
+                    ความจุขั้นต่ำตามประกัน @AnalyticsModel.N(w.MinCapacityPct, "0") %
+                </div>
+            </div></div>
+        }
+
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="card-title">สุขภาพรายแพ็ก (KPI ดี / เฝ้าระวัง / ต้องแก้ไข)</h6>
+            <div class="table-responsive">
+                <table class="table table-sm an-table mb-0">
+                    <thead><tr><th>ตัวชี้วัด</th>
+                        @foreach (var p in b.Packs) { <th class="text-center">แพ็ก @p.Index</th> }
+                    </tr></thead>
+                    <tbody>
+                        <tr><td>ความจุวัดจริง</td>
+                            @foreach (var p in b.Packs) { <td class="text-center">@(p.Capacity?.MedianPct is double pc ? $"{pc:0}%" : "–")</td> }
+                        </tr>
+                        <tr><td>EFC</td>
+                            @foreach (var p in b.Packs) { <td class="text-center">@AnalyticsModel.N(p.Efc, "N1")</td> }
+                        </tr>
+                        @foreach (var key in b.Packs.SelectMany(p => p.Kpis).Select(k => (k.Key, k.Name)).Distinct())
+                        {
+                            <tr><td>@key.Name</td>
+                                @foreach (var p in b.Packs)
+                                {
+                                    var k = p.Kpis.FirstOrDefault(x => x.Key == key.Key);
+                                    if (k == null) { <td class="text-center text-muted">–</td> }
+                                    else
+                                    {
+                                        <td class="text-center" title="@k.Note">
+                                            <span class="badge text-bg-@AnalyticsModel.GradeClass(k.Grade)">@AnalyticsModel.N(k.Value, "0.#") @k.Unit</span>
+                                            <div class="small text-muted">@k.GradeText</div>
+                                        </td>
+                                    }
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <small class="text-muted">ΔV ขณะพักวัดที่ SOC 30–80 % · ΔV ตอนเต็มวัดที่ SOC ≥ 99 % · ความจุวัดจากรอบที่เริ่มหลังชาร์จเต็ม ΔSOC ≥ 50 ไม่มีการชาร์จระหว่างทาง อุณหภูมิเซลล์ 20–40 °C (ต่อรอบ @cap.PerCycleErrorPct %)</small>
+        </div></div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-lg-7"><div class="card h-100"><div class="card-body">
+                <h6 class="card-title">แผนที่ความร้อน SOC (ชั่วโมง × วัน)</h6>
+                @if (b.Heatmap.Dates.Count == 0) { <p class="text-muted small mb-0">ไม่มีข้อมูล</p> }
+                else
+                {
+                    <canvas id="chHeat" class="an-heat"></canvas>
+                    <div class="small text-muted mt-1">
+                        <span class="an-legend-swatch" style="background:#d73027"></span> 0 %
+                        <span class="an-legend-swatch ms-1" style="background:#fee08b"></span> 50 %
+                        <span class="an-legend-swatch ms-1" style="background:#1a9850"></span> 100 % · แนวนอน 0–23 น.
+                    </div>
+                }
+            </div></div></div>
+            <div class="col-lg-5"><div class="card h-100"><div class="card-body">
+                <h6 class="card-title">ความจุวัดจริงแต่ละรอบ</h6>
+                @if (cap.Measurements.Count == 0)
+                {
+                    <p class="text-muted small mb-1">ยังไม่มีรอบที่เข้าเงื่อนไข</p>
+                    @if (cap.Rejected.Count > 0)
+                    {
+                        <ul class="small text-muted mb-0">@foreach (var kv in cap.Rejected) { <li>@kv.Key: @kv.Value รอบ</li> }</ul>
+                    }
+                }
+                else { <div class="an-chart sm"><canvas id="chCapacity"></canvas></div> }
+                @foreach (var n in cap.Notes) { <div class="small text-muted">@n</div> }
+            </div></div></div>
+        </div>
+
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="card-title">ตัวชี้วัดรายวัน</h6>
+            <div class="table-responsive" style="max-height:420px">
+                <table class="table table-sm table-hover an-table mb-0">
+                    <thead class="sticky-top bg-body"><tr>
+                        <th>วันที่</th><th class="text-end">ชาร์จ kWh</th><th class="text-end">จ่าย kWh</th><th>กลางคืน</th>
+                        <th class="text-end">SOC สูง→ต่ำ</th><th class="text-end">DoD</th><th class="text-end">EFC</th>
+                        <th class="text-end">ชม. 100% (07–18)</th><th class="text-end">ชม. &lt; 20%</th><th class="text-end">C-rate เฉลี่ย/สูงสุด</th><th class="text-end">อุณหภูมิเซลล์</th><th></th>
+                    </tr></thead>
+                    <tbody>
+                    @foreach (var d in Enumerable.Reverse(b.Days))
+                    {
+                        <tr class="@(d.HeatAndFull ? "table-warning" : "")">
+                            <td>@AnalyticsModel.Day(d.Date, "ddd d MMM")</td>
+                            <td class="text-end text-success">@AnalyticsModel.N(d.ChargedKwh)</td>
+                            <td class="text-end" style="color:#c96a12">@AnalyticsModel.N(d.DischargedKwh)</td>
+                            <td class="small">@(d.OvernightText ?? "–")</td>
+                            <td class="text-end">@AnalyticsModel.N(d.SocMax, "0")→@AnalyticsModel.N(d.SocMin, "0")</td>
+                            <td class="text-end">@(d.DodPct is double dd ? $"{dd:0}%" : "–")</td>
+                            <td class="text-end">@AnalyticsModel.N(d.EfcToday, "N2")</td>
+                            <td class="text-end">@AnalyticsModel.N(d.HoursFullDaytime)</td>
+                            <td class="text-end">@AnalyticsModel.N(d.HoursBelowLow)</td>
+                            <td class="text-end @(d.CRateOk ? "" : "text-danger")">@AnalyticsModel.N(d.CRateAvg, "0.00") / @AnalyticsModel.N(d.CRateMax, "0.00")C</td>
+                            <td class="text-end">@(d.CellTempMaxC.HasValue ? $"{AnalyticsModel.N(d.CellTempMinC, "0")}–{AnalyticsModel.N(d.CellTempMaxC, "0")} °C" : "–")</td>
+                            <td>
+                                @if (d.HeatAndFull) { <span class="badge text-bg-warning" title="อยู่ที่ 100 % นานกว่า 5 ชม. และร้อนกว่า 35 °C">ร้อน+เต็ม</span> }
+                                @if (d.HadOutage) { <span class="badge text-bg-danger">ไฟดับ</span> }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <small class="text-muted">แถวสีส้ม = แบตเต็ม 100 % นานกว่า 5 ชม. ขณะอุณหภูมิเกิน 35 °C (เร่งการเสื่อมในอากาศร้อนแบบชลบุรี) · C-rate ดีเมื่อ &lt; 0.5C</small>
+        </div></div>
+
+        @if (b.Efficiency.Items.Count > 0)
+        {
+            <div class="card mb-3"><div class="card-body">
+                <h6 class="card-title">ประสิทธิภาพรอบ เต็ม → เต็ม</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm an-table mb-0">
+                        <thead><tr><th>ช่วง</th><th class="text-end">ชาร์จ kWh</th><th class="text-end">จ่าย kWh</th><th class="text-end">ประสิทธิภาพ</th><th></th></tr></thead>
+                        <tbody>
+                        @foreach (var rt in Enumerable.Reverse(b.Efficiency.Items).Take(20))
+                        {
+                            <tr><td>@AnalyticsModel.Local(rt.StartUtc, "d MMM HH:mm") – @AnalyticsModel.Local(rt.EndUtc, "d MMM HH:mm")</td>
+                                <td class="text-end">@AnalyticsModel.N(rt.ChargedKwh)</td><td class="text-end">@AnalyticsModel.N(rt.DischargedKwh)</td>
+                                <td class="text-end"><span class="badge text-bg-@AnalyticsModel.EfficiencyClass(rt.Grade)">@AnalyticsModel.N(rt.EfficiencyPct, "0.#") %</span></td>
+                                <td class="small text-muted">@rt.Note</td></tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div></div>
+        }
+        @foreach (var n in b.Notes) { <div class="small text-muted"><i class="bi bi-info-circle"></i> @n</div> }
+    }
+
+    <div class="card mt-3"><div class="card-body">
+        <h6 class="card-title">เงื่อนไขประกันแบตเตอรี่</h6>
+        <form method="post" asp-page-handler="Warranty" asp-route-id="@inst.Id" class="row g-2 align-items-end">
+            <div class="col-4 col-md-2"><label class="form-label small mb-0">ปี</label>
+                <input asp-for="Warranty.Years" type="number" min="0" max="30" class="form-control form-control-sm" /></div>
+            <div class="col-4 col-md-3"><label class="form-label small mb-0">พลังงานรวม (MWh)</label>
+                <input asp-for="Warranty.ThroughputMwh" type="number" step="0.1" min="0" class="form-control form-control-sm" /></div>
+            <div class="col-4 col-md-3"><label class="form-label small mb-0">ความจุขั้นต่ำ (%)</label>
+                <input asp-for="Warranty.MinCapacityPct" type="number" step="1" min="0" max="100" class="form-control form-control-sm" /></div>
+            <div class="col-12 col-md-4 d-flex gap-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="anWarranty(10,33.4,70)">FoxESS EP11</button>
+                <button type="submit" class="btn btn-primary btn-sm">บันทึก</button>
+            </div>
+        </form>
+        <small class="text-muted">ตรวจสอบกับเอกสารประกันว่าค่า MWh เป็นของทั้งระบบหรือต่อแพ็ก ระบบเทียบกับพลังงานที่จ่ายรวมของทั้งระบบ</small>
+    </div></div>
+}
+
+@* ═══════════════════════════ PV & สตริง ═══════════════════════════ *@
+@if (tab == "pv")
+{
+    var pv = Model.Pv;
+    var cu = Model.Curtailment;
+    var st = Model.Strings;
+    @if (pv == null)
+    {
+        <div class="alert alert-secondary">ยังไม่มีผลเทียบค่าผลิตจริงกับค่าคาดหวัง — กด "คำนวณใหม่"</div>
+    }
+    else
+    {
+        <div class="row g-2 mb-3">
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">ผลิตจริง 30 วัน</div><div class="v">@AnalyticsModel.N(pv.Summary.ActualKwh, "N0") kWh</div>
+                <div class="l">@AnalyticsModel.N(pv.Summary.KwhPerKwp, "N1") kWh/kWp</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">ควรผลิตได้</div><div class="v">@AnalyticsModel.N(pv.Summary.ExpectedKwh, "N0") kWh</div>
+                <div class="l">จากโมเดลของไซต์เอง</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">ดัชนีประสิทธิภาพ</div>
+                <div class="v @(pv.Summary.PerformanceIndexPct < 90 ? "text-danger" : "text-success")">@(pv.Summary.PerformanceIndexPct is double pi ? $"{pi:0} %" : "–")</div>
+                <div class="l">จริง ÷ คาดหวัง</div>
+            </div></div></div>
+            <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
+                <div class="l">Performance Ratio</div><div class="v">@(pv.Summary.PrPct is double pr ? $"{pr:0} %" : "–")</div>
+                <div class="l">@pv.Summary.Days วัน</div>
+            </div></div></div>
+        </div>
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="card-title">ผลิตจริง vs ควรผลิตได้ (kWh/kWp ต่อวัน)</h6>
+            <div class="an-chart"><canvas id="chPv"></canvas></div>
+            <small class="text-muted">โมเดลเรียนรู้จากข้อมูล 5 นาทีของไซต์ (ไม่รวมช่วงที่ถูกจำกัดการผลิต) แยกตามเดือน × ชั่วโมง
+                @(pv.SensorKind == "lux" ? "ร่วมกับเซ็นเซอร์แสง (lux)" : pv.SensorKind == "irradiance" ? "ร่วมกับค่าความเข้มแสง" : "ร่วมกับแบบจำลองฟ้าใส")
+                · ฝึกใหม่ทุกสัปดาห์ @(pv.ModelTrainedToUtc is DateTime mt ? $"(ล่าสุดถึง {AnalyticsModel.Local(mt, "d MMM yy")}, {pv.ModelSamples:N0} จุด)" : "")</small>
+            @foreach (var n in pv.Notes) { <div class="small text-muted"><i class="bi bi-info-circle"></i> @n</div> }
+        </div></div>
+    }
+
+    <div class="card mb-3"><div class="card-body">
+        <h6 class="card-title">การจำกัดการผลิต (Zero export) — 30 วัน</h6>
+        @if (cu == null)
+        {
+            <p class="text-muted small mb-0">@(caps.HasGridMeter ? "ยังไม่ได้คำนวณ" : "ต้องมีมิเตอร์กริดจึงตรวจได้ว่าระบบลดการผลิตเพื่อไม่ให้ไฟไหลออก")</p>
+        }
+        else if (!cu.Available)
+        {
+            @foreach (var n in cu.Notes) { <p class="text-muted small mb-0">@n</p> }
+        }
+        else
+        {
+            <div class="row g-2 mb-2">
+                <div class="col-4"><div class="an-kpi"><div class="l">เวลาที่ถูกจำกัด</div><div class="v">@AnalyticsModel.Hours(cu.CurtailedMinutes)</div></div></div>
+                <div class="col-4"><div class="an-kpi"><div class="l">พลังงานที่เสียไป</div><div class="v">@AnalyticsModel.N(cu.LostKwh, "N1") kWh</div></div></div>
+                <div class="col-4"><div class="an-kpi"><div class="l">มูลค่า</div><div class="v text-danger">฿@AnalyticsModel.N(cu.LostThb, "N0")</div></div></div>
+            </div>
+            <div class="an-chart sm"><canvas id="chCurtail"></canvas></div>
+            @if (cu.TopHours.Count > 0)
+            {
+                <div class="alert alert-success small mt-2 mb-0">
+                    <i class="bi bi-lightbulb"></i> <strong>ช่วงเวลาที่ควรเปิดเครื่องใช้ไฟฟ้า</strong> (ไฟโซลาร์ถูกทิ้งมากที่สุด):
+                    @foreach (var h in cu.TopHours) { <div>@h.MessageTh</div> }
+                </div>
+            }
+            @foreach (var n in cu.Notes) { <div class="small text-muted">@n</div> }
+        }
+    </div></div>
+
+    <div class="card mb-3"><div class="card-body">
+        <h6 class="card-title">เทียบสตริง (เฉพาะช่วงที่ไม่ถูกจำกัดการผลิต)</h6>
+        @if (st == null)
+        {
+            <p class="text-muted small mb-0">@(caps.StringCount >= 2 ? "ยังไม่ได้คำนวณ" : "ต้องมีข้อมูลอย่างน้อย 2 สตริง (pv.string{n}.power_w หรือ voltage + current)")</p>
+        }
+        else
+        {
+            <div class="an-chart"><canvas id="chStrings"></canvas></div>
+            <div class="d-flex flex-wrap gap-2 my-2">
+                @foreach (var s in st.Strings)
+                {
+                    <span class="badge text-bg-@AnalyticsModel.GradeClass(s.Grade)">สตริง @s.StringIndex · @(s.MeanRatio7d is double r ? $"{r * 100:0}%" : "–") ของค่าเฉลี่ย</span>
+                }
+            </div>
+            @if (st.Findings.Count == 0) { <div class="small text-success"><i class="bi bi-check-circle"></i> ไม่พบความผิดปกติของสตริง</div> }
+            @foreach (var f in st.Findings)
+            {
+                <div class="small @(f.Recovered ? "text-muted" : "text-danger")">
+                    <i class="bi @(f.Recovered ? "bi-check2" : "bi-exclamation-triangle")"></i>
+                    <strong>สตริง @f.StringIndex: @AnalyticsModel.StringIssueText(f.Issue)</strong> ตั้งแต่ @AnalyticsModel.Day(f.Since) (@f.Days วัน@(f.ChangePct is double c ? $", {c:+0;-0}%" : "")) — @f.MessageTh
+                </div>
+            }
+            @foreach (var n in st.Notes) { <div class="small text-muted">@n</div> }
+        }
+    </div></div>
+}
+
+@* ═══════════════════════════ ค่าไฟ & TOU ═══════════════════════════ *@
+@if (tab == "tariff")
+{
+    var tou = Model.Tou;
+    @if (tou == null)
+    {
+        <div class="alert alert-secondary">ยังไม่มีผลเทียบค่าไฟ — ต้องมีข้อมูลการซื้อไฟรายชั่วโมงอย่างน้อยหนึ่งเดือน แล้วกด "คำนวณใหม่"</div>
+    }
+    else
+    {
+        var c = tou.Comparison;
+        <div class="card mb-3 border-2 @(c.RecommendSwitch ? "border-success" : "border-secondary")"><div class="card-body">
+            <h6 class="card-title"><i class="bi bi-lightbulb"></i> คำแนะนำ</h6>
+            <p class="mb-1 fs-6">@c.RecommendationTh</p>
+            <div class="small text-muted">
+                เทียบ "@c.CurrentName" กับ "@c.AlternativeName" · @c.MonthsCompared เดือน ·
+                สัดส่วนซื้อไฟช่วง Peak ล่าสุด @AnalyticsModel.N(c.RecentPeakSharePct, "0") % ·
+                ส่วนต่าง 3 เดือนล่าสุด ฿@AnalyticsModel.N(c.RecentSavingThb, "N0") (@AnalyticsModel.N(c.RecentSavingPct, "+0.0;-0.0") %)
+            </div>
+            @if (c.UsesUnconfirmedRates)
+            {
+                <div class="alert alert-warning small py-1 mt-2 mb-0"><i class="bi bi-exclamation-triangle"></i> ใช้อัตราค่าเริ่มต้นที่ยังไม่ได้ยืนยัน โปรดตรวจสอบอัตราและค่า Ft ให้ตรงประกาศ กฟภ. ล่าสุดด้านล่าง</div>
+            }
+        </div></div>
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="card-title">ค่าไฟรายเดือน: แผนปัจจุบัน vs แผนทางเลือก (คำนวณย้อนหลังรายชั่วโมง)</h6>
+            <div class="an-chart"><canvas id="chTou"></canvas></div>
+            <div class="table-responsive mt-2">
+                <table class="table table-sm an-table mb-0">
+                    <thead><tr><th>เดือน</th><th class="text-end">ซื้อ kWh</th><th class="text-end">Peak %</th><th class="text-end">@c.CurrentName</th><th class="text-end">@c.AlternativeName</th><th class="text-end">ต่าง</th></tr></thead>
+                    <tbody>
+                    @foreach (var m in Enumerable.Reverse(c.Months))
+                    {
+                        <tr><td>@($"{m.Month:00}/{m.Year}")</td><td class="text-end">@AnalyticsModel.N(m.ImportKwh, "N0")</td><td class="text-end">@AnalyticsModel.N(m.PeakSharePct, "0")</td>
+                            <td class="text-end">฿@AnalyticsModel.N(m.CurrentBill, "N0")</td><td class="text-end">฿@AnalyticsModel.N(m.AlternativeBill, "N0")</td>
+                            <td class="text-end @(m.Delta < 0 ? "text-success" : "text-danger")">@AnalyticsModel.N(m.Delta, "+#,0;-#,0") (@AnalyticsModel.N(m.DeltaPct, "+0;-0")%)</td></tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <small class="text-muted">ค่าติดลบ = แผนทางเลือกถูกกว่า · รวม Ft ค่าบริการ และ VAT · @tou.HoursOfData.ToString("N0") ชั่วโมงข้อมูล</small>
+        </div></div>
+    }
+
+    <div class="card mb-3"><div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+            <h6 class="card-title mb-0">แผนค่าไฟของไซต์</h6>
+            @if (Model.TariffPlans.Count == 0)
+            {
+                <form method="post" asp-page-handler="SeedTariffs" asp-route-id="@inst.Id">
+                    <button class="btn btn-outline-primary btn-sm"><i class="bi bi-plus-lg"></i> ใช้ค่าเริ่มต้น กฟภ. (ก้าวหน้า + TOU)</button>
+                </form>
+            }
+        </div>
+        @if (Model.TariffPlans.Count == 0)
+        {
+            <p class="small text-muted mt-2 mb-0">ยังไม่ได้ตั้งแผน ระบบเทียบ "กฟภ. อัตราก้าวหน้า" (ปัจจุบัน) กับ "กฟภ. TOU" ด้วยอัตราเริ่มต้น</p>
+        }
+        else
+        {
+            <div class="list-group list-group-flush mt-2">
+                @foreach (var p in Model.TariffPlans)
+                {
+                    var cfg = AnalyticsModel.ParseConfig(p);
+                    <div class="list-group-item px-0 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <strong>@p.Name</strong>
+                            @if (p.IsCurrent) { <span class="badge text-bg-primary">แผนปัจจุบัน</span> }
+                            @if (cfg?.IsUnconfirmedDefault == true) { <span class="badge text-bg-warning">ค่าเริ่มต้น ยังไม่ยืนยัน</span> }
+                            <div class="small text-muted">
+                                @if (cfg == null) { <span class="text-danger">อ่านค่าไม่ได้</span> }
+                                else if (cfg.Kind == TariffKind.TimeOfUse) { <span>Peak ฿@cfg.PeakRate (@cfg.PeakStartHour:00–@cfg.PeakEndHour:00 จ.–ศ.) · Off-peak ฿@cfg.OffPeakRate</span> }
+                                else if (cfg.Kind == TariffKind.Progressive) { <span>ขั้นบันได @AnalyticsModel.FormatTiers(cfg.Tiers)</span> }
+                                else { <span>อัตราเดียว ฿@cfg.FlatRate</span> }
+                                @if (cfg != null) { <span> · Ft ฿@cfg.FtPerKwh · ค่าบริการ ฿@cfg.ServiceChargePerMonth · VAT @cfg.VatPct%</span> }
+                            </div>
+                        </div>
+                        <div class="d-flex gap-1">
+                            <a class="btn btn-outline-secondary btn-sm" asp-route-id="@inst.Id" asp-route-tab="tariff" asp-route-editTariff="@p.Id"><i class="bi bi-pencil"></i> แก้ไข</a>
+                            <form method="post" asp-page-handler="DeleteTariff" asp-route-id="@inst.Id" asp-route-planId="@p.Id" onsubmit="return confirm('ลบแผนนี้?')">
+                                <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
+                            </form>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        <hr />
+        <h6 class="small fw-bold">@(Model.Tariff.Id != null ? "แก้ไขแผน" : "เพิ่มแผนใหม่")</h6>
+        <form method="post" asp-page-handler="SaveTariff" asp-route-id="@inst.Id" class="row g-2" id="tariffForm">
+            <input type="hidden" asp-for="Tariff.Id" />
+            <div class="col-12 col-md-5"><label class="form-label small mb-0">ชื่อแผน</label>
+                <input asp-for="Tariff.Name" class="form-control form-control-sm" maxlength="100" required /></div>
+            <div class="col-7 col-md-4"><label class="form-label small mb-0">ประเภท</label>
+                <select asp-for="Tariff.Kind" class="form-select form-select-sm" id="tariffKind">
+                    <option value="@TariffKind.Progressive">อัตราก้าวหน้า</option>
+                    <option value="@TariffKind.TimeOfUse">TOU (Peak / Off-peak)</option>
+                    <option value="@TariffKind.Flat">อัตราเดียว</option>
+                </select></div>
+            <div class="col-5 col-md-3 d-flex align-items-end"><div class="form-check">
+                <input asp-for="Tariff.IsCurrent" class="form-check-input" /><label asp-for="Tariff.IsCurrent" class="form-check-label small">แผนที่ใช้อยู่</label></div></div>
+            <div class="col-6 col-md-3" data-kind="Flat"><label class="form-label small mb-0">อัตรา ฿/kWh</label>
+                <input asp-for="Tariff.FlatRate" type="number" step="0.0001" min="0" class="form-control form-control-sm" /></div>
+            <div class="col-12" data-kind="Progressive"><label class="form-label small mb-0">ขั้นบันได (kWh สะสมถึง : ฿/kWh)</label>
+                <input asp-for="Tariff.Tiers" class="form-control form-control-sm font-monospace" placeholder="150:3.2484, 400:4.2218, :4.4217" /></div>
+            <div class="col-6 col-md-3" data-kind="TimeOfUse"><label class="form-label small mb-0">Peak ฿/kWh</label>
+                <input asp-for="Tariff.PeakRate" type="number" step="0.0001" min="0" class="form-control form-control-sm" /></div>
+            <div class="col-6 col-md-3" data-kind="TimeOfUse"><label class="form-label small mb-0">Off-peak ฿/kWh</label>
+                <input asp-for="Tariff.OffPeakRate" type="number" step="0.0001" min="0" class="form-control form-control-sm" /></div>
+            <div class="col-6 col-md-3" data-kind="TimeOfUse"><label class="form-label small mb-0">Peak เริ่ม (น.)</label>
+                <input asp-for="Tariff.PeakStartHour" type="number" min="0" max="23" class="form-control form-control-sm" /></div>
+            <div class="col-6 col-md-3" data-kind="TimeOfUse"><label class="form-label small mb-0">Peak สิ้นสุด (น.)</label>
+                <input asp-for="Tariff.PeakEndHour" type="number" min="1" max="24" class="form-control form-control-sm" /></div>
+            <div class="col-4"><label class="form-label small mb-0">Ft ฿/kWh</label>
+                <input asp-for="Tariff.FtPerKwh" type="number" step="0.0001" class="form-control form-control-sm" /></div>
+            <div class="col-4"><label class="form-label small mb-0">ค่าบริการ/เดือน</label>
+                <input asp-for="Tariff.ServiceChargePerMonth" type="number" step="0.01" min="0" class="form-control form-control-sm" /></div>
+            <div class="col-4"><label class="form-label small mb-0">VAT %</label>
+                <input asp-for="Tariff.VatPct" type="number" step="0.1" min="0" class="form-control form-control-sm" /></div>
+            <div class="col-12 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> บันทึกแผน</button>
+                @if (Model.Tariff.Id != null) { <a class="btn btn-outline-secondary btn-sm" asp-route-id="@inst.Id" asp-route-tab="tariff">ยกเลิก</a> }
+            </div>
+        </form>
+        <small class="text-muted">TOU: วันจันทร์–ศุกร์ในช่วง Peak คิดอัตรา Peak · เสาร์–อาทิตย์และนอกช่วงคิด Off-peak</small>
+    </div></div>
+}
+
+@* ═══════════════════════════ ไฟฟ้า & ความร้อน ═══════════════════════════ *@
+@if (tab == "power")
+{
+    var g = Model.Grid;
+    var th = Model.Thermal;
+    <div class="row g-3 mb-3">
+        <div class="col-lg-6"><div class="card h-100"><div class="card-body">
+            <h6 class="card-title">คุณภาพไฟฟ้าจากการไฟฟ้า (30 วัน)</h6>
+            @if (g?.Quality is { } pq)
+            {
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge fs-6 text-bg-@AnalyticsModel.GradeClass(pq.Grade)">@KpiGrades.Thai(pq.Grade)</span>
+                    <span class="small">แรงดัน @AnalyticsModel.N(pq.MinV, "0")–@AnalyticsModel.N(pq.MaxV, "0") V (เฉลี่ย @AnalyticsModel.N(pq.AvgV, "0"))</span>
+                </div>
+                <table class="table table-sm an-table mb-2">
+                    <tr><td>เวลาที่แรงดันนอกช่วง 207–253 V</td><td class="text-end">@AnalyticsModel.N(pq.PctTimeVoltageOutside, "0.##") %</td></tr>
+                    <tr><td>ไฟตก (sag) / ไฟเกิน (swell)</td><td class="text-end">@pq.SagCount / @pq.SwellCount ครั้ง</td></tr>
+                    @if (pq.MinHz.HasValue)
+                    {
+                    <tr><td>ความถี่</td><td class="text-end">@AnalyticsModel.N(pq.MinHz, "0.00")–@AnalyticsModel.N(pq.MaxHz, "0.00") Hz (นอกช่วง @AnalyticsModel.N(pq.PctTimeFrequencyOutside, "0.##") %)</td></tr>
+                    }
+                </table>
+                @if (pq.Hours.Count > 0) { <div class="an-chart sm"><canvas id="chVoltage"></canvas></div> }
+                @foreach (var n in pq.Notes) { <div class="small text-muted">@n</div> }
+            }
+            else { <p class="text-muted small mb-0">@(caps.HasGridVoltage ? "ยังไม่ได้คำนวณ" : "ไม่มีข้อมูลแรงดันกริด (grid.voltage_v)")</p> }
+        </div></div></div>
+        <div class="col-lg-6"><div class="card h-100"><div class="card-body">
+            <h6 class="card-title">ประวัติไฟดับ (@(g?.WindowDays ?? 0) วัน)</h6>
+            @if (g == null) { <p class="text-muted small mb-0">@(caps.HasGridStatus || caps.HasGridVoltage ? "ยังไม่ได้คำนวณ" : "ไม่มีสถานะกริด (grid.status) หรือแรงดันกริด")</p> }
+            else if (g.Outages.Count == 0) { <p class="small text-success mb-0"><i class="bi bi-check-circle"></i> ไม่พบไฟดับในช่วงนี้</p> }
+            else
+            {
+                <div class="small mb-2">@g.Outages.Count ครั้ง · รวม @AnalyticsModel.Hours(g.Outages.Sum(o => o.DurationMinutes))</div>
+                <div class="table-responsive" style="max-height:320px">
+                    <table class="table table-sm an-table mb-0">
+                        <thead><tr><th>เริ่ม</th><th class="text-end">นาน</th><th class="text-end">SOC</th><th class="text-end">แบตจ่าย</th><th></th></tr></thead>
+                        <tbody>
+                        @foreach (var o in Enumerable.Reverse(g.Outages))
+                        {
+                            <tr><td>@AnalyticsModel.Local(o.StartUtc)</td><td class="text-end">@AnalyticsModel.Hours(o.DurationMinutes)</td>
+                                <td class="text-end">@(o.SocStart.HasValue ? $"{o.SocStart:0}→{o.SocEnd:0}%" : "–")</td>
+                                <td class="text-end">@(o.BatteryKwhSupplied is double k ? $"{k:0.0} kWh" : "–")</td>
+                                <td>@if (o.Ongoing) { <span class="badge text-bg-danger">กำลังดับ</span> } @if (o.BatteryDepleted) { <span class="badge text-bg-warning">แบตหมด</span> }</td></tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div></div></div>
+    </div>
+
+    <div class="card mb-3"><div class="card-body">
+        <h6 class="card-title">อุณหภูมิอินเวอร์เตอร์และแบตเตอรี่ (30 วัน)</h6>
+        @if (th == null) { <p class="text-muted small mb-0">ยังไม่ได้คำนวณ หรือไม่มีช่องอุณหภูมิ</p> }
+        else
+        {
+            <div class="row g-2">
+                @foreach (var d in th.Inverters.Concat(th.Battery != null ? new[] { th.Battery } : Array.Empty<ThermalDevice>()))
+                {
+                    <div class="col-6 col-md-3"><div class="card an-kpi h-100 border-@AnalyticsModel.GradeClass(d.Grade)"><div class="card-body p-2">
+                        <div class="l">@(d.Name.StartsWith("inverter", StringComparison.OrdinalIgnoreCase) ? $"อินเวอร์เตอร์ {d.Index}" : d.Name.StartsWith("battery", StringComparison.OrdinalIgnoreCase) ? "แบตเตอรี่" : d.Name)</div>
+                        <div class="v">@AnalyticsModel.N(d.MaxTempC, "0") °C</div>
+                        <div class="l">สูงสุด @(d.MaxAtUtc is DateTime at ? AnalyticsModel.Local(at, "d MMM HH:mm") : "") · เฉลี่ย @AnalyticsModel.N(d.AvgTempC, "0") °C</div>
+                        @if (d.Derating.Count > 0) { <div class="small text-danger">ลดกำลังเพราะร้อน @d.Derating.Count ครั้ง</div> }
+                    </div></div></div>
+                }
+            </div>
+            @foreach (var a in th.Alerts) { <div class="small text-danger mt-1"><i class="bi bi-thermometer-high"></i> @a</div> }
+            <small class="text-muted">แบตเตอรี่: ดี ≤ 35 °C · เฝ้าระวัง 35–45 °C · เกิน 45 °C แจ้งเตือน · เกิน 50 °C วิกฤต</small>
+        }
+    </div></div>
+}
+
+@* ═══════════════════════════ คุณภาพข้อมูล ═══════════════════════════ *@
+@if (tab == "quality")
+{
+    var q = Model.Quality;
+    @if (q == null) { <div class="alert alert-secondary">ยังไม่ได้ตรวจคุณภาพข้อมูล — กด "คำนวณใหม่"</div> }
+    else
+    {
+        <div class="card mb-3"><div class="card-body">
+            <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+                <div class="an-kpi"><div class="l">คะแนนคุณภาพข้อมูล @AnalyticsModel.Day(q.Date)</div>
+                    <div class="v @(q.Score >= 90 ? "text-success" : q.Score >= 70 ? "text-warning" : "text-danger")">@q.Score.ToString("0") / 100</div></div>
+                <div class="small text-muted">ตรวจช่องว่างของข้อมูล ค่าค้าง ค่าผิดช่วง ตัวนับรีเซ็ต และเวลาในอนาคต</div>
+            </div>
+            @if (q.Issues.Count == 0) { <div class="small text-success"><i class="bi bi-check-circle"></i> ไม่พบปัญหา</div> }
+            @foreach (var i in q.Issues.Take(30)) { <div class="small"><i class="bi bi-exclamation-circle text-warning"></i> <code>@i.Key</code> — @i.MessageTh</div> }
+        </div></div>
+        <div class="card"><div class="card-body">
+            <h6 class="card-title">รายช่องข้อมูล</h6>
+            <div class="table-responsive">
+                <table class="table table-sm an-table mb-0">
+                    <thead><tr><th>ช่อง</th><th class="text-end">ครอบคลุม</th><th class="text-end">จุด/คาด</th><th class="text-end">ช่องว่าง</th><th class="text-end">ว่างนานสุด</th><th class="text-end">ค้าง</th><th class="text-end">ผิดช่วง</th><th class="text-end">คะแนน</th></tr></thead>
+                    <tbody>
+                    @foreach (var ch in q.Channels.OrderBy(c => c.Score))
+                    {
+                        <tr><td><code>@ch.Key</code></td>
+                            <td class="text-end @(ch.CoveragePct < 90 ? "text-danger" : "")">@ch.CoveragePct.ToString("0") %</td>
+                            <td class="text-end">@ch.Samples / @ch.ExpectedSamples</td><td class="text-end">@ch.Gaps</td>
+                            <td class="text-end">@ch.MaxGapMinutes.ToString("0") นาที</td><td class="text-end">@ch.StuckMinutes.ToString("0") นาที</td>
+                            <td class="text-end">@ch.OutOfRange</td><td class="text-end">@ch.Score.ToString("0")</td></tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </div></div>
+    }
+}
+
+@* ═══════════════════════════ เหตุการณ์ ═══════════════════════════ *@
+@if (tab == "events")
+{
+    <div class="card"><div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <h6 class="card-title mb-0">สถานะและ alarm ที่ถอดรหัสแล้ว (200 รายการล่าสุด)</h6>
+            <select class="form-select form-select-sm w-auto" id="evFilter">
+                <option value="">ทุกระดับ</option>
+                <option value="high">เฉพาะสำคัญ</option>
+            </select>
+        </div>
+        @if (Model.Events.Count == 0) { <p class="text-muted small mb-0">ยังไม่มีเหตุการณ์</p> }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm an-table mb-0" id="evTable">
+                    <thead><tr><th>เวลา</th><th>อุปกรณ์</th><th>ประเภท</th><th class="text-end">รหัส</th><th>ความหมาย</th></tr></thead>
+                    <tbody>
+                    @foreach (var e in Model.Events)
+                    {
+                        <tr data-high="@(e.Severity is AlertSeverity.Critical or AlertSeverity.High ? "1" : "0")">
+                            <td>@AnalyticsModel.Local(e.TsUtc)</td><td>@e.Source</td>
+                            <td>@(e.EventKind == "alarm" ? "Alarm" : "สถานะ")</td><td class="text-end font-monospace">@e.Code</td>
+                            <td style="white-space:normal"><span class="badge text-bg-@AnalyticsModel.SeverityClass(e.Severity)">&nbsp;</span> @e.Decoded @(e.Message != null ? $"— {e.Message}" : "")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div></div>
+}
+
+@section Scripts {
+    @if (tab == "overview" && Model.Flow30 is { Total: > 0 })
+    {
+        <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-sankey@0.12.1/dist/chartjs-chart-sankey.min.js"></script>
+    }
+    <script>
+    (function () {
+        if (typeof Chart === 'undefined') return;
+        const css = getComputedStyle(document.documentElement);
+        const textColor = css.getPropertyValue('--bs-body-color') || '#333';
+        const gridColor = 'rgba(128,128,128,.15)';
+        Chart.defaults.color = textColor;
+        Chart.defaults.font.family = 'inherit';
+        Chart.defaults.maintainAspectRatio = false;
+        const GREEN = '#2e9e5b', ORANGE = '#f08c2e', BLUE = '#4285f4', GREY = '#9aa0a6', RED = '#d9534f';
+        const el = id => document.getElementById(id);
+
+        @if (tab == "overview" && Model.Months.Count > 0)
+        {
+            var months = Model.Months.TakeLast(24).ToList();
+            <text>
+            if (el('chMonthly')) new Chart(el('chMonthly'), {
+                data: {
+                    labels: @Json.Serialize(months.Select(m => $"{m.Month:00}/{m.Year % 100:00}")),
+                    datasets: [
+                        { type: 'bar', label: 'ประหยัด (บาท)', data: @Json.Serialize(months.Select(m => Math.Round(m.Result.SavingsThb))), backgroundColor: GREEN, yAxisID: 'y' },
+                        { type: 'line', label: 'พึ่งพาตัวเอง (%)', data: @Json.Serialize(months.Select(m => m.Result.SelfSufficiencyPct.HasValue ? Math.Round(m.Result.SelfSufficiencyPct.Value, 1) : (double?)null)), borderColor: BLUE, backgroundColor: BLUE, yAxisID: 'y1', tension: .3, spanGaps: true }
+                    ]
+                },
+                options: { interaction: { mode: 'index', intersect: false },
+                    scales: { y: { title: { display: true, text: 'บาท' }, grid: { color: gridColor } },
+                              y1: { position: 'right', min: 0, max: 100, title: { display: true, text: '%' }, grid: { display: false } } } }
+            });
+            </text>
+        }
+        @if (tab == "overview" && Model.Flow30 is { Total: > 0 } fl)
+        {
+            var flows = new List<object>();
+            void F(string from, string to, double v) { if (v > 0.05) flows.Add(new { from, to, flow = Math.Round(v, 1) }); }
+            F("โซลาร์", "ใช้ในบ้าน", fl.PvToHome); F("โซลาร์", "แบตเตอรี่", fl.PvToBattery); F("โซลาร์", "ขายเข้ากริด", fl.PvToGrid);
+            F("ซื้อจากกริด", "ใช้ในบ้าน", fl.GridToHome); F("แบตเตอรี่", "ใช้ในบ้าน", fl.BatteryToHome);
+            <text>
+            if (el('chSankey') && Chart.registry.controllers.get('sankey')) {
+                const colors = { 'โซลาร์': '#f4b400', 'ใช้ในบ้าน': BLUE, 'แบตเตอรี่': GREEN, 'ขายเข้ากริด': GREY, 'ซื้อจากกริด': RED };
+                new Chart(el('chSankey'), { type: 'sankey', data: { datasets: [{
+                    data: @Json.Serialize(flows),
+                    colorFrom: c => colors[c.dataset.data[c.dataIndex].from] || GREY,
+                    colorTo: c => colors[c.dataset.data[c.dataIndex].to] || GREY,
+                    colorMode: 'gradient', size: 'max'
+                }] } });
+            }
+            </text>
+        }
+
+        @if (tab == "battery" && Model.History.Buckets.Count > 0)
+        {
+            var hb = Model.History.Buckets;
+            var weekly = Model.History.Resolution == "week";
+            <text>
+            (function () {
+                const labels = @Json.Serialize(hb.Select(x => (weekly ? "สัปดาห์ " : "") + x.Start.ToString("d MMM yy", System.Globalization.CultureInfo.GetCultureInfo("th-TH"))));
+                const charged = @Json.Serialize(hb.Select(x => Math.Round(x.ChargedKwh, 2)));
+                const discharged = @Json.Serialize(hb.Select(x => -Math.Round(x.DischargedKwh, 2)));
+                const band = @Json.Serialize(hb.Select(x => x.SocMin.HasValue && x.SocMax.HasValue ? new[] { Math.Round(x.SocMin.Value, 1), Math.Round(x.SocMax.Value, 1) } : null));
+                const outage = @Json.Serialize(hb.Select(x => x.HadOutage ? (double?)100 : null));
+                new Chart(el('chHistory'), {
+                    data: { labels, datasets: [
+                        { type: 'bar', label: 'ชาร์จ kWh', data: charged, backgroundColor: GREEN, stack: 'kwh', yAxisID: 'y', order: 2 },
+                        { type: 'bar', label: 'จ่าย kWh', data: discharged, backgroundColor: ORANGE, stack: 'kwh', yAxisID: 'y', order: 2 },
+                        { type: 'bar', label: 'SOC ต่ำสุด–สูงสุด', data: band, backgroundColor: 'rgba(66,133,244,.22)', borderWidth: 0, yAxisID: 'y1', stack: 'soc',
+                          grouped: false, barPercentage: 1, categoryPercentage: 1, order: 3 },
+                        { type: 'line', label: 'ไฟดับ', data: outage, yAxisID: 'y1', showLine: false, pointStyle: 'triangle', rotation: 180,
+                          pointRadius: 6, pointBackgroundColor: RED, borderColor: RED, order: 1, clip: false }
+                    ] },
+                    options: {
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => {
+                            if (c.dataset.label === 'SOC ต่ำสุด–สูงสุด') return c.raw ? `SOC ${c.raw[0]}–${c.raw[1]} %` : null;
+                            if (c.dataset.label === 'ไฟดับ') return c.raw ? 'มีไฟดับ' : null;
+                            return `${c.dataset.label}: ${Math.abs(c.raw)}`;
+                        } } } },
+                        scales: {
+                            x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
+                            y: { stacked: true, title: { display: true, text: 'kWh (บน = ชาร์จ, ล่าง = จ่าย)' }, grid: { color: gridColor },
+                                 ticks: { callback: v => Math.abs(v) } },
+                            y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'SOC %' }, grid: { display: false },
+                                  ticks: { stepSize: 20 } }
+                        }
+                    }
+                });
+            })();
+            </text>
+        }
+        @if (tab == "battery" && Model.Battery is { } br)
+        {
+            <text>
+            if (el('chDod')) new Chart(el('chDod'), { type: 'bar',
+                data: { labels: @Json.Serialize(br.DodHistogram.Bins.Select(x => $"{x.FromPct}–{x.ToPct}%")),
+                        datasets: [{ label: 'รอบ', data: @Json.Serialize(br.DodHistogram.Bins.Select(x => Math.Round(x.Cycles, 1))), backgroundColor: BLUE }] },
+                options: { plugins: { legend: { display: false } }, scales: { y: { title: { display: true, text: 'จำนวนรอบ' }, grid: { color: gridColor } }, x: { grid: { display: false } } } }
+            });
+            if (el('chCapacity')) new Chart(el('chCapacity'), { type: 'line',
+                data: { labels: @Json.Serialize(br.Capacity.Measurements.Select(m => AnalyticsModel.Local(m.StartUtc, "d MMM"))),
+                        datasets: [{ label: 'ความจุ % ของพิกัด', data: @Json.Serialize(br.Capacity.Measurements.Select(m => Math.Round(m.PctOfNominal, 1))),
+                                     borderColor: GREEN, backgroundColor: GREEN, showLine: false, pointRadius: 4 }] },
+                options: { plugins: { legend: { display: false } }, scales: { y: { suggestedMin: 80, suggestedMax: 105, grid: { color: gridColor } }, x: { grid: { display: false } } } }
+            });
+            (function () {
+                const c = el('chHeat'); if (!c) return;
+                const dates = @Json.Serialize(br.Heatmap.Dates.Select(d => AnalyticsModel.Day(d, "d MMM")));
+                const vals = @Json.Serialize(br.Heatmap.Values.Select(r => r.Select(v => v.HasValue ? Math.Round(v.Value) : (double?)null)));
+                const color = v => {
+                    if (v === null) return 'rgba(128,128,128,.12)';
+                    const t = Math.max(0, Math.min(1, v / 100));
+                    const stops = [[215,48,39],[254,224,139],[26,152,80]];
+                    const seg = t >= .5 ? 1 : 0, f = seg ? (t - .5) / .5 : t / .5;
+                    const a = stops[seg], b = stops[seg + 1];
+                    return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * f)).join(',')})`;
+                };
+                function draw() {
+                    const labelW = 56, top = 14, w = c.clientWidth;
+                    const rowH = Math.max(3, Math.min(14, Math.floor(420 / Math.max(1, dates.length))));
+                    const h = top + rowH * dates.length;
+                    const dpr = window.devicePixelRatio || 1;
+                    c.width = w * dpr; c.height = h * dpr; c.style.height = h + 'px';
+                    const g = c.getContext('2d'); g.scale(dpr, dpr);
+                    const cellW = (w - labelW) / 24;
+                    g.font = '10px sans-serif'; g.fillStyle = textColor; g.textBaseline = 'middle';
+                    for (let hr = 0; 24 > hr; hr += 3) g.fillText(hr, labelW + hr * cellW + 1, 6);
+                    const every = Math.ceil(12 / rowH);
+                    dates.forEach((d, r) => {
+                        if (r % every === 0) g.fillText(d, 0, top + r * rowH + rowH / 2);
+                        (vals[r] || []).forEach((v, hr) => { g.fillStyle = color(v); g.fillRect(labelW + hr * cellW, top + r * rowH, Math.ceil(cellW), rowH); });
+                        g.fillStyle = textColor;
+                    });
+                }
+                draw(); window.addEventListener('resize', draw);
+            })();
+            </text>
+        }
+
+        @if (tab == "pv" && Model.Pv is { Days.Count: > 0 } pvs)
+        {
+            <text>
+            new Chart(el('chPv'), {
+                data: { labels: @Json.Serialize(pvs.Days.Select(d => AnalyticsModel.Day(d.Date, "d MMM"))),
+                        datasets: [
+                            { type: 'bar', label: 'ผลิตจริง', data: @Json.Serialize(pvs.Days.Select(d => Math.Round(d.KwhPerKwp, 2))), backgroundColor: '#f4b400' },
+                            { type: 'line', label: 'ควรผลิตได้', data: @Json.Serialize(pvs.Days.Select(d => Math.Round(d.ExpectedKwhPerKwp, 2))), borderColor: GREY, backgroundColor: GREY, borderDash: [4, 3], tension: .3 }
+                        ] },
+                options: { interaction: { mode: 'index', intersect: false }, scales: { y: { title: { display: true, text: 'kWh/kWp' }, grid: { color: gridColor } }, x: { grid: { display: false } } } }
+            });
+            </text>
+        }
+        @if (tab == "pv" && Model.Curtailment is { Available: true } cur)
+        {
+            <text>
+            if (el('chCurtail')) new Chart(el('chCurtail'), { type: 'bar',
+                data: { labels: [...Array(24).keys()].map(h => h + ':00'),
+                        datasets: [{ label: 'kWh ที่เสียไป', data: @Json.Serialize(cur.LostKwhByHour.Select(v => Math.Round(v, 2))), backgroundColor: ORANGE }] },
+                options: { plugins: { legend: { display: false } }, scales: { y: { title: { display: true, text: 'kWh ที่เสียไป (รวม 30 วัน)' }, grid: { color: gridColor } }, x: { grid: { display: false } } } }
+            });
+            </text>
+        }
+        @if (tab == "pv" && Model.Strings is { Days.Count: > 0 } sr)
+        {
+            var idx = sr.Strings.Select(s => s.StringIndex).ToList();
+            var palette = new[] { "#4285f4", "#db4437", "#f4b400", "#0f9d58", "#ab47bc", "#00acc1", "#ff7043", "#9e9d24" };
+            var ds = idx.Select((n, i) => new
+            {
+                label = $"สตริง {n}",
+                data = sr.Days.Select(d => d.Ratio.TryGetValue(n, out var r) && r.HasValue ? Math.Round(r.Value * 100, 1) : (double?)null),
+                borderColor = palette[i % palette.Length],
+                backgroundColor = palette[i % palette.Length],
+                tension = 0.2,
+                spanGaps = true,
+            });
+            <text>
+            if (el('chStrings')) new Chart(el('chStrings'), { type: 'line',
+                data: { labels: @Json.Serialize(sr.Days.Select(d => AnalyticsModel.Day(d.Date, "d MMM"))), datasets: @Json.Serialize(ds) },
+                options: { interaction: { mode: 'index', intersect: false },
+                    scales: { y: { title: { display: true, text: '% ของค่าเฉลี่ยทุกสตริง' + (@Json.Serialize(sr.PerKwp) ? ' (ต่อ kWp)' : '') }, grid: { color: gridColor } }, x: { grid: { display: false } } } }
+            });
+            </text>
+        }
+
+        @if (tab == "tariff" && Model.Tou is { } ts)
+        {
+            var tm = ts.Comparison.Months;
+            <text>
+            new Chart(el('chTou'), { type: 'bar',
+                data: { labels: @Json.Serialize(tm.Select(m => $"{m.Month:00}/{m.Year % 100:00}")),
+                        datasets: [
+                            { label: @Json.Serialize(ts.Comparison.CurrentName), data: @Json.Serialize(tm.Select(m => Math.Round(m.CurrentBill))), backgroundColor: GREY },
+                            { label: @Json.Serialize(ts.Comparison.AlternativeName), data: @Json.Serialize(tm.Select(m => Math.Round(m.AlternativeBill))), backgroundColor: BLUE }
+                        ] },
+                options: { interaction: { mode: 'index', intersect: false }, scales: { y: { title: { display: true, text: 'บาท/เดือน' }, grid: { color: gridColor } }, x: { grid: { display: false } } } }
+            });
+            </text>
+        }
+        @if (tab == "power" && Model.Grid?.Quality is { Hours.Count: > 0 } pqr)
+        {
+            var hrs = pqr.Hours.TakeLast(24 * 7).ToList();
+            <text>
+            if (el('chVoltage')) new Chart(el('chVoltage'), { type: 'line',
+                data: { labels: @Json.Serialize(hrs.Select(h => h.LocalHourStart.ToString("d/M HH:00"))),
+                        datasets: [
+                            { label: 'สูงสุด', data: @Json.Serialize(hrs.Select(h => Math.Round(h.Max, 1))), borderColor: RED, pointRadius: 0, borderWidth: 1 },
+                            { label: 'เฉลี่ย', data: @Json.Serialize(hrs.Select(h => Math.Round(h.Avg, 1))), borderColor: BLUE, pointRadius: 0 },
+                            { label: 'ต่ำสุด', data: @Json.Serialize(hrs.Select(h => Math.Round(h.Min, 1))), borderColor: ORANGE, pointRadius: 0, borderWidth: 1 }
+                        ] },
+                options: { interaction: { mode: 'index', intersect: false },
+                    scales: { y: { suggestedMin: 200, suggestedMax: 255, title: { display: true, text: 'V (7 วันล่าสุด)' }, grid: { color: gridColor } }, x: { ticks: { maxTicksLimit: 7 }, grid: { display: false } } } }
+            });
+            </text>
+        }
+    })();
+
+    // Phones: bring the active tab into view in the scrolling tab bar.
+    (function () { const a = document.querySelector('.an-tabs .active'); if (a) a.scrollIntoView({ inline: 'center', block: 'nearest' }); })();
+    // Tariff form: show only the fields of the selected plan type.
+    (function () {
+        const kind = document.getElementById('tariffKind'); if (!kind) return;
+        const sync = () => document.querySelectorAll('#tariffForm [data-kind]').forEach(e => e.classList.toggle('d-none', e.dataset.kind !== kind.value));
+        kind.addEventListener('change', sync); sync();
+    })();
+    // Battery warranty preset.
+    function anWarranty(y, mwh, pct) {
+        document.getElementById('Warranty_Years').value = y;
+        document.getElementById('Warranty_ThroughputMwh').value = mwh;
+        document.getElementById('Warranty_MinCapacityPct').value = pct;
+    }
+    // Event filter.
+    (function () {
+        const f = document.getElementById('evFilter'); if (!f) return;
+        f.addEventListener('change', () => document.querySelectorAll('#evTable tbody tr').forEach(tr =>
+            tr.classList.toggle('d-none', f.value === 'high' && tr.dataset.high !== '1')));
+    })();
+    </script>
+}

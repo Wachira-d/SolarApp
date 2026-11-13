@@ -280,6 +280,9 @@ public class Startup
         builder.Services.AddScoped<Services.Telemetry.TelemetryGatewayService>();
         builder.Services.AddScoped<Services.Telemetry.TelemetryIngestService>();
         builder.Services.AddScoped<BackgroundJobs.TelemetryRollupJob>();
+        builder.Services.AddScoped<Services.Analytics.SiteAnalyticsLoader>();
+        builder.Services.AddScoped<Services.Analytics.SiteAnalyticsService>();
+        builder.Services.AddScoped<BackgroundJobs.SiteAnalyticsJob>();
         builder.Services.AddScoped<BackgroundJobs.TelemetryRetentionJob>();
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
         builder.Services.AddScoped<BackgroundJobs.DataRetentionJob>();
@@ -408,6 +411,11 @@ public class Startup
         var telemetryRetentionCron = GetSetting(ctx, "Schedule.TelemetryRetention", "30 20 * * *");
         RecurringJob.AddOrUpdate<BackgroundJobs.TelemetryRetentionJob>(
             "telemetry-retention", job => job.ExecuteAsync(), telemetryRetentionCron);
+        // Site analytics (DESIGN.md §7): 21:15 UTC = 04:15 Thailand, after the
+        // night's last rollups and before anyone opens a dashboard.
+        var siteAnalyticsCron = GetSetting(ctx, "Schedule.SiteAnalytics", "15 21 * * *");
+        RecurringJob.AddOrUpdate<BackgroundJobs.SiteAnalyticsJob>(
+            "site-analytics", job => job.ExecuteAsync(), siteAnalyticsCron);
     }
 
     /// <summary>
