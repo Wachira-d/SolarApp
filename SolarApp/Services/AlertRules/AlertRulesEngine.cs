@@ -73,6 +73,8 @@ public class AlertRulesEngine : IAlertRulesEngine
         // OfflineMinutes or DailyEnergyKwh rule fired on every such site forever.
         var allInstallations = await _context.Installations
             .Where(i => i.Status != InstallationStatus.Inactive && i.IncludesMonitoring)
+            // Same reasoning for a site whose cloud was paused or removed.
+            .Where(SolarApp.Services.InstallationCloudConnection.HasLiveDataSource)
             .ToListAsync(cancellationToken);
 
         var openAlerts = await _context.SystemAlerts

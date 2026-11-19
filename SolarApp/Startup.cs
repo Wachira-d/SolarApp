@@ -776,6 +776,8 @@ public class Startup
             // battery metadata so we don't lose existing hybrid sites.
             (Table: "Installations", Column: "TelemetrySource",
              Sql: "ALTER TABLE [Installations] ADD [TelemetrySource] int NOT NULL DEFAULT 0"),
+            (Table: "Installations", Column: "CloudApiEnabled",
+             Sql: "ALTER TABLE [Installations] ADD [CloudApiEnabled] bit NOT NULL DEFAULT 1"),
             (Table: "Installations", Column: "BatteryWarrantyYears",
              Sql: "ALTER TABLE [Installations] ADD [BatteryWarrantyYears] int NULL"),
             (Table: "Installations", Column: "BatteryWarrantyThroughputMwh",
@@ -2714,6 +2716,9 @@ BEGIN {sql}; END");
 
             if (string.IsNullOrEmpty(installation.PlantId))
                 return Results.Json(Services.Api.ApiResponse.ValidationError("No Plant/Station ID configured"));
+            if (!installation.CloudApiEnabled)
+                return Results.Json(Services.Api.ApiResponse.ValidationError(
+                    "การเชื่อมต่อคลาวด์ของไซต์นี้ถูกหยุดไว้ — เปิดใช้งานอีกครั้งที่หน้าแก้ไขไซต์ก่อน"));
 
             try
             {

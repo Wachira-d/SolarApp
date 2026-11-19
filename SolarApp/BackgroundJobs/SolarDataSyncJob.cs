@@ -50,6 +50,8 @@ public class SolarDataSyncJob
         var installations = await _context.Installations
             .Where(i => i.Status != InstallationStatus.Inactive
                         && i.IncludesMonitoring
+                        // Paused / disconnected by an operator on the site's edit page.
+                        && i.CloudApiEnabled
                         && i.PlantId != null && i.PlantId != ""
                         // Local-gateway sites push to us; there is nothing to poll.
                         && i.TelemetrySource != TelemetrySource.LocalGateway

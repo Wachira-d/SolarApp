@@ -333,6 +333,15 @@ public class Installation : ISoftDeletable
     public TelemetrySource TelemetrySource { get; set; } = TelemetrySource.Cloud;
 
     /// <summary>
+    /// The vendor-cloud connection is switched on. False = paused or
+    /// disconnected by an operator: SolarDataSyncJob does not poll the site
+    /// and the health monitor does not raise offline / API alerts for it
+    /// (unless a local gateway still feeds it). Credentials may be kept
+    /// (paused) or removed (disconnected) — see InstallationCloudConnection.
+    /// </summary>
+    public bool CloudApiEnabled { get; set; } = true;
+
+    /// <summary>
     /// How often the background sync job should hit this site's cloud API.
     /// Operator-chosen from a dropdown of presets (5 / 15 / 30 / 60 / 120 /
     /// 360 / 720 / 1440 min); clamped to the brand's minimum at save time.

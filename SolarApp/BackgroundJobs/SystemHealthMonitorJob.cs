@@ -93,6 +93,10 @@ public class SystemHealthMonitorJob
                     && i.IncludesMonitoring
                     && i.LastOnlineAt != null
                     && i.LastOnlineAt < threshold)
+                // A site whose cloud connection was paused or removed, with no
+                // gateway either, has nothing that could bring data — silence
+                // is expected, not an outage.
+                .Where(SolarApp.Services.InstallationCloudConnection.HasLiveDataSource)
                 .ToListAsync())
             .Where(i =>
             {
@@ -335,6 +339,7 @@ public class SystemHealthMonitorJob
 
         var candidates = await _context.Installations
             .Where(i => i.Status == InstallationStatus.Active && i.IncludesMonitoring)
+            .Where(SolarApp.Services.InstallationCloudConnection.HasLiveDataSource)
             .ToListAsync();
 
         // Look back 7 days to distinguish real outages from "never worked" config errors
@@ -571,7 +576,10 @@ public class SystemHealthMonitorJob
             .IgnoreQueryFilters()
             .Where(i => i.DeletedAt != null
                         || i.Status == InstallationStatus.Inactive
-                        || !i.IncludesMonitoring)
+                        || !i.IncludesMonitoring
+                        // Cloud paused / disconnected and no gateway.
+                        || (i.TelemetrySource == TelemetrySource.Cloud
+                            && (!i.CloudApiEnabled || i.PlantId == null || i.PlantId == "")))
             .Select(i => i.Id)
             .ToListAsync();
         if (outOfScopeIds.Count == 0) return;
@@ -591,7 +599,10 @@ public class SystemHealthMonitorJob
         }
 
         var stuckOffline = await _context.Installations
-            .Where(i => !i.IncludesMonitoring && i.Status == InstallationStatus.Offline)
+            .Where(i => i.Status == InstallationStatus.Offline
+                        && (!i.IncludesMonitoring
+                            || (i.TelemetrySource == TelemetrySource.Cloud
+                                && (!i.CloudApiEnabled || i.PlantId == null || i.PlantId == ""))))
             .ToListAsync();
         foreach (var i in stuckOffline)
             i.Status = InstallationStatus.Active;

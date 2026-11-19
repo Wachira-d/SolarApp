@@ -126,7 +126,8 @@ public class SiteModel : PageModel
         var rate = Site.ElectricityRatePerKwh > 0 ? Site.ElectricityRatePerKwh : 4.0m;
         EstimatedSavingsThbMonth = Math.Round(MonthKwh * rate, 0);
         Co2SavedKgMonth = Math.Round(MonthKwh * 0.5m, 0);
-        TreesEquivalent = (int)Math.Round(Co2SavedKgMonth / 21m);
+        // Same CO₂-per-tree factor as every other page (EconomicsOptions), so one site never shows two tree counts.
+        TreesEquivalent = (int)Math.Round(Co2SavedKgMonth / (decimal)new SolarApp.Services.Analytics.EconomicsOptions().Co2KgPerTree);
 
         Equipment = Site.Equipment
             .Select(e => new EquipmentVm(

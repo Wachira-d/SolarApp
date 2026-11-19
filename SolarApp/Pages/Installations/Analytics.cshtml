@@ -230,7 +230,7 @@ else
             <div class="col-6 col-md-3"><div class="card an-kpi h-100"><div class="card-body p-2">
                 <div class="l">ความจุวัดจริง (มัธยฐาน 30 วัน)</div>
                 <div class="v">@(cap.MedianPct is double mp ? $"{mp:0} %" : "–")
-                    @if (cap.Trend == "up") { <small class="text-success">▲</small> } else if (cap.Trend == "down") { <small class="text-danger">▼</small> }
+                    @if (cap.Trend == "▲") { <small class="text-success" title="สูงขึ้นเทียบ 90 วันก่อน">▲</small> } else if (cap.Trend == "▼") { <small class="text-danger" title="ลดลงเทียบ 90 วันก่อน">▼</small> } else if (cap.Trend == "≈") { <small class="text-muted" title="ใกล้เคียง 90 วันก่อน">≈</small> }
                 </div>
                 <div class="l">@AnalyticsModel.N(cap.MedianKwh) kWh · @cap.MedianErrorPct % · @(cap.ChangePct is double cpct ? $"{cpct:+0.0;-0.0}% เทียบ 90 วันก่อน" : "")</div>
             </div></div></div>

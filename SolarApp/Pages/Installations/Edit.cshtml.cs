@@ -11,6 +11,8 @@ using SolarApp.Models.Enums;
 using SolarApp.Services.Interfaces;
 using SolarApp.Services.Security;
 
+using SolarApp.Services;
+
 namespace SolarApp.Pages.Installations;
 
 [Authorize(Roles = "Admin,Partner")]
@@ -48,6 +50,12 @@ public class EditModel : PageModel
     public bool HasPassword { get; set; }
     public bool HasPlantId { get; set; }
     public string CredentialStorageNote { get; set; } = "";
+    public CloudConnectionState CloudState { get; set; }
+    public bool CloudApiEnabled { get; set; } = true;
+    public TelemetrySource TelemetrySource { get; set; }
+    public DateTime? LastCloudSuccessUtc { get; set; }
+    public string? LastCloudError { get; set; }
+    public DateTime? LastCloudErrorUtc { get; set; }
     public List<SelectListItem> Partners { get; set; } = new();
     public List<SelectListItem> Customers { get; set; } = new();
 
@@ -55,8 +63,8 @@ public class EditModel : PageModel
     {
         public int Id { get; set; }
 
-        [Required] public string SiteName { get; set; } = string.Empty;
-        [Required] public string Address { get; set; } = string.Empty;
+        [Display(Name = "ชื่อไซต์งาน")][Required(ErrorMessage = "กรุณากรอก{0}")] public string SiteName { get; set; } = string.Empty;
+        [Display(Name = "ที่อยู่")][Required(ErrorMessage = "กรุณากรอก{0}")] public string Address { get; set; } = string.Empty;
         public string? City { get; set; }
         public string? Province { get; set; }
         public string? PostalCode { get; set; }
@@ -67,6 +75,10 @@ public class EditModel : PageModel
         public string? CustomerFirstName { get; set; }
         public string? CustomerLastName { get; set; }
         public string? CustomerPhone { get; set; }
+        // Displayed fields where blank must mean "clear": MVC turns an empty
+        // form value into null by default, and the save path reads null as
+        // "not posted, keep" — so clearing them was silently ignored.
+        [DisplayFormat(ConvertEmptyStringToNull = false)]
         public string? CustomerEmail { get; set; }
         public int? PartnerId { get; set; }
 
@@ -77,14 +89,28 @@ public class EditModel : PageModel
         public SystemType SystemType { get; set; } = SystemType.OnGrid;
         public string? CloudApiKey { get; set; }
         public string? CloudApiSecret { get; set; }
+        [DisplayFormat(ConvertEmptyStringToNull = false)]
         public string? CloudUsername { get; set; }
         public string? CloudPassword { get; set; }
+        [DisplayFormat(ConvertEmptyStringToNull = false)]
         public string? PlantId { get; set; }
+        [DisplayFormat(ConvertEmptyStringToNull = false)]
         public string? CloudApiBaseUrl { get; set; }
 
-        [Required][Range(0.1, 10000)] public decimal SystemCapacityKw { get; set; }
-        [Required][Range(1, 10000)] public int NumberOfPanels { get; set; }
-        [Required][Range(100, 1000)] public int PanelWattage { get; set; }
+        /// <summary>Secrets are never shown, so blank means "keep"; these ticks are the way to remove one.</summary>
+        public bool ClearCloudPassword { get; set; }
+        public bool ClearCloudApiKey { get; set; }
+        public bool ClearCloudApiSecret { get; set; }
+
+        [Display(Name = "กำลังติดตั้งรวม (kWp)")]
+        [Required(ErrorMessage = "กรุณากรอก{0}")][Range(0.1, 10000, ErrorMessage = "{0} ต้องอยู่ระหว่าง {1}–{2}")]
+        public decimal SystemCapacityKw { get; set; }
+        [Display(Name = "จำนวนแผง")]
+        [Required(ErrorMessage = "กรุณากรอก{0}")][Range(1, 10000, ErrorMessage = "{0} ต้องอยู่ระหว่าง {1}–{2}")]
+        public int NumberOfPanels { get; set; }
+        [Display(Name = "กำลังต่อแผง (W)")]
+        [Required(ErrorMessage = "กรุณากรอก{0}")][Range(100, 1000, ErrorMessage = "{0} ต้องอยู่ระหว่าง {1}–{2}")]
+        public int PanelWattage { get; set; }
         public string? PanelBrand { get; set; }
         public string? PanelModel { get; set; }
         public bool HasBattery { get; set; }
@@ -96,7 +122,9 @@ public class EditModel : PageModel
         [Required] public DateTime InstallationDate { get; set; } = SolarApp.Services.SiteTime.Today;
         public DateTime? CommissionDate { get; set; }
 
-        [Required][Range(1, 30)] public int WarrantyYears { get; set; } = 10;
+        [Display(Name = "ระยะประกันงานติดตั้ง (ปี)")]
+        [Required(ErrorMessage = "กรุณากรอก{0}")][Range(1, 30, ErrorMessage = "{0} ต้องอยู่ระหว่าง {1}–{2}")]
+        public int WarrantyYears { get; set; } = 10;
 
         /// <summary>
         /// Null only when the field was cleared — the form pre-fills it from
@@ -107,7 +135,8 @@ public class EditModel : PageModel
 
         public int InverterWarrantyYears { get; set; } = 10;
         public DateTime? InverterWarrantyExpiryDate { get; set; }
-        [Range(0, 100)] public int TotalCleaningCount { get; set; }
+        [Display(Name = "จำนวนครั้งล้างแผงตามสัญญา")][Range(0, 100, ErrorMessage = "{0} ต้องอยู่ระหว่าง {1}–{2}")]
+        public int TotalCleaningCount { get; set; }
         public int CleaningFrequencyMonths { get; set; } = 6;
         public decimal ElectricityRatePerKwh { get; set; } = 4.0m;
         public decimal? FeedInTariffRate { get; set; }
@@ -147,10 +176,28 @@ public class EditModel : PageModel
             return Forbid();
 
         MapToInput(installation);
+        await LoadCloudStatusAsync(id);
         await LoadCustomerDisplayNameAsync(installation.CustomerId);
         await LoadPartnersAsync();
         await LoadCustomersAsync();
         return Page();
+    }
+
+    private async Task LoadCloudStatusAsync(int id)
+    {
+        LastCloudSuccessUtc = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => l.InstallationId == id && l.IsSuccess)
+            .MaxAsync(l => (DateTime?)l.RequestTime);
+        var lastFail = await _context.InverterApiLogs.AsNoTracking()
+            .Where(l => l.InstallationId == id && !l.IsSuccess)
+            .OrderByDescending(l => l.RequestTime)
+            .Select(l => new { l.RequestTime, l.ErrorMessage })
+            .FirstOrDefaultAsync();
+        if (lastFail != null && (LastCloudSuccessUtc == null || lastFail.RequestTime > LastCloudSuccessUtc))
+        {
+            LastCloudErrorUtc = lastFail.RequestTime;
+            LastCloudError = lastFail.ErrorMessage;
+        }
     }
 
     /// <summary>
@@ -275,6 +322,10 @@ public class EditModel : PageModel
         // Ensure the route id matches the form id
         if (installation.Id != Input.Id)
             return BadRequest();
+
+        // For any re-render below (validation failure): badges and connection state.
+        LoadViewState(installation);
+        await LoadCloudStatusAsync(id);
 
         // Defense layer 5 — duplicate form-field guard.  If the cshtml ever
         // accidentally emits two <input name="Input.CustomerId"> elements
@@ -411,8 +462,12 @@ public class EditModel : PageModel
         // correctly detects "user didn't type anything".
         if (!string.IsNullOrWhiteSpace(Input.CloudApiKey))
             installation.CloudApiKey = _credProtector.Protect(Input.CloudApiKey.Trim());
+        else if (Input.ClearCloudApiKey)
+            installation.CloudApiKey = null;
         if (!string.IsNullOrWhiteSpace(Input.CloudApiSecret))
             installation.CloudApiSecret = _credProtector.Protect(Input.CloudApiSecret.Trim());
+        else if (Input.ClearCloudApiSecret)
+            installation.CloudApiSecret = null;
 
         // Username is DISPLAYED in the form (MapToInput fills it), so
         // "what you see is what you save" — clearing the box must actually
@@ -430,6 +485,11 @@ public class EditModel : PageModel
         var passwordChanged = !string.IsNullOrWhiteSpace(Input.CloudPassword);
         if (passwordChanged)
             installation.CloudPassword = _credProtector.Protect(Input.CloudPassword!.Trim());
+        else if (Input.ClearCloudPassword && installation.CloudPassword != null)
+        {
+            installation.CloudPassword = null;
+            passwordChanged = true;
+        }
 
         // If Huawei credentials changed, purge the static XSRF token cache so the
         // next sync re-logins instead of using a stale 15-min cached token.
@@ -578,7 +638,58 @@ public class EditModel : PageModel
         }
 
         await _installationService.UpdateAsync(installation);
+        TempData["FlashSuccess"] = $"บันทึกการแก้ไขไซต์ \"{installation.SiteName}\" แล้ว";
         return RedirectToPage("Index");
+    }
+
+    // ── Cloud connection: pause / resume / disconnect ─────────────────
+    // Separate actions instead of "clear the fields and save": the secrets
+    // are never rendered, so a form save cannot remove them, and an operator
+    // needs a way to stop a site being polled without losing its settings.
+
+    public Task<IActionResult> OnPostCloudPauseAsync(int id) =>
+        CloudActionAsync(id, "pause", inst =>
+        {
+            InstallationCloudConnection.Pause(inst);
+            return "หยุดดึงข้อมูลจากคลาวด์ชั่วคราวแล้ว — การตั้งค่ายังเก็บไว้ กด \"เปิดใช้งานอีกครั้ง\" เมื่อต้องการ";
+        });
+
+    public Task<IActionResult> OnPostCloudResumeAsync(int id) =>
+        CloudActionAsync(id, "resume", inst =>
+        {
+            InstallationCloudConnection.Resume(inst);
+            return InstallationCloudConnection.State(inst) == CloudConnectionState.Connected
+                ? "เปิดการเชื่อมต่อคลาวด์แล้ว — ระบบจะดึงข้อมูลในรอบถัดไป (ภายใน 5 นาที)"
+                : "เปิดการเชื่อมต่อแล้ว แต่ยังตั้งค่าไม่ครบ — กรอก Station ID และข้อมูลเข้าสู่ระบบแล้วกดบันทึก";
+        });
+
+    public Task<IActionResult> OnPostCloudDisconnectAsync(int id) =>
+        CloudActionAsync(id, "disconnect", inst =>
+        {
+            if (inst.InverterBrand == InverterBrand.Huawei)
+                SolarApp.Services.InverterApi.Adapters.HuaweiAdapter.InvalidateTokenForCredentials(
+                    _credProtector.Unprotect(inst.CloudUsername), _credProtector.Unprotect(inst.CloudPassword));
+            InstallationCloudConnection.Disconnect(inst);
+            return "ตัดการเชื่อมต่อคลาวด์และลบ Station ID / ข้อมูลเข้าสู่ระบบของไซต์นี้แล้ว — ข้อมูลการผลิตเดิมยังอยู่ครบ";
+        });
+
+    private async Task<IActionResult> CloudActionAsync(int id, string action, Func<Installation, string> apply)
+    {
+        var installation = await _context.Installations.FirstOrDefaultAsync(i => i.Id == id);
+        if (installation == null) return NotFound();
+        if (!await CanAccessInstallationAsync(installation)) return Forbid();
+
+        var message = apply(installation);
+        var closed = installation.CloudApiEnabled
+            ? 0
+            : await InstallationCloudConnection.CloseConnectivityAlertsAsync(_context, id, DateTime.UtcNow);
+        installation.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Installation {Id}: cloud connection {Action} by {User}; {Closed} connectivity alert(s) closed",
+            id, action, User.Identity?.Name, closed);
+        TempData["FlashSuccess"] = closed > 0 ? $"{message} · ปิดการแจ้งเตือนค้าง {closed} รายการ" : message;
+        return RedirectToPage("Edit", null, new { id }, "cloud");
     }
 
     /// <summary>
@@ -713,21 +824,32 @@ public class EditModel : PageModel
         }
     }
 
-    private void MapToInput(Installation installation)
+    /// <summary>Badges and connection state shown around the credential fields — needed on every render, not only GET.</summary>
+    private void LoadViewState(Installation installation)
     {
         HasApiKey    = !string.IsNullOrEmpty(installation.CloudApiKey);
         HasApiSecret = !string.IsNullOrEmpty(installation.CloudApiSecret);
         HasUsername  = !string.IsNullOrEmpty(installation.CloudUsername);
         HasPassword  = !string.IsNullOrEmpty(installation.CloudPassword);
         HasPlantId   = !string.IsNullOrEmpty(installation.PlantId);
+        CloudState = InstallationCloudConnection.State(installation);
+        CloudApiEnabled = installation.CloudApiEnabled;
+        TelemetrySource = installation.TelemetrySource;
 
-        // Diagnostic note for admin to understand storage state
+        // Storage note: which secrets exist and whether they are encrypted at rest.
+        static string Enc(string v) => v.StartsWith("enc:") ? "เข้ารหัสแล้ว" : "ยังไม่เข้ารหัส";
         var parts = new List<string>();
-        if (HasApiKey) parts.Add($"ApiKey: {(installation.CloudApiKey!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
-        if (HasApiSecret) parts.Add($"ApiSecret: {(installation.CloudApiSecret!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
-        if (HasUsername) parts.Add($"Username: {(installation.CloudUsername!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
-        if (HasPassword) parts.Add($"Password: {(installation.CloudPassword!.StartsWith("enc:") ? "encrypted" : "plaintext")}");
-        CredentialStorageNote = parts.Any() ? string.Join(" | ", parts) : "No credentials stored";
+        if (HasApiKey) parts.Add($"API Key: {Enc(installation.CloudApiKey!)}");
+        if (HasApiSecret) parts.Add($"API Secret: {Enc(installation.CloudApiSecret!)}");
+        if (HasUsername) parts.Add($"Username: {Enc(installation.CloudUsername!)}");
+        if (HasPassword) parts.Add($"Password: {Enc(installation.CloudPassword!)}");
+        CredentialStorageNote = parts.Any() ? string.Join(" · ", parts) : "ยังไม่มีข้อมูลเข้าสู่ระบบที่บันทึกไว้";
+
+    }
+
+    private void MapToInput(Installation installation)
+    {
+        LoadViewState(installation);
 
         Input = new InstallationInput
         {

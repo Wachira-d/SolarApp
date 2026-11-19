@@ -13,7 +13,13 @@
             </div>
             <div class="card-body">
                 <form method="post">
-                    <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+                    @if (!ViewData.ModelState.IsValid)
+                    {
+                        <div class="alert alert-danger" id="saveErrors" tabindex="-1">
+                            <strong><i class="bi bi-exclamation-triangle-fill"></i> ยังบันทึกไม่ได้ — กรุณาแก้ไขรายการต่อไปนี้</strong>
+                            <div asp-validation-summary="All" class="mb-0 mt-1"></div>
+                        </div>
+                    }
                     <input type="hidden" asp-for="Input.Id" />
                     @* No hidden Input.CustomerId here — the <select> at line 56
                        already submits this field.  Having both produces TWO
@@ -204,176 +210,235 @@
                     </div>
 
                     <!-- Cloud API -->
-                    <h6 class="text-muted mb-3 mt-4">Cloud API Connection</h6>
                     @{
                         var capTop = SolarApp.Services.InverterApi.Common.BrandCapabilities.Get(Model.Input.InverterBrand);
+                        var guide = SolarApp.Services.InverterApi.Common.BrandFieldGuide.Get(Model.Input.InverterBrand);
+                        var (cloudLabel, cloudColor) = SolarApp.Services.InstallationCloudConnection.Display(Model.CloudState);
+                        var hasAnyCloudSetting = Model.HasPlantId || Model.HasUsername || Model.HasPassword || Model.HasApiKey
+                                                 || Model.HasApiSecret || !string.IsNullOrEmpty(Model.Input.CloudApiBaseUrl);
+                        var th = System.Globalization.CultureInfo.GetCultureInfo("th-TH");
                     }
-                    <!-- ConnectionMethod must live right next to the credentials.
-                         When it sat further down the page (next to SyncIntervalMinutes),
-                         the test endpoint received stale auto-detect mode and bounced
-                         the operator with confusing "API Key required" messages even
-                         though they had selected "Username + Password". -->
-                    <div class="row mb-3">
-                        <div class="col-md-12">
-                            <label for="Input_ConnectionMethod" class="form-label">
-                                วิธีเชื่อมต่อ (Connection method)
-                                <span class="text-muted small">— เลือกก่อน, ฟิลด์ด้านล่างจะเปลี่ยนตาม</span>
-                            </label>
+                    <div id="cloud" class="mt-4 mb-3 p-3 border rounded-3">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                            <div>
+                                <h6 class="mb-1"><i class="bi bi-cloud"></i> การเชื่อมต่อคลาวด์ผู้ผลิต (Cloud API)</h6>
+                                <span class="badge text-bg-@cloudColor">@cloudLabel</span>
+                                <div class="small text-muted mt-1">
+                                    @if (Model.LastCloudSuccessUtc is DateTime okAt)
+                                    {
+                                        <span><i class="bi bi-check-circle text-success"></i> ดึงข้อมูลสำเร็จล่าสุด @SolarApp.Services.SiteTime.ToSiteTime(okAt).ToString("d MMM yy HH:mm", th)</span>
+                                    }
+                                    else
+                                    {
+                                        <span>ยังไม่เคยดึงข้อมูลสำเร็จ</span>
+                                    }
+                                    @if (Model.LastCloudErrorUtc is DateTime errAt)
+                                    {
+                                        <span class="d-block text-danger"><i class="bi bi-exclamation-triangle"></i>
+                                            ผิดพลาดล่าสุด @SolarApp.Services.SiteTime.ToSiteTime(errAt).ToString("d MMM yy HH:mm", th):
+                                            @((Model.LastCloudError ?? "").Length > 160 ? Model.LastCloudError![..160] + "…" : Model.LastCloudError)</span>
+                                    }
+                                </div>
+                            </div>
+                            <div class="d-flex flex-wrap gap-2">
+                                @if (Model.CloudApiEnabled && hasAnyCloudSetting)
+                                {
+                                    <button type="submit" class="btn btn-outline-secondary btn-sm" formnovalidate
+                                            asp-page-handler="CloudPause" asp-route-id="@Model.Input.Id"
+                                            title="หยุดดึงข้อมูลและหยุดแจ้งเตือนออฟไลน์ โดยเก็บการตั้งค่าไว้">
+                                        <i class="bi bi-pause-circle"></i> หยุดชั่วคราว
+                                    </button>
+                                }
+                                @if (!Model.CloudApiEnabled)
+                                {
+                                    <button type="submit" class="btn btn-success btn-sm" formnovalidate
+                                            asp-page-handler="CloudResume" asp-route-id="@Model.Input.Id">
+                                        <i class="bi bi-play-circle"></i> เปิดใช้งานอีกครั้ง
+                                    </button>
+                                }
+                                @if (hasAnyCloudSetting)
+                                {
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" formnovalidate
+                                            asp-page-handler="CloudDisconnect" asp-route-id="@Model.Input.Id"
+                                            onclick="return confirm('ตัดการเชื่อมต่อคลาวด์ของไซต์นี้?\n\nระบบจะหยุดดึงข้อมูล หยุดแจ้งเตือนออฟไลน์ และลบ Station ID, ชื่อผู้ใช้, รหัสผ่าน และ API Key ที่บันทึกไว้\nข้อมูลการผลิตย้อนหลังยังอยู่ครบ');">
+                                        <i class="bi bi-plug"></i> ตัดการเชื่อมต่อ
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (!Model.CloudApiEnabled)
+                        {
+                            <div class="alert alert-secondary small py-2 mb-3">
+                                <i class="bi bi-info-circle"></i>
+                                ระบบ<strong>ไม่ดึงข้อมูล</strong>จากคลาวด์และ<strong>ไม่แจ้งเตือนออฟไลน์</strong>สำหรับไซต์นี้
+                                @if (hasAnyCloudSetting) { <span>· การตั้งค่าด้านล่างยังเก็บไว้ กด "เปิดใช้งานอีกครั้ง" เพื่อกลับมาดึงข้อมูล</span> }
+                                else { <span>· ถ้าจะเชื่อมต่อใหม่ ให้กรอกข้อมูลด้านล่าง กดบันทึก แล้วกด "เปิดใช้งานอีกครั้ง"</span> }
+                            </div>
+                        }
+                        @if (Model.TelemetrySource == TelemetrySource.LocalGateway)
+                        {
+                            <div class="alert alert-info small py-2 mb-3">
+                                <i class="bi bi-router"></i> ไซต์นี้รับข้อมูลจาก Home Assistant / Local API จึงไม่ดึงข้อมูลจากคลาวด์
+                                <a asp-page="Gateway" asp-route-id="@Model.Input.Id">ดูการเชื่อมต่อ Home Assistant</a>
+                            </div>
+                        }
+
+                        @* ConnectionMethod sits right next to the credentials: when it was
+                           further down, the test endpoint read a stale mode. *@
+                        <div class="mb-3">
+                            <label for="Input_ConnectionMethod" class="form-label">วิธีเชื่อมต่อ</label>
                             <select id="Input_ConnectionMethod" name="Input.ConnectionMethod" class="form-select">
                                 @foreach (var m in capTop.SupportedMethods)
                                 {
-                                    var methodLabel = m == SolarApp.Models.Enums.ConnectionMethod.OfficialApi  ? "Official API (API Key + Secret)"
-                                                    : m == SolarApp.Models.Enums.ConnectionMethod.UserPassword ? "Username + Password (web-login)"
-                                                    : m == SolarApp.Models.Enums.ConnectionMethod.Hybrid       ? "Hybrid (ทั้งสองอย่าง)"
-                                                                                                                : m.ToString();
-                                    var isSelected = Model.Input.ConnectionMethod == m;
-                                    <option value="@((int)m)" selected="@isSelected">@methodLabel</option>
+                                    var methodLabel = m == ConnectionMethod.OfficialApi  ? "API ทางการ (API Key + Secret)"
+                                                    : m == ConnectionMethod.UserPassword ? "ชื่อผู้ใช้ + รหัสผ่าน (บัญชีเว็บพอร์ทัล)"
+                                                    : m == ConnectionMethod.Hybrid       ? "ใช้ทั้งสองแบบ"
+                                                                                         : m.ToString();
+                                    <option value="@((int)m)" selected="@(Model.Input.ConnectionMethod == m)">@methodLabel</option>
                                 }
                             </select>
                             <div class="form-text">
-                                Brand <strong>@Model.Input.InverterBrand</strong> รองรับ:
-                                <code>@string.Join(", ", capTop.SupportedMethods)</code>.
-                                @capTop.Notes
-                                @{ var credGuide = SolarApp.Services.InverterApi.Common.BrandFieldGuide.Get(Model.Input.InverterBrand); }
-                                @if (!string.IsNullOrEmpty(credGuide.CredentialHint))
+                                @* The Thai field guide says the same as the brand's English note; show one. *@
+                                @if (!string.IsNullOrEmpty(guide.CredentialHint))
                                 {
-                                    <span class="d-block mt-1 text-primary">
-                                        <i class="bi bi-key"></i> @credGuide.CredentialHint
-                                    </span>
+                                    <span class="text-primary"><i class="bi bi-key"></i> @guide.CredentialHint</span>
+                                }
+                                else
+                                {
+                                    @capTop.Notes
                                 }
                             </div>
                         </div>
-                    </div>
-                    <div class="row mb-3">
-                        @{ var guide = SolarApp.Services.InverterApi.Common.BrandFieldGuide.Get(Model.Input.InverterBrand); }
-                        <div class="col-md-6">
-                            @* PlantId is NOT a secret — show actual value for verification *@
-                            <label asp-for="Input.PlantId" class="form-label d-flex align-items-center gap-2">
-                                <span>@guide.PlantIdLabel</span>
-                                @if (Model.HasPlantId) { <span class="badge bg-success">บันทึกแล้ว</span> }
-                                @if (!string.IsNullOrEmpty(guide.PlantIdWhat))
-                                {
-                                    <button type="button" class="btn btn-link p-0 border-0 lh-1"
-                                            data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true"
-                                            data-bs-title="@guide.PlantIdLabel — @Model.Input.InverterBrand"
-                                            data-bs-content="<strong>ใส่อะไร:</strong> @guide.PlantIdWhat<br><br><strong>หาจากไหน:</strong> @guide.PlantIdWhere<br><br><strong>ตัวอย่าง:</strong> <code>@guide.PlantIdExample</code>"
-                                            title="ดูคำอธิบาย">
-                                        <i class="bi bi-question-circle-fill text-primary"></i>
-                                    </button>
-                                }
-                            </label>
-                            <div class="input-group">
-                                <input asp-for="Input.PlantId" class="form-control" autocomplete="off"
-                                       placeholder="@(string.IsNullOrEmpty(guide.PlantIdExample) ? "Enter Plant/Station ID" : $"เช่น {guide.PlantIdExample}")" />
-                                <button type="button" id="discoverPlantsBtn" class="btn btn-outline-primary"
-                                        title="ดึงรายการไซต์/อุปกรณ์จาก Cloud มาให้เลือก">
-                                    <i class="bi bi-cloud-download"></i> ดึงรายการ
-                                </button>
-                            </div>
-                            <div class="form-text">
-                                @if (!string.IsNullOrEmpty(guide.PlantIdWhat))
-                                {
-                                    <span class="d-block">@guide.PlantIdWhat</span>
-                                }
-                                <span class="text-muted">ลบให้ว่างแล้ว Save = ล้างค่า</span>
-                            </div>
-                            <div id="discoverResult" class="mt-2"></div>
-                        </div>
-                        <div class="col-md-6 cred-api-row">
-                            <label asp-for="Input.CloudApiKey" class="form-label">
-                                API Key
-                                @if (Model.HasApiKey) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
-                            </label>
-                            <div class="input-group">
-                                <input asp-for="Input.CloudApiKey" class="form-control" type="password"
-                                       autocomplete="new-password" data-cred-guard data-server-value=""
-                                       placeholder="@(Model.HasApiKey ? "•••••••••• (saved — leave blank to keep)" : "Enter API Key")" />
-                                <button type="button" class="btn btn-outline-secondary credential-reveal"
-                                        data-field="apiKey" data-target="Input.CloudApiKey"
-                                        title="ดู / ซ่อน">
-                                    <i class="bi bi-eye"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6 cred-userpass-row">
-                            <label asp-for="Input.CloudUsername" class="form-label">
-                                Cloud Username
-                                @if (Model.HasUsername) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
-                            </label>
-                            @* Username is NOT a secret — show the actual value for verification *@
-                            <div class="input-group">
-                                <input asp-for="Input.CloudUsername" class="form-control"
-                                       autocomplete="off" data-cred-guard data-server-value="@Model.Input.CloudUsername"
-                                       placeholder="Enter username (email/phone)" />
-                                <button type="button" class="btn btn-outline-secondary credential-reveal"
-                                        data-field="username" data-target="Input.CloudUsername"
-                                        title="โหลดค่าที่บันทึกไว้">
-                                    <i class="bi bi-download"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="col-md-6 cred-userpass-row">
-                            <label asp-for="Input.CloudPassword" class="form-label">
-                                Cloud Password
-                                @if (Model.HasPassword) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
-                            </label>
-                            <div class="input-group">
-                                <input asp-for="Input.CloudPassword" class="form-control" type="password"
-                                       autocomplete="new-password" data-cred-guard data-server-value=""
-                                       placeholder="@(Model.HasPassword ? "•••••••••• (saved — leave blank to keep)" : "Enter password")" />
-                                <button type="button" class="btn btn-outline-secondary credential-reveal"
-                                        data-field="password" data-target="Input.CloudPassword"
-                                        title="ดู / ซ่อน">
-                                    <i class="bi bi-eye"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
 
-                    <!-- Advanced: API endpoint override -->
-                    <div class="row mb-3">
-                        <div class="col-12">
-                            <label asp-for="Input.CloudApiBaseUrl" class="form-label">
-                                <i class="bi bi-gear"></i> API Endpoint Override
-                                <span class="badge bg-secondary ms-1">ขั้นสูง</span>
-                            </label>
-                            <input asp-for="Input.CloudApiBaseUrl" class="form-control"
-                                   placeholder="เว้นว่างเพื่อให้ระบบเลือกอัตโนมัติ — กรอกเมื่อ login ผิด region" />
-                            <div class="form-text">
-                                ใช้เฉพาะเมื่อ account อยู่บน server ที่ระบบเลือกไม่ถูก. รับ 2 รูปแบบ:<br>
-                                <strong>Base URL</strong> เช่น <code>https://global.hoymiles.com</code> —
-                                ระบบจะลองหา login path เอง (V3, V0, web-tier)<br>
-                                <strong>Full URL</strong> เช่น
-                                <code>https://global.hoymiles.com/platform/api/gateway/iam/auth_login</code> —
-                                ใช้เลย ไม่ต้องลอง. หา URL นี้ได้จาก Browser DevTools (F12 → Network) ตอน login บนเว็บ
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                @* PlantId is not a secret — the stored value is shown so it can be checked *@
+                                <label asp-for="Input.PlantId" class="form-label d-flex align-items-center gap-2">
+                                    <span>@guide.PlantIdLabel</span>
+                                    @if (Model.HasPlantId) { <span class="badge bg-success">บันทึกแล้ว</span> }
+                                    @if (!string.IsNullOrEmpty(guide.PlantIdWhat))
+                                    {
+                                        <button type="button" class="btn btn-link p-0 border-0 lh-1"
+                                                data-bs-toggle="popover" data-bs-trigger="focus" data-bs-html="true"
+                                                data-bs-title="@guide.PlantIdLabel — @Model.Input.InverterBrand"
+                                                data-bs-content="<strong>ใส่อะไร:</strong> @guide.PlantIdWhat<br><br><strong>หาจากไหน:</strong> @guide.PlantIdWhere<br><br><strong>ตัวอย่าง:</strong> <code>@guide.PlantIdExample</code>"
+                                                title="ดูคำอธิบาย">
+                                            <i class="bi bi-question-circle-fill text-primary"></i>
+                                        </button>
+                                    }
+                                </label>
+                                <div class="input-group">
+                                    <input asp-for="Input.PlantId" class="form-control" autocomplete="off"
+                                           placeholder="@(string.IsNullOrEmpty(guide.PlantIdExample) ? "Station / Plant ID" : $"เช่น {guide.PlantIdExample}")" />
+                                    <button type="button" id="discoverPlantsBtn" class="btn btn-outline-primary"
+                                            title="ดึงรายการไซต์/อุปกรณ์จากคลาวด์มาให้เลือก">
+                                        <i class="bi bi-cloud-download"></i> ดึงรายการ
+                                    </button>
+                                </div>
+                                <div class="form-text">
+                                    @if (!string.IsNullOrEmpty(guide.PlantIdWhat)) { <span class="d-block">@guide.PlantIdWhat</span> }
+                                    ลบให้ว่างแล้วกดบันทึก = ล้างค่า
+                                </div>
+                                <div id="discoverResult" class="mt-2"></div>
                             </div>
                         </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6 cred-api-row">
-                            <label asp-for="Input.CloudApiSecret" class="form-label">
-                                API Secret
-                                @if (Model.HasApiSecret) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
-                            </label>
-                            <div class="input-group">
-                                <input asp-for="Input.CloudApiSecret" class="form-control" type="password"
-                                       autocomplete="new-password" data-cred-guard data-server-value=""
-                                       placeholder="@(Model.HasApiSecret ? "•••••••••• (saved — leave blank to keep)" : "Enter secret")" />
-                                <button type="button" class="btn btn-outline-secondary credential-reveal"
-                                        data-field="apiSecret" data-target="Input.CloudApiSecret"
-                                        title="ดู / ซ่อน">
-                                    <i class="bi bi-eye"></i>
-                                </button>
+
+                        <div class="row mb-3 cred-userpass-row">
+                            <div class="col-md-6 mb-3 mb-md-0">
+                                <label asp-for="Input.CloudUsername" class="form-label">
+                                    ชื่อผู้ใช้ (อีเมล / เบอร์โทร)
+                                    @if (Model.HasUsername) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
+                                </label>
+                                @* Not a secret — the stored value is shown so it can be checked *@
+                                <div class="input-group">
+                                    <input asp-for="Input.CloudUsername" class="form-control"
+                                           autocomplete="off" data-cred-guard data-server-value="@Model.Input.CloudUsername"
+                                           placeholder="อีเมลหรือเบอร์ที่ใช้เข้าเว็บพอร์ทัลของผู้ผลิต" />
+                                    <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                            data-field="username" data-target="Input.CloudUsername" title="โหลดค่าที่บันทึกไว้">
+                                        <i class="bi bi-download"></i>
+                                    </button>
+                                </div>
+                                <div class="form-text">ลบให้ว่างแล้วกดบันทึก = ล้างค่า</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label asp-for="Input.CloudPassword" class="form-label">
+                                    รหัสผ่าน
+                                    @if (Model.HasPassword) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
+                                </label>
+                                <div class="input-group">
+                                    <input asp-for="Input.CloudPassword" class="form-control" type="password"
+                                           autocomplete="new-password" data-cred-guard data-server-value=""
+                                           placeholder="@(Model.HasPassword ? "บันทึกไว้แล้ว — เว้นว่างถ้าไม่เปลี่ยน" : "รหัสผ่านเว็บพอร์ทัล")" />
+                                    <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                            data-field="password" data-target="Input.CloudPassword" title="ดู / ซ่อน">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                @if (Model.HasPassword)
+                                {
+                                    <div class="form-check mt-1">
+                                        <input asp-for="Input.ClearCloudPassword" class="form-check-input" />
+                                        <label asp-for="Input.ClearCloudPassword" class="form-check-label small">ลบรหัสผ่านที่บันทึกไว้เมื่อกดบันทึก</label>
+                                    </div>
+                                }
                             </div>
                         </div>
-                        <div class="col-md-6 d-flex align-items-end gap-2 flex-wrap">
+
+                        <div class="row mb-3 cred-api-row">
+                            <div class="col-md-6 mb-3 mb-md-0">
+                                <label asp-for="Input.CloudApiKey" class="form-label">
+                                    API Key
+                                    @if (Model.HasApiKey) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
+                                </label>
+                                <div class="input-group">
+                                    <input asp-for="Input.CloudApiKey" class="form-control" type="password"
+                                           autocomplete="new-password" data-cred-guard data-server-value=""
+                                           placeholder="@(Model.HasApiKey ? "บันทึกไว้แล้ว — เว้นว่างถ้าไม่เปลี่ยน" : "API Key")" />
+                                    <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                            data-field="apiKey" data-target="Input.CloudApiKey" title="ดู / ซ่อน">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                @if (Model.HasApiKey)
+                                {
+                                    <div class="form-check mt-1">
+                                        <input asp-for="Input.ClearCloudApiKey" class="form-check-input" />
+                                        <label asp-for="Input.ClearCloudApiKey" class="form-check-label small">ลบ API Key ที่บันทึกไว้เมื่อกดบันทึก</label>
+                                    </div>
+                                }
+                            </div>
+                            <div class="col-md-6">
+                                <label asp-for="Input.CloudApiSecret" class="form-label">
+                                    API Secret
+                                    @if (Model.HasApiSecret) { <span class="badge bg-success ms-1">บันทึกแล้ว</span> }
+                                </label>
+                                <div class="input-group">
+                                    <input asp-for="Input.CloudApiSecret" class="form-control" type="password"
+                                           autocomplete="new-password" data-cred-guard data-server-value=""
+                                           placeholder="@(Model.HasApiSecret ? "บันทึกไว้แล้ว — เว้นว่างถ้าไม่เปลี่ยน" : "API Secret")" />
+                                    <button type="button" class="btn btn-outline-secondary credential-reveal"
+                                            data-field="apiSecret" data-target="Input.CloudApiSecret" title="ดู / ซ่อน">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                </div>
+                                @if (Model.HasApiSecret)
+                                {
+                                    <div class="form-check mt-1">
+                                        <input asp-for="Input.ClearCloudApiSecret" class="form-check-input" />
+                                        <label asp-for="Input.ClearCloudApiSecret" class="form-check-label small">ลบ API Secret ที่บันทึกไว้เมื่อกดบันทึก</label>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                             <button type="button" id="testConnectionBtn" class="btn btn-outline-info">
-                                <i class="bi bi-plug"></i> Test Connection
+                                <i class="bi bi-plug"></i> ทดสอบการเชื่อมต่อ
                             </button>
-                            <div class="input-group" style="max-width: 340px">
-                                <select id="backfillDays" class="form-select form-select-sm" style="flex: 0 0 110px">
+                            <div class="input-group" style="max-width: 360px">
+                                <select id="backfillDays" class="form-select form-select-sm" style="flex: 0 0 100px" aria-label="ช่วงข้อมูลย้อนหลัง">
                                     <option value="30">30 วัน</option>
                                     <option value="90">90 วัน</option>
                                     <option value="180">180 วัน</option>
@@ -382,25 +447,35 @@
                                     <option value="1095">3 ปี</option>
                                 </select>
                                 <button type="button" id="backfillBtn" class="btn btn-outline-success">
-                                    <i class="bi bi-cloud-download"></i> ดึงข้อมูลย้อนหลังจาก API
+                                    <i class="bi bi-cloud-download"></i> ดึงข้อมูลย้อนหลัง
                                 </button>
                             </div>
                         </div>
-                    </div>
-                    <div id="testResult"></div>
-                    <div id="backfillResult" class="mt-1 small"></div>
+                        <div class="form-text mb-2">ทดสอบใช้ค่าที่กรอกอยู่บนหน้าจอ ยังไม่ต้องกดบันทึก</div>
+                        <div id="testResult"></div>
+                        <div id="backfillResult" class="mt-1 small"></div>
 
-                    @if (!string.IsNullOrEmpty(Model.CredentialStorageNote))
-                    {
-                        <div class="alert alert-light small py-1 px-2 mt-2 mb-3">
-                            <i class="bi bi-database"></i>
-                            <strong>Storage:</strong> @Model.CredentialStorageNote
-                            <br /><small class="text-muted">
-                                Credential fields are blank on purpose — leave blank to keep existing saved values.
-                                Only type a new value if you want to CHANGE it.
-                            </small>
+                        <details class="mt-3" @(string.IsNullOrEmpty(Model.Input.CloudApiBaseUrl) ? "" : "open")>
+                            <summary class="small"><i class="bi bi-gear"></i> ขั้นสูง: กำหนดเซิร์ฟเวอร์ API เอง
+                                @if (!string.IsNullOrEmpty(Model.Input.CloudApiBaseUrl)) { <span class="badge bg-warning text-dark ms-1">ตั้งค่าไว้</span> }
+                            </summary>
+                            <div class="mt-2">
+                                <input asp-for="Input.CloudApiBaseUrl" class="form-control"
+                                       placeholder="เว้นว่าง = ระบบเลือกเซิร์ฟเวอร์ให้เอง" />
+                                <div class="form-text">
+                                    ใช้เฉพาะเมื่อบัญชีอยู่บนเซิร์ฟเวอร์คนละภูมิภาคกับที่ระบบเลือก เช่น รหัสถูกแต่เข้าสู่ระบบไม่ผ่าน
+                                    ใส่ได้ทั้ง <strong>Base URL</strong> เช่น <code>https://global.hoymiles.com</code>
+                                    หรือ <strong>URL เข้าสู่ระบบเต็ม</strong> ที่ดูได้จาก DevTools (F12 → Network) ตอนเข้าสู่ระบบบนเว็บ
+                                    · ลบให้ว่างแล้วกดบันทึก = ล้างค่า
+                                </div>
+                            </div>
+                        </details>
+
+                        <div class="small text-muted mt-3">
+                            <i class="bi bi-shield-lock"></i> @Model.CredentialStorageNote
+                            · รหัสผ่านและ API Key จะไม่แสดงบนหน้านี้ เว้นว่างไว้ = ใช้ค่าเดิม
                         </div>
-                    }
+                    </div>
 
                     <!-- Warranty & Maintenance -->
                     <h6 class="text-muted mb-3 mt-4">ประกันและการบำรุงรักษา</h6>
@@ -908,6 +983,16 @@
         bindWarrantyEnd({ years: 'invWarrantyYears', end: 'invWarrantyEnd', state: 'invWarrantyEndState',
                           hint: 'invWarrantyEndHint', reset: 'invWarrantyEndReset' });
 
+        // ─── A failed save: bring the error list into view ───────────────────
+        // The form is long; the reason a save was refused used to sit next to
+        // a field far below (or nowhere), so it looked as if Save did nothing.
+        (function () {
+            const box = document.getElementById('saveErrors');
+            if (!box) return;
+            box.scrollIntoView({ block: 'start' });
+            box.focus({ preventScroll: true });
+        })();
+
         // ─── Browser-autofill guard on the credential fields ─────────────────
         // Chrome's password manager fills EVERY type=password box on a page with
         // the login it has saved for the site, so the API Key / API Secret boxes
@@ -924,9 +1009,12 @@
             const guarded = document.querySelectorAll('[data-cred-guard]');
             if (!guarded.length) return;
 
-            // keydown/paste, not 'input' — Chrome's autofill fires 'input' too.
+            // keydown/paste/beforeinput, not 'input' — Chrome's autofill fires
+            // 'input' too, but not 'beforeinput'. beforeinput is what catches
+            // a clear done with the mouse (right-click → Delete) or a phone
+            // keyboard; without it the guard put the old username back on submit.
             guarded.forEach(el => {
-                ['keydown', 'paste', 'cut'].forEach(evt =>
+                ['keydown', 'paste', 'cut', 'beforeinput', 'drop'].forEach(evt =>
                     el.addEventListener(evt, () => { el.dataset.credEdited = '1'; }));
             });
 
@@ -998,7 +1086,7 @@
             formData.append('installationId', '@Model.Input.Id');
 
             btn.disabled = true;
-            result.innerHTML = '<span class="text-muted"><i class="spinner-border spinner-border-sm"></i> Testing...</span>';
+            result.innerHTML = '<span class="text-muted"><i class="spinner-border spinner-border-sm"></i> กำลังทดสอบ…</span>';
 
             try {
                 const r = await fetch('/api/test-inverter-connection', { method: 'POST', body: formData });
@@ -1262,11 +1350,12 @@
             const method = parseInt(sel.value, 10);
             const apiNeeded      = method === 0 || method === 2;
             const userPassNeeded = method === 1 || method === 2;
+            // Hidden, not disabled: hidden inputs still post, so saved values are kept.
             document.querySelectorAll('.cred-api-row').forEach(el => {
-                el.classList.toggle('opacity-50', !apiNeeded);
+                el.classList.toggle('d-none', !apiNeeded);
             });
             document.querySelectorAll('.cred-userpass-row').forEach(el => {
-                el.classList.toggle('opacity-50', !userPassNeeded);
+                el.classList.toggle('d-none', !userPassNeeded);
             });
         }
         document.getElementById('Input_ConnectionMethod')?.addEventListener('change', applyCredentialVisibility);
