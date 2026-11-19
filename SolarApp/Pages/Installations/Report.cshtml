@@ -1,0 +1,9 @@
+@page "{id:int}"
+@model SolarApp.Pages.Installations.ReportModel
+@{
+    // A sheet of paper, not a staff page: no sidebar or navbar to print.
+    Layout = null;
+    ViewData["BackUrl"] = Url.Page("/Installations/Analytics", new { id = Model.Report.Site.Id });
+    ViewData["BackText"] = "กลับไปหน้าวิเคราะห์ระบบ";
+}
+<partial name="_MonthlyReport" model="Model.Report" />

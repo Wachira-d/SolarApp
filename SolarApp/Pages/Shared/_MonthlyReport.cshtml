@@ -1,0 +1,403 @@
+@model SolarApp.Services.Analytics.MonthlySiteReport
+@using SolarApp.Services.Analytics
+@using Staff = SolarApp.Pages.Installations.AnalyticsModel
+@using Owner = SolarApp.Pages.My.AnalyticsModel
+@*
+    The printable monthly report (DESIGN.md §11 phase 2 "PDF report"): a whole
+    HTML document, rendered with Layout = null by /Installations/Report and
+    /My/Report so neither the staff nor the portal chrome prints. The browser's
+    "Save as PDF" makes the file; the chart is inline SVG so it prints without
+    JavaScript. Sections follow SiteCapabilities like the analytics pages.
+*@
+@{
+    var r = Model;
+    var site = r.Site;
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    var th = System.Globalization.CultureInfo.GetCultureInfo("th-TH");
+    var backUrl = ViewData["BackUrl"] as string;
+    var backText = ViewData["BackText"] as string ?? "กลับ";
+    string S(double v) => v.ToString("0.##", inv);
+    string Kwh(double? v) => v is double d && double.IsFinite(d) ? d.ToString(Math.Abs(d) >= 100 ? "N0" : "N1", inv) : "–";
+    string Thb(double? v) => v is double d && double.IsFinite(d) ? d.ToString("N0", inv) : "–";
+    string Pct0(double? v) => v is double d && double.IsFinite(d) ? d.ToString("0", inv) + " %" : "–";
+    string Delta(double? v) => v is double d && double.IsFinite(d) ? d.ToString("+0;-0;0", inv) + " %" : "–";
+    string DeltaPts(double? v) => v is double d && double.IsFinite(d) ? d.ToString("+0;-0;0", inv) + " จุด" : "–";
+    string Dir(double? v) => v is > 0.5 ? "up" : v is < -0.5 ? "down" : "";
+    string Day(int d) => new DateTime(r.Year, r.Month, d).ToString("d MMM", th);
+    string ShortMonth(int y, int m) => new DateTime(y, m, 1).ToString("MMM yy", th);
+    var address = string.Join(" ", new[] { site.Address, site.City, site.Province, site.PostalCode }.Where(s => !string.IsNullOrWhiteSpace(s)));
+    var res = r.Result;
+    var prev = new DateTime(r.Year, r.Month, 1).AddMonths(-1);
+    var ly = new DateTime(r.Year, r.Month, 1).AddYears(-1);
+}
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>รายงาน @site.SiteName @r.MonthLabel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" />
+    <style>
+        :root {
+            color-scheme: light;
+            --rp-ink: #1f2933; --rp-muted: #616e7c; --rp-line: #d9dee4; --rp-soft: #f3f5f7;
+            --rp-accent: #1f8f52; --rp-accent-soft: #e3f4ea; --rp-bar: #2e9e5b; --rp-best: #f08c2e;
+            --rp-down: #c0392b; --rp-up: #1f8f52; --rp-desk: #e4e7eb;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; }
+        body {
+            background: var(--rp-desk); color: var(--rp-ink);
+            font-family: "Sarabun", "Noto Sans Thai", "Noto Sans Thai UI", "Leelawadee UI", "Tahoma", sans-serif;
+            font-size: 10.5pt; line-height: 1.45;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .rp-toolbar {
+            position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+            justify-content: center; padding: 10px 16px; background: #fff; border-bottom: 1px solid var(--rp-line);
+        }
+        .rp-toolbar a { color: var(--rp-muted); text-decoration: none; margin-right: auto; }
+        .rp-toolbar form { display: flex; gap: 6px; align-items: center; margin: 0; }
+        .rp-toolbar select, .rp-toolbar button {
+            font: inherit; font-size: 10.5pt; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--rp-line); background: #fff; color: var(--rp-ink);
+        }
+        .rp-toolbar .rp-print-btn { background: var(--rp-accent); border-color: var(--rp-accent); color: #fff; font-weight: 600; cursor: pointer; }
+        .rp-sheet {
+            width: 210mm; min-height: 297mm; margin: 16px auto; padding: 13mm 14mm; background: #fff;
+            box-shadow: 0 2px 12px rgba(0,0,0,.12);
+        }
+        @@media (max-width: 230mm) {
+            .rp-sheet { width: auto; min-height: 0; margin: 0; padding: 16px; box-shadow: none; }
+            .rp-toolbar a { margin-right: 0; width: 100%; }
+        }
+        .rp-head { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid var(--rp-accent); padding-bottom: 8px; margin-bottom: 10px; }
+        .rp-head h1 { font-size: 16pt; margin: 0; line-height: 1.2; }
+        .rp-kicker { font-size: 9pt; color: var(--rp-accent); font-weight: 700; letter-spacing: .02em; }
+        .rp-month { text-align: right; white-space: nowrap; }
+        .rp-month .m { font-size: 15pt; font-weight: 700; line-height: 1.2; }
+        .rp-meta { color: var(--rp-muted); font-size: 9pt; }
+        .rp-flag { display: inline-block; font-size: 8.5pt; background: #fff4e0; color: #8a5a00; border-radius: 4px; padding: 0 6px; }
+        .rp-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+        .rp-kpi { border: 1px solid var(--rp-line); border-radius: 8px; padding: 8px 10px; break-inside: avoid; }
+        .rp-kpi .k { font-size: 8.5pt; color: var(--rp-muted); }
+        .rp-kpi .v { font-size: 15pt; font-weight: 700; line-height: 1.2; }
+        .rp-kpi .v small { font-size: 9pt; font-weight: 400; color: var(--rp-muted); }
+        .rp-kpi .s { font-size: 8.5pt; color: var(--rp-muted); }
+        .rp-kpi.hero { background: var(--rp-accent-soft); border-color: transparent; }
+        .rp-card { border: 1px solid var(--rp-line); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; break-inside: avoid; page-break-inside: avoid; }
+        .rp-card h2 { font-size: 11pt; margin: 0 0 4px; }
+        .rp-foot { font-size: 8.5pt; color: var(--rp-muted); margin-top: 4px; }
+        .rp-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        .rp-row2 > .rp-card { margin-bottom: 0; }
+        .rp-bar-track { height: 8px; background: var(--rp-soft); border-radius: 4px; overflow: hidden; margin: 4px 0; }
+        .rp-bar-track span { display: block; height: 100%; background: var(--rp-accent); }
+        table.rp-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+        .rp-table th, .rp-table td { padding: 3px 6px; border-bottom: 1px solid var(--rp-line); text-align: right; white-space: nowrap; }
+        .rp-table th:first-child, .rp-table td:first-child { text-align: left; }
+        .rp-table thead th { font-weight: 600; color: var(--rp-muted); font-size: 8.5pt; }
+        .rp-table .up { color: var(--rp-up); } .rp-table .down { color: var(--rp-down); }
+        .rp-scroll { overflow-x: auto; }
+        .rp-stats { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+        .rp-stats div b { font-size: 12pt; }
+        .rp-note { color: var(--rp-muted); }
+        svg.rp-chart { width: 100%; height: auto; display: block; }
+        .rp-chart text { font-family: inherit; font-size: 9px; fill: var(--rp-muted); }
+        .rp-chart .rp-grid { stroke: var(--rp-line); stroke-width: 1; }
+        .rp-chart .rp-bar { fill: var(--rp-bar); }
+        .rp-chart .rp-bar.best { fill: var(--rp-best); }
+        .rp-chart .rp-nodata { fill: #b8c0c8; }
+        .rp-legend { font-size: 8.5pt; color: var(--rp-muted); }
+        .rp-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin: 0 3px 0 10px; }
+        .rp-legend i:first-child { margin-left: 0; }
+        .rp-end { border-top: 1px solid var(--rp-line); padding-top: 6px; font-size: 8.5pt; color: var(--rp-muted); }
+        @@media (max-width: 160mm) {
+            .rp-kpis { grid-template-columns: repeat(2, 1fr); }
+            .rp-row2 { grid-template-columns: 1fr; }
+            .rp-head { flex-direction: column; }
+            .rp-month { text-align: left; }
+        }
+        @@page { size: A4 portrait; margin: 12mm 12mm 14mm; }
+        @@media print {
+            body { background: #fff; font-size: 10pt; }
+            .no-print { display: none !important; }
+            .rp-sheet { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+            .rp-kpis { grid-template-columns: repeat(4, 1fr); }
+            .rp-row2 { grid-template-columns: 1fr 1fr; }
+            .rp-head { flex-direction: row; }
+            .rp-month { text-align: right; }
+            .rp-scroll { overflow: visible; }
+            a { color: inherit; text-decoration: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="rp-toolbar no-print" id="rp-toolbar">
+    @if (backUrl != null) { <a href="@backUrl">‹ @backText</a> }
+    <form method="get" id="rp-month-form">
+        <label for="rp-month">เดือน</label>
+        <select id="rp-month" name="month" onchange="this.form.submit()">
+            @foreach (var m in r.Months)
+            {
+                <option value="@m.Key" selected="@(m.Year == r.Year && m.Month == r.Month)">@MonthlyReportBuilder.ThaiMonth(m.Year, m.Month)@(m.Partial ? " (ยังไม่ครบเดือน)" : "")</option>
+            }
+        </select>
+        <noscript><button type="submit">ดู</button></noscript>
+    </form>
+    <button type="button" class="rp-print-btn" id="rp-print" onclick="window.print()">พิมพ์ / บันทึกเป็น PDF</button>
+</div>
+
+<main class="rp-sheet" id="report-sheet">
+    <header class="rp-head" id="rp-header">
+        <div>
+            <div class="rp-kicker">รายงานระบบโซลาร์ประจำเดือน</div>
+            <h1>@site.SiteName</h1>
+            <div class="rp-meta">
+                @if (!string.IsNullOrWhiteSpace(r.CustomerName)) { <span>@r.CustomerName · </span> }
+                รหัส @site.SiteCode
+            </div>
+            @if (address.Length > 0) { <div class="rp-meta">@address</div> }
+            <div class="rp-meta">
+                ขนาดระบบ @site.SystemCapacityKw.ToString("0.##", inv) kWp
+                @if (site.NumberOfPanels > 0 && site.PanelWattage > 0) { <span> · แผง @site.NumberOfPanels × @site.PanelWattage W</span> }
+                @if (r.Caps.HasBattery && site.BatteryNominalKwhTotal is decimal bkw) { <span> · แบตเตอรี่ @bkw.ToString("0.##", inv) kWh</span> }
+            </div>
+        </div>
+        <div class="rp-month">
+            <div class="rp-meta">ประจำเดือน</div>
+            <div class="m" id="rp-month-label">@r.MonthLabel</div>
+            @if (r.Partial) { <span class="rp-flag">ยังไม่ครบเดือน · ถึง @r.GeneratedAt.ToString("d MMM", th)</span> }
+        </div>
+    </header>
+
+    @if (!r.HasMonthData)
+    {
+        <div class="rp-card rp-note" id="rp-nodata">
+            ไม่มีข้อมูลการผลิตรายวันของเดือนนี้@(r.HasEnergyData ? " — เลือกเดือนอื่นจากรายการด้านบน" : " — ตัวเลขจะแสดงเมื่อระบบเก็บข้อมูลได้แล้ว")
+        </div>
+    }
+    else
+    {
+        <section class="rp-kpis" id="rp-kpis">
+            <div class="rp-kpi hero" id="rp-production">
+                <div class="k">ผลิตไฟฟ้าได้</div>
+                <div class="v">@Kwh(r.PvKwh) <small>kWh</small></div>
+                <div class="s">เฉลี่ย @Kwh(r.AverageDailyKwh) kWh/วัน</div>
+            </div>
+            <div class="rp-kpi hero" id="rp-savings">
+                <div class="k">ประหยัดค่าไฟ</div>
+                <div class="v"><small>฿</small>@Thb(res!.SavingsThb)</div>
+                <div class="s">@(res.ExportIncomeThb > 0 ? $"รวมขายไฟคืน ฿{Thb(res.ExportIncomeThb)}" : "ค่าไฟที่ไม่ต้องจ่าย")</div>
+            </div>
+            <div class="rp-kpi" id="rp-self">
+                <div class="k">พึ่งพาตัวเอง</div>
+                <div class="v">@(res.SelfSufficiencyPct is double ss ? ss.ToString("0", inv) : "–") <small>%</small></div>
+                <div class="s">ไฟที่ใช้มาจากโซลาร์</div>
+            </div>
+            <div class="rp-kpi" id="rp-co2">
+                <div class="k">ลด CO₂</div>
+                <div class="v">@Kwh(res.Co2Kg) <small>กก.</small></div>
+                <div class="s">เทียบเท่าต้นไม้ @res.Trees.ToString("N0", inv) ต้น</div>
+            </div>
+        </section>
+
+        <div class="rp-row2">
+            <section class="rp-card" id="rp-cumulative">
+                <h2>ความคุ้มค่าสะสม</h2>
+                <div class="rp-stats">
+                    <div>ประหยัดสะสม@(r.Partial ? "ถึงวันนี้" : "ถึงสิ้นเดือน")<br /><b>฿@Thb(r.CumulativeSavingsThb)</b></div>
+                    @if (r.PaybackPct is double pp)
+                    {
+                        <div id="rp-payback">คืนทุนแล้ว<br /><b>@pp.ToString("0.#", inv) %</b></div>
+                    }
+                </div>
+                @if (r.PaybackPct is double pb)
+                {
+                    <div class="rp-bar-track" role="progressbar" aria-valuenow="@Math.Clamp(pb, 0, 100).ToString("0.#", inv)" aria-valuemin="0" aria-valuemax="100"><span style="width:@Math.Clamp(pb, 0, 100).ToString("0.#", inv)%"></span></div>
+                    <div class="rp-foot">จากราคาระบบ ฿@site.ContractValue!.Value.ToString("N0", inv)</div>
+                }
+                else
+                {
+                    <div class="rp-foot">นับจากข้อมูลการผลิตทุกเดือนที่มีในระบบ</div>
+                }
+            </section>
+            <section class="rp-card" id="rp-env">
+                <h2>ช่วยโลก</h2>
+                <div>ลดการปล่อยก๊าซคาร์บอนไดออกไซด์ <b>@Kwh(res.Co2Kg) กก.</b> เทียบเท่าการปลูกต้นไม้ <b>@res.Trees.ToString("N0", inv) ต้น</b> (ดูดซับ 1 ปี)</div>
+                <div class="rp-foot" id="rp-co2-basis">@r.Factors.BasisText</div>
+            </section>
+        </div>
+
+        <section class="rp-card" id="rp-compare">
+            <h2>เทียบกับเดือนก่อนและปีก่อน</h2>
+            @if (r.PrevEnergy == null && r.LastYearEnergy == null)
+            {
+                <div class="rp-note">ยังไม่มีข้อมูลเดือนก่อนหน้าหรือเดือนเดียวกันของปีก่อนให้เทียบ</div>
+            }
+            else
+            {
+                <div class="rp-scroll">
+                    <table class="rp-table">
+                        <thead>
+                            <tr>
+                                <th></th><th>@ShortMonth(r.Year, r.Month)</th>
+                                <th>@ShortMonth(prev.Year, prev.Month)</th><th>เทียบเดือนก่อน</th>
+                                <th>@ShortMonth(ly.Year, ly.Month)</th><th>เทียบปีก่อน</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>ผลิตได้ (kWh)</td><td><b>@Kwh(r.PvKwh)</b></td>
+                                <td>@Kwh(r.PrevEnergy?.PvKwh)</td><td class="@Dir(r.PvVsPrevPct)">@Delta(r.PvVsPrevPct)</td>
+                                <td>@Kwh(r.LastYearEnergy?.PvKwh)</td><td class="@Dir(r.PvVsLastYearPct)">@Delta(r.PvVsLastYearPct)</td>
+                            </tr>
+                            <tr>
+                                <td>ประหยัด (฿)</td><td><b>@Thb(res.SavingsThb)</b></td>
+                                <td>@Thb(r.PrevEconomics?.Result.SavingsThb)</td><td class="@Dir(r.SavingsVsPrevPct)">@Delta(r.SavingsVsPrevPct)</td>
+                                <td>@Thb(r.LastYearEconomics?.Result.SavingsThb)</td><td class="@Dir(r.SavingsVsLastYearPct)">@Delta(r.SavingsVsLastYearPct)</td>
+                            </tr>
+                            <tr>
+                                <td>พึ่งพาตัวเอง</td><td><b>@Pct0(res.SelfSufficiencyPct)</b></td>
+                                <td>@Pct0(r.PrevEconomics?.Result.SelfSufficiencyPct)</td><td>@DeltaPts(res.SelfSufficiencyPct - r.PrevEconomics?.Result.SelfSufficiencyPct)</td>
+                                <td>@Pct0(r.LastYearEconomics?.Result.SelfSufficiencyPct)</td><td>@DeltaPts(res.SelfSufficiencyPct - r.LastYearEconomics?.Result.SelfSufficiencyPct)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                @if (r.Partial) { <div class="rp-foot">เดือนนี้ยังไม่ครบ ตัวเลขจึงต่ำกว่าเดือนเต็ม</div> }
+            }
+        </section>
+
+        var ch = r.Chart;
+        <section class="rp-card" id="rp-daily">
+            <h2>การผลิตรายวัน (kWh)</h2>
+            <svg class="rp-chart" id="rp-daily-chart" viewBox="0 0 @S(DailyChart.Width) @S(DailyChart.Height)" role="img"
+                 aria-label="กราฟแท่งการผลิตไฟฟ้ารายวัน @r.MonthLabel" preserveAspectRatio="xMidYMid meet">
+                @foreach (var t in ch.Ticks)
+                {
+                    <g class="rp-tick"><line class="rp-grid" x1="@S(DailyChart.Left)" x2="@S(DailyChart.Width - DailyChart.Right)" y1="@S(t.Y)" y2="@S(t.Y)" /><text x="@S(DailyChart.Left - 6)" y="@S(t.Y + 3)" text-anchor="end">@t.Kwh.ToString("0.#", inv)</text></g>
+                }
+                @foreach (var b in ch.Bars)
+                {
+                    <rect class="rp-bar@(b.Best ? " best" : "")" data-day="@b.Day" x="@S(b.X)" y="@S(b.Y)" width="@S(b.Width)" height="@S(b.Height)"><title>@Day(b.Day): @(b.Kwh is double k ? Kwh(k) + " kWh" : "ไม่มีข้อมูล")</title></rect>
+                    @if (b.Kwh == null && !b.Future)
+                    {
+                        <circle class="rp-nodata" cx="@S(b.X + b.Width / 2)" cy="@S(ch.Baseline - 2)" r="1.6" />
+                    }
+                    @if (b.Day == 1 || b.Day % 5 == 0 || b.Day == ch.Bars.Count)
+                    {
+                        <g class="rp-xlabel"><text x="@S(b.X + b.Width / 2)" y="@S(DailyChart.Height - 6)" text-anchor="middle">@b.Day</text></g>
+                    }
+                }
+            </svg>
+            <div class="rp-legend">
+                <i style="background:var(--rp-bar)"></i>ผลิตได้ต่อวัน
+                <i style="background:var(--rp-best)"></i>วันที่ผลิตได้มากที่สุด
+                @if (r.DaysWithData < r.DaysCounted) { <i style="background:#b8c0c8;border-radius:50%"></i><span>ไม่มีข้อมูล</span> }
+            </div>
+            <div class="rp-foot">
+                @if (r.BestDay is (int bestD, double bestK)) { <span>ผลิตสูงสุด @Day(bestD) · @Kwh(bestK) kWh · </span> }
+                มีข้อมูล @r.DaysWithData จาก @r.DaysCounted วัน
+            </div>
+        </section>
+    }
+
+    @if (r.ShowOutages && r.OutagesCovered)
+    {
+        <section class="rp-card" id="rp-outages">
+            <h2>ไฟดับ</h2>
+            @if (r.Outages.Count == 0)
+            {
+                <div>ไม่พบไฟดับในเดือนนี้@(r.OutagesFrom is DateTime of1 ? $" (มีข้อมูลตั้งแต่ {of1.ToString("d MMM", th)})" : "")</div>
+            }
+            else
+            {
+                <div class="rp-stats">
+                    <div>จำนวน <b>@r.Outages.Count</b> ครั้ง</div>
+                    <div>รวม <b>@Staff.Hours(r.Outages.Sum(o => o.DurationMinutes))</b></div>
+                    <div>นานที่สุด <b>@Staff.Hours(r.Outages.Max(o => o.DurationMinutes))</b></div>
+                </div>
+                <table class="rp-table" style="margin-top:4px">
+                    <thead><tr><th>เริ่ม</th><th>นาน</th>@if (r.ShowBattery) { <th>แบตเตอรี่</th> }</tr></thead>
+                    <tbody>
+                    @foreach (var o in r.Outages.Take(10))
+                    {
+                        <tr>
+                            <td>@Staff.Local(o.StartUtc, "ddd d MMM HH:mm")@(o.Ongoing ? " (ยังดับอยู่)" : "")</td>
+                            <td>@Staff.Hours(o.DurationMinutes)</td>
+                            @if (r.ShowBattery)
+                            {
+                                <td>@(o.HoursCovered is double hc ? (o.BatteryDepleted ? "แบตหมดหลัง " : "สำรองไฟ ") + Staff.Hours(hc * 60) : "–")</td>
+                            }
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                @if (r.Outages.Count > 10) { <div class="rp-foot">แสดง 10 ครั้งแรกจาก @r.Outages.Count ครั้ง</div> }
+                @if (r.OutagesFrom is DateTime of2) { <div class="rp-foot">มีข้อมูลไฟดับตั้งแต่ @of2.ToString("d MMM yy", th)</div> }
+            }
+        </section>
+    }
+
+    @if (r.ShowBattery)
+    {
+        var bd = r.BatteryDays;
+        var b = r.Battery;
+        <section class="rp-card" id="rp-battery">
+            <h2>แบตเตอรี่</h2>
+            @if (bd.Count > 0)
+            {
+                var socMin = bd.Where(d => d.SocMin.HasValue).Select(d => d.SocMin!.Value).DefaultIfEmpty(double.NaN).Min();
+                var socMax = bd.Where(d => d.SocMax.HasValue).Select(d => d.SocMax!.Value).DefaultIfEmpty(double.NaN).Max();
+                <div class="rp-stats">
+                    <div>ชาร์จเข้า <b>@Kwh(bd.Sum(d => d.ChargedKwh))</b> kWh</div>
+                    <div>จ่ายไฟ <b>@Kwh(bd.Sum(d => d.DischargedKwh))</b> kWh</div>
+                    <div>เฉลี่ยจ่าย <b>@Kwh(bd.Average(d => d.DischargedKwh))</b> kWh/วัน</div>
+                    @if (double.IsFinite(socMin) && double.IsFinite(socMax)) { <div>ระดับแบต <b>@socMin.ToString("0", inv)–@socMax.ToString("0", inv) %</b></div> }
+                    @if (bd.Count(d => d.HadOutage) is > 0 and var od) { <div>ช่วยสำรองไฟวันที่ไฟดับ <b>@od</b> วัน</div> }
+                </div>
+                <div class="rp-foot">จากข้อมูลแบตเตอรี่ @bd.Count วันในเดือนนี้</div>
+            }
+            @if (b != null)
+            {
+                var grade = b.Overall.Grade;
+                <div style="margin-top:6px">
+                    สุขภาพแบตเตอรี่: <b>@(grade is "A" or "B" or "C" ? $"{grade} · {b.Overall.Label}" : "ยังประเมินไม่ได้")</b>
+                    — @Owner.GradeSentence(grade)
+                </div>
+                <div class="rp-stats">
+                    @if (b.Capacity.MedianPct is double mp) { <div>ความจุที่วัดได้ <b>@mp.ToString("0", inv) %</b> ของตอนใหม่</div> }
+                    @if (b.Warranty is { } w)
+                    {
+                        <div>ใช้ประกันไปแล้ว <b>@w.ThroughputUsedPct.ToString("0.#", inv) %</b></div>
+                        @if (w.ExpectedRemainingYears is double ery) { <div>คาดว่าใช้ได้อีก <b>@ery.ToString("0.#", inv)</b> ปี</div> }
+                    }
+                </div>
+                @if (r.BatteryAt is DateTime ba) { <div class="rp-foot">ประเมิน ณ @Staff.Local(ba, "d MMM yy")</div> }
+            }
+        </section>
+    }
+
+    <section class="rp-card" id="rp-service">
+        <h2>การดูแลระบบ</h2>
+        <div class="rp-stats">
+            @if (site.IncludesMonitoring)
+            {
+                <div id="rp-healthy">ระบบออนไลน์ปกติ <b>@r.HealthyDays</b> จาก @r.DaysCounted วัน</div>
+            }
+            <div>การแจ้งเตือน <b>@r.AlertCount</b> รายการ</div>
+            <div>ล้างแผง <b>@r.CleaningsDone</b> ครั้ง</div>
+            <div>งานบริการที่เสร็จ <b>@r.WorkOrdersCompleted</b> งาน</div>
+        </div>
+    </section>
+
+    <footer class="rp-end" id="rp-footer">
+        ค่าประหยัดคิดจากไฟโซลาร์ที่ใช้เอง × ค่าไฟ ฿@r.Options.ImportRateThb.ToString("0.##", inv)/kWh@(r.Options.FeedInRateThb > 0 ? $" + ไฟที่ขายคืน × ฿{r.Options.FeedInRateThb.ToString("0.##", inv)}/kWh" : "")
+        · ข้อมูลการผลิตรายวันของระบบ · @r.Factors.BasisText
+        <br />จัดทำเมื่อ @r.GeneratedAt.ToString("d MMMM yyyy HH:mm", th) น.
+    </footer>
+</main>
+</body>
+</html>

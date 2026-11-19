@@ -57,6 +57,7 @@
                 <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-arrow-repeat"></i> คำนวณใหม่</button>
             </form>
         }
+        <a asp-page="Report" asp-route-id="@inst.Id" target="_blank" id="an-report-link" class="btn btn-outline-success btn-sm"><i class="bi bi-printer"></i> รายงานรายเดือน (PDF)</a>
         <a asp-page="Detail" asp-route-id="@inst.Id" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> กลับ</a>
     </div>
 </div>
