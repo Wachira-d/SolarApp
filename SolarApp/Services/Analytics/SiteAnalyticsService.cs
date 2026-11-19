@@ -270,6 +270,16 @@ public class SiteAnalyticsService
 
     // ── reading ──────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Series for these channels straight from the store (5-minute aggregates
+    /// for windows over two days, raw samples after the last closed bucket, or
+    /// raw only before the first rollup), keyed by channel key. For views that
+    /// read live telemetry rather than stored results, such as per-cell voltages.
+    /// </summary>
+    public Task<Dictionary<string, TimeSeries>> ReadSeriesAsync(IReadOnlyCollection<TelemetryChannel> channels,
+        DateTime fromUtc, DateTime toUtc, CancellationToken ct = default) =>
+        _loader.ReadSeriesAsync(channels, fromUtc, toUtc, ct: ct);
+
     public Task<SiteAnalyticsDaily?> LatestRowAsync(int installationId, string kind, CancellationToken ct = default) =>
         _db.SiteAnalyticsDaily.AsNoTracking()
             .Where(a => a.InstallationId == installationId && a.Kind == kind)

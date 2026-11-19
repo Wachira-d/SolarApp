@@ -77,6 +77,15 @@ public class AnalyticsModel : PageModel
     public List<DeviceEvent> Events { get; private set; } = new();
     public List<TariffPlan> TariffPlans { get; private set; } = new();
 
+    // Per-cell battery view (battery tab; only for sites with battery.pack{n}.cell{m}.voltage_v)
+    public const int CellHistoryDays = 7;
+    public List<CellPackView> CellPacks { get; private set; } = new();
+    /// <summary>The pack whose history is shown (?pack=n), defaulting to the first.</summary>
+    public int? CellPack { get; private set; }
+    public CellHistoryReport? CellHistory { get; private set; }
+    public bool HasCellVoltages => CellPacks.Count > 0;
+    private List<TelemetryChannel> _channels = new();
+
     [BindProperty] public TariffInput Tariff { get; set; } = new();
     [BindProperty] public WarrantyInput Warranty { get; set; } = new();
 
@@ -109,10 +118,12 @@ public class AnalyticsModel : PageModel
 
     // ── GET ────────────────────────────────────────────────────────────
 
-    public async Task<IActionResult> OnGetAsync(int id, string? tab = null, string? range = null, int? editTariff = null)
+    public async Task<IActionResult> OnGetAsync(int id, string? tab = null, string? range = null, int? editTariff = null,
+        int? pack = null)
     {
         if (!await _access.CanAccessAsync(id, User)) return Forbid();
         if (!await LoadAsync(id, tab, range)) return NotFound();
+        if (ActiveTab == "battery") await LoadCellsAsync(pack, DateTime.UtcNow, HttpContext?.RequestAborted ?? default);
 
         if (editTariff is int tid && TariffPlans.FirstOrDefault(p => p.Id == tid) is { } plan)
             Tariff = ToInput(plan);
@@ -125,6 +136,7 @@ public class AnalyticsModel : PageModel
         if (inst == null) return false;
         Installation = inst;
         var channels = await _db.TelemetryChannels.AsNoTracking().Where(c => c.InstallationId == id).ToListAsync();
+        _channels = channels;
         Caps = SiteCapabilities.From(inst, channels);
         Range = Ranges.Contains(range) ? range! : "365";
 
@@ -234,6 +246,51 @@ public class AnalyticsModel : PageModel
             Flow30 = new EnergyFlow(Math.Max(0, pv - toGrid - toBattery), toBattery, toGrid, imp, dis);
         }
     }
+
+    /// <summary>
+    /// Latest cell voltages of every pack from the channel catalog, and for the
+    /// selected pack ΔV per 5-minute bucket over the last 7 days plus the cells
+    /// most often lowest / highest. Nothing is loaded without per-cell channels.
+    /// </summary>
+    private async Task LoadCellsAsync(int? pack, DateTime nowUtc, CancellationToken ct)
+    {
+        var cells = _channels.Where(c => c.Kind == TelemetryDeviceKind.BatteryCell && c.Quantity == TelemetryQuantity.Voltage
+                                         && c.DeviceIndex > 0 && c.SubIndex > 0).ToList();
+        if (cells.Count == 0) return;
+
+        // Current SOC / power for grading ΔV: the pack's own, else the system's; only when fresh.
+        double? Latest(TelemetryDeviceKind kind, int index, TelemetryQuantity q) =>
+            _channels.Where(c => c.Kind == kind && c.DeviceIndex == index && c.Quantity == q && !c.IsCumulative
+                                 && !BatteryCellAnalyzer.IsStale(c.LastTs, nowUtc))
+                .OrderByDescending(c => c.LastTs).Select(c => (double?)c.LastValue).FirstOrDefault();
+
+        foreach (var g in cells.GroupBy(c => c.DeviceIndex).OrderBy(g => g.Key))
+        {
+            var soc = Latest(TelemetryDeviceKind.BatteryPack, g.Key, TelemetryQuantity.Soc)
+                      ?? Latest(TelemetryDeviceKind.Battery, 0, TelemetryQuantity.Soc);
+            var power = Latest(TelemetryDeviceKind.BatteryPack, g.Key, TelemetryQuantity.Power);
+            var view = BatteryCellAnalyzer.Pack(g.Key, g.Select(c => new CellReading(c.SubIndex, c.LastValue, c.LastTs)),
+                nowUtc, soc, power);
+            if (view != null) CellPacks.Add(view);
+        }
+        if (CellPacks.Count == 0) return;
+
+        CellPack = pack is int p && CellPacks.Any(x => x.Pack == p) ? p : CellPacks[0].Pack;
+        var packChannels = cells.Where(c => c.DeviceIndex == CellPack).ToList();
+        var series = await _analytics.ReadSeriesAsync(packChannels, nowUtc.AddDays(-CellHistoryDays), nowUtc, ct);
+        var byCell = packChannels
+            .GroupBy(c => c.SubIndex)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<Point>)g
+                .SelectMany(c => series.TryGetValue(c.Key, out var s) ? s.Points : Array.Empty<Point>()).ToList());
+        CellHistory = BatteryCellAnalyzer.History(CellPack.Value, byCell);
+    }
+
+    public static string CellClass(KpiGrade g) => g switch
+    {
+        KpiGrade.Watch => "watch",
+        KpiGrade.Poor => "poor",
+        _ => "",
+    };
 
     public static EconomicsOptions EconomicsOptionsFor(Installation inst) => new()
     {

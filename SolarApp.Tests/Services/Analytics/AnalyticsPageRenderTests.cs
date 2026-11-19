@@ -142,6 +142,41 @@ public class AnalyticsPageRenderTests
         }
     }
 
+    [Fact]
+    public async Task Battery_tab_renders_the_per_cell_section_only_for_sites_with_cell_channels()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var f = SiteAnalyticsServiceTests.Build(dbName: dbName);
+        var (client, host) = await StartAsync(dbName, f.Store);
+        using (host)
+        {
+            // Pack min/max only: the KPI table covers it, no cell section.
+            var plain = await client.GetAsync($"/Installations/Analytics/{f.Site.Id}?tab=battery");
+            var plainHtml = await plain.Content.ReadAsStringAsync();
+            plain.StatusCode.Should().Be(HttpStatusCode.OK, Snippet(plainHtml));
+            plainHtml.Should().NotContain("id=\"batteryCells\"").And.NotContain("chCellDelta");
+
+            BatteryCellPageTests.SeedCells(f, DateTime.UtcNow);
+            foreach (var pack in new[] { "", "&pack=2" })
+            {
+                var res = await client.GetAsync($"/Installations/Analytics/{f.Site.Id}?tab=battery&range=30{pack}");
+                var html = await res.Content.ReadAsStringAsync();
+                res.StatusCode.Should().Be(HttpStatusCode.OK, Snippet(html));
+                html.Should().Contain("id=\"batteryCells\"").And.Contain("id=\"cellPack1\"").And.Contain("id=\"cellPack2\"")
+                    .And.Contain("id=\"cellHistory\"").And.Contain("id=\"chCellDelta\"").And.Contain("id=\"cellWeakList\"")
+                    .And.Contain("เซลล์ที่ต่ำสุดบ่อยที่สุด");
+                html.Should().NotContain("NaN");
+                if (pack == "")
+                {
+                    html.Should().Contain("pack=2#cellHistory").And.Contain("เซลล์อ่อน");
+                    html.Should().Contain("ΔV 55 mV");
+                }
+                if (Environment.GetEnvironmentVariable("ANALYTICS_RENDER_DIR") is { Length: > 0 } dir)
+                    await File.WriteAllTextAsync(Path.Combine(dir, $"cells{pack.Replace("&", "_").Replace("=", "")}.html"), html);
+            }
+        }
+    }
+
     private static string Snippet(string html)
     {
         var i = html.IndexOf("Exception", StringComparison.Ordinal);
