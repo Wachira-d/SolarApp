@@ -138,6 +138,8 @@ Telemetry__Store = TimescaleDB
 ## 6. เริ่มใช้งาน
 
 1. ทำก่อนเชื่อมต่อเกตเวย์ Home Assistant ตัวแรก ข้อมูล telemetry ที่อยู่ใน SQL Server แล้วจะไม่ถูกย้ายให้อัตโนมัติ
+   ถ้ามีข้อมูลเดิมอยู่แล้ว ให้เปิดหน้า **ผู้ดูแลระบบ → ตรวจสอบระบบ → ที่เก็บข้อมูล Telemetry** (`/Admin/TelemetryStorage`)
+   แล้วกด "คัดลอกข้อมูล telemetry เดิมจาก SQL Server" งานทำเบื้องหลัง กดซ้ำได้ไม่เกิดข้อมูลซ้ำ และไม่ลบข้อมูลใน SQL Server
 2. Recycle App Pool ใน IIS
 3. เปิด log ของแอป ต้องเห็นบรรทัด
 
