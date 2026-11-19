@@ -47,17 +47,38 @@ public interface ITelemetryStore
 /// rowstore keyed (ChannelId, Resolution, BucketStart) because rollups
 /// rewrite buckets when late data arrives.
 /// </summary>
-public sealed class SqlServerTelemetryStore : ITelemetryStore
+public sealed class SqlServerTelemetryStore : ITelemetryStore, ITelemetryStoreStats
 {
     private readonly string _connectionString;
 
     public SqlServerTelemetryStore(IConfiguration configuration)
+        : this(ConnectionStringFrom(configuration) ?? throw new InvalidOperationException("No connection string for telemetry"))
     {
-        // A separate database can hold telemetry so SQL Express's 10 GB cap
-        // applies to it alone (DESIGN.md §5.2); default is the main one.
-        _connectionString = configuration.GetConnectionString("TelemetryConnection")
-                            ?? configuration.GetConnectionString("DefaultConnection")
-                            ?? throw new InvalidOperationException("No connection string for telemetry");
+    }
+
+    public SqlServerTelemetryStore(string connectionString) => _connectionString = connectionString;
+
+    /// <summary>
+    /// A separate database can hold telemetry so SQL Express's 10 GB cap
+    /// applies to it alone (DESIGN.md §5.2); default is the main one.
+    /// </summary>
+    public static string? ConnectionStringFrom(IConfiguration configuration) =>
+        configuration.GetConnectionString("TelemetryConnection") is { Length: > 0 } t ? t
+        : configuration.GetConnectionString("DefaultConnection") is { Length: > 0 } d ? d
+        : null;
+
+    /// <summary>
+    /// The SQL Server tables even when another store is active — the source of
+    /// the one-off copy and of the admin page's "data left behind" check.
+    /// Null when no connection string is configured.
+    /// </summary>
+    public static SqlServerTelemetryStore? FromConfiguration(IConfiguration configuration, int? connectTimeoutSeconds = null)
+    {
+        var cs = ConnectionStringFrom(configuration);
+        if (cs == null) return null;
+        if (connectTimeoutSeconds is { } seconds)
+            cs = new SqlConnectionStringBuilder(cs) { ConnectTimeout = seconds }.ConnectionString;
+        return new SqlServerTelemetryStore(cs);
     }
 
     public async Task AppendRawAsync(IReadOnlyList<RawSample> samples, CancellationToken ct = default)
@@ -214,10 +235,119 @@ public sealed class SqlServerTelemetryStore : ITelemetryStore
 
     /// <summary>Integer ids inlined — they are ints from our own catalog, never user text.</summary>
     private static string IdList(IEnumerable<int> ids) => string.Join(",", ids.Distinct());
+
+    // ── stats (read-only) ────────────────────────────────────────────
+
+    public async Task<long> CountRawAsync(DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(
+            "SELECT COUNT_BIG(*) FROM [TelemetryRaw] WHERE [Ts] >= @a AND [Ts] < @b", conn) { CommandTimeout = 120 };
+        cmd.Parameters.Add("@a", SqlDbType.DateTime2).Value = fromUtc;
+        cmd.Parameters.Add("@b", SqlDbType.DateTime2).Value = toUtc;
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    public async Task<Dictionary<int, (DateTime First, DateTime Last)>> ChannelExtentsAsync(CancellationToken ct = default)
+    {
+        var map = new Dictionary<int, (DateTime, DateTime)>();
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(
+            "SELECT [ChannelId], MIN([F]), MAX([L]) FROM (" +
+            "SELECT [ChannelId], MIN([Ts]) AS [F], MAX([Ts]) AS [L] FROM [TelemetryRaw] GROUP BY [ChannelId] UNION ALL " +
+            "SELECT [ChannelId], MIN([BucketStart]), MAX([BucketStart]) FROM [TelemetryAggregates] GROUP BY [ChannelId]" +
+            ") x GROUP BY [ChannelId]", conn) { CommandTimeout = 600 };
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            map[r.GetInt32(0)] = (DateTime.SpecifyKind(r.GetDateTime(1), DateTimeKind.Utc),
+                DateTime.SpecifyKind(r.GetDateTime(2), DateTimeKind.Utc));
+        return map;
+    }
+
+    private static readonly (string Name, TelemetryTableKind Kind)[] Tables =
+        { ("TelemetryRaw", TelemetryTableKind.Raw), ("TelemetryAggregates", TelemetryTableKind.AllAggregates) };
+
+    /// <summary>
+    /// Rows and reserved bytes from sys.dm_db_partition_stats (needs VIEW
+    /// DATABASE STATE), else sp_spaceused (any user who can read the table),
+    /// else only whether the tables hold rows. Never needs admin rights.
+    /// </summary>
+    public async Task<TelemetryStorageReport> StorageAsync(CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+
+        var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var cmd = new SqlCommand(
+            "SELECT [name] FROM sys.tables WHERE [name] IN (N'TelemetryRaw', N'TelemetryAggregates')", conn))
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+            while (await r.ReadAsync(ct)) present.Add(r.GetString(0));
+        if (present.Count == 0)
+            return new TelemetryStorageReport(Array.Empty<TelemetryTableSize>(), false, "ไม่มีตาราง telemetry ในฐานข้อมูลนี้");
+
+        try
+        {
+            var stats = new Dictionary<string, (long Rows, long Bytes)>(StringComparer.OrdinalIgnoreCase);
+            await using var cmd = new SqlCommand(
+                "SELECT o.[name], SUM(CASE WHEN ps.[index_id] IN (0, 1) THEN ps.[row_count] ELSE 0 END), " +
+                "SUM(ps.[reserved_page_count]) * 8192 " +
+                "FROM sys.dm_db_partition_stats ps JOIN sys.objects o ON o.[object_id] = ps.[object_id] " +
+                "WHERE o.[type] = 'U' AND o.[name] IN (N'TelemetryRaw', N'TelemetryAggregates') GROUP BY o.[name]", conn);
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+                while (await r.ReadAsync(ct)) stats[r.GetString(0)] = (Convert.ToInt64(r.GetValue(1)), Convert.ToInt64(r.GetValue(2)));
+            return new TelemetryStorageReport(Tables.Where(t => present.Contains(t.Name))
+                .Select(t => stats.TryGetValue(t.Name, out var s)
+                    ? new TelemetryTableSize(t.Name, t.Kind, s.Rows, s.Bytes)
+                    : new TelemetryTableSize(t.Name, t.Kind, 0, 0)).ToList());
+        }
+        catch (SqlException) { /* no VIEW DATABASE STATE: try sp_spaceused */ }
+
+        try
+        {
+            var list = new List<TelemetryTableSize>();
+            foreach (var t in Tables.Where(t => present.Contains(t.Name)))
+            {
+                await using var cmd = new SqlCommand("sp_spaceused", conn) { CommandType = CommandType.StoredProcedure };
+                cmd.Parameters.Add("@objname", SqlDbType.NVarChar, 776).Value = t.Name;
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                if (!await r.ReadAsync(ct)) continue;
+                list.Add(new TelemetryTableSize(t.Name, t.Kind, ParseLong(r["rows"]), ParseKb(r["reserved"])));
+            }
+            return new TelemetryStorageReport(list);
+        }
+        catch (SqlException) { /* fall through to the existence check */ }
+
+        try
+        {
+            var any = false;
+            foreach (var t in Tables.Where(t => present.Contains(t.Name)))
+            {
+                await using var cmd = new SqlCommand($"SELECT CASE WHEN EXISTS (SELECT 1 FROM [{t.Name}]) THEN 1 ELSE 0 END", conn);
+                any |= Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
+            }
+            return new TelemetryStorageReport(Tables.Where(t => present.Contains(t.Name))
+                    .Select(t => new TelemetryTableSize(t.Name, t.Kind, null, null)).ToList(), any,
+                "บัญชีฐานข้อมูลที่แอปใช้ไม่มีสิทธิ์ดูขนาดตาราง จึงแสดงจำนวนแถวและขนาดไม่ได้");
+        }
+        catch (SqlException ex)
+        {
+            return new TelemetryStorageReport(Array.Empty<TelemetryTableSize>(), null,
+                $"อ่านข้อมูลตาราง telemetry ใน SQL Server ไม่ได้ ({ex.Message})");
+        }
+    }
+
+    private static long? ParseLong(object v) =>
+        long.TryParse(Convert.ToString(v)?.Trim(), out var n) ? n : null;
+
+    /// <summary>sp_spaceused reports sizes as text: "1234 KB".</summary>
+    private static long? ParseKb(object v) =>
+        long.TryParse(Convert.ToString(v)?.Replace("KB", "", StringComparison.OrdinalIgnoreCase).Trim(), out var kb) ? kb * 1024 : null;
 }
 
 /// <summary>In-memory store for tests and for running without SQL Server.</summary>
-public sealed class InMemoryTelemetryStore : ITelemetryStore
+public sealed class InMemoryTelemetryStore : ITelemetryStore, ITelemetryStoreStats
 {
     private readonly ConcurrentDictionary<(int, DateTime), double> _raw = new();
     private readonly ConcurrentDictionary<(int, AggregateResolution, DateTime), AggregatePoint> _agg = new();
@@ -269,4 +399,20 @@ public sealed class InMemoryTelemetryStore : ITelemetryStore
         foreach (var k in keys) _agg.TryRemove(k, out _);
         return Task.FromResult(keys.Count);
     }
+
+    public Task<long> CountRawAsync(DateTime fromUtc, DateTime toUtc, CancellationToken ct = default) =>
+        Task.FromResult(_raw.Keys.LongCount(k => k.Item2 >= fromUtc && k.Item2 < toUtc));
+
+    public Task<Dictionary<int, (DateTime First, DateTime Last)>> ChannelExtentsAsync(CancellationToken ct = default) =>
+        Task.FromResult(_raw.Keys.Select(k => (Channel: k.Item1, Ts: k.Item2))
+            .Concat(_agg.Keys.Select(k => (Channel: k.Item1, Ts: k.Item3)))
+            .GroupBy(k => k.Channel)
+            .ToDictionary(g => g.Key, g => (g.Min(k => k.Ts), g.Max(k => k.Ts))));
+
+    public Task<TelemetryStorageReport> StorageAsync(CancellationToken ct = default) =>
+        Task.FromResult(new TelemetryStorageReport(new[]
+        {
+            new TelemetryTableSize("raw (memory)", TelemetryTableKind.Raw, _raw.Count, null),
+            new TelemetryTableSize("aggregates (memory)", TelemetryTableKind.AllAggregates, _agg.Count, null),
+        }));
 }

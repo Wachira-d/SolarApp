@@ -1,0 +1,311 @@
+@page
+@model SolarApp.Pages.Admin.TelemetryStorageModel
+@using SolarApp.Pages.Admin
+@using SolarApp.Services.Telemetry
+@{
+    ViewData["Title"] = "ที่เก็บข้อมูล Telemetry";
+    var s = Model.Status;
+    var est = s.Estimate;
+    var copy = s.Copy;
+    var (copyText, copyCss) = TelemetryStorageModel.CopyStatus(copy, s.CopyActive);
+    var showTimescale = s.Kind == TelemetryStoreKind.Timescale;
+    // Unreachable PostgreSQL: whether TimescaleDB is on is unknown, so name neither mode.
+    var unknownPg = s.IsPostgres && s.StorageError != null;
+}
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle"></i> @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> @Model.ErrorMessage</div>
+}
+
+<h4 class="mb-1"><i class="bi bi-database text-primary"></i> ที่เก็บข้อมูล Telemetry</h4>
+<p class="text-muted small">
+    ข้อมูลที่ Home Assistant ส่งเข้ามา (ค่าดิบทุกนาที และค่าสรุปราย 5 นาที / ชั่วโมง / วัน) เก็บอยู่ที่ไหน ใช้พื้นที่เท่าไร
+    และพื้นที่จะพอไปอีกนานแค่ไหน หน้านี้อ่านข้อมูลอย่างเดียว ไม่แก้ไขอะไร
+</p>
+
+@* ── Active store ── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <span class="text-muted small">ที่เก็บที่ใช้อยู่</span>
+            <span class="badge fs-6 @(unknownPg ? "bg-secondary" : s.Kind switch { TelemetryStoreKind.Timescale => "bg-success", TelemetryStoreKind.Postgres => "bg-warning text-dark", TelemetryStoreKind.SqlServer => "bg-primary", _ => "bg-secondary" })">
+                @(unknownPg ? "PostgreSQL" : TelemetryStorageModel.StoreName(s.Kind))
+            </span>
+            @if (s.Schema != null)
+            {
+                <span class="small text-muted">schema <code>@s.Schema</code></span>
+            }
+        </div>
+        @switch (unknownPg ? TelemetryStoreKind.Other : s.Kind)
+        {
+            case TelemetryStoreKind.Other when unknownPg:
+                break;
+            case TelemetryStoreKind.SqlServer:
+                <p class="small mb-0">ข้อมูลอยู่ในตาราง <code>TelemetryRaw</code> และ <code>TelemetryAggregates</code> ของ SQL Server
+                    ถ้าใช้ SQL Server Express ฐานข้อมูลหนึ่งเก็บได้ไม่เกิน 10 GB — ดูวิธีย้ายไป TimescaleDB ได้ที่ <code>docs/telemetry-platform/TIMESCALEDB-SETUP.md</code></p>
+                break;
+            case TelemetryStoreKind.Timescale:
+                <p class="small mb-0">บีบอัดข้อมูลอัตโนมัติ (ค่าดิบที่เก่ากว่า 7 วัน และสรุป 5 นาทีที่เก่ากว่า 45 วัน) และลบข้อมูลหมดอายุทีละ chunk</p>
+                break;
+            case TelemetryStoreKind.Postgres:
+                <div class="alert alert-warning small mb-0 py-2">
+                    <i class="bi bi-exclamation-triangle"></i> PostgreSQL แบบนี้ไม่บีบอัดข้อมูล เหมาะกับการทดสอบเท่านั้น
+                    ใช้จริงให้ติดตั้ง TimescaleDB แล้วตั้ง <code>Telemetry:Store = TimescaleDB</code>
+                </div>
+                break;
+            default:
+                <p class="small mb-0">ข้อมูลอยู่ในหน่วยความจำของแอป และหายเมื่อรีสตาร์ท</p>
+                break;
+        }
+        @if (s.StorageError != null)
+        {
+            <div class="alert alert-danger small mt-2 mb-0 py-2"><i class="bi bi-plug"></i> อ่านข้อมูลจากที่เก็บไม่ได้: @s.StorageError</div>
+        }
+    </div>
+</div>
+
+@* ── Counts ── *@
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+            <div class="small text-muted">ช่องข้อมูล</div>
+            <div class="fs-4 fw-semibold">@TelemetryStorageModel.Count(s.Channels)</div>
+            <div class="small text-muted">ส่งใน 24 ชม. @TelemetryStorageModel.Count(s.ActiveChannels)</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+            <div class="small text-muted">ไซต์ที่มีข้อมูล</div>
+            <div class="fs-4 fw-semibold">@TelemetryStorageModel.Count(s.Sites)</div>
+            <div class="small text-muted">ส่งใน 24 ชม. @TelemetryStorageModel.Count(s.ActiveSites)</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+            <div class="small text-muted">ค่าดิบ 24 ชม. ล่าสุด</div>
+            <div class="fs-4 fw-semibold">@TelemetryStorageModel.Count(s.RawLast24h)</div>
+            <div class="small text-muted">นับจากที่เก็บที่ใช้อยู่</div>
+        </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-0 shadow-sm h-100"><div class="card-body py-2">
+            <div class="small text-muted">ข้อมูลล่าสุด</div>
+            <div class="fw-semibold">@TelemetryStorageModel.Time(s.LastSampleUtc)</div>
+        </div></div>
+    </div>
+</div>
+@if (s.CountsError != null)
+{
+    <div class="alert alert-warning small py-2"><i class="bi bi-exclamation-triangle"></i> นับข้อมูลบางส่วนไม่ได้: @s.CountsError</div>
+}
+
+@* ── Tables ── *@
+@if (s.Storage is { } storage)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <h6 class="card-title">ขนาดตาราง</h6>
+            @if (storage.Tables.Count > 0)
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-1">
+                        <thead>
+                            <tr>
+                                <th>ตาราง</th>
+                                <th class="text-end">แถว@(s.IsPostgres ? " (โดยประมาณ)" : "")</th>
+                                <th class="text-end">ขนาดบนดิสก์</th>
+                                @if (showTimescale)
+                                {
+                                    <th class="text-end">ประหยัดจากการบีบอัด</th>
+                                    <th class="text-end">อัตราบีบอัด</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in storage.Tables)
+                            {
+                                <tr>
+                                    <td><div>@TelemetryStorageModel.TableLabel(t.Kind)</div><code class="small">@t.Table</code></td>
+                                    <td class="text-end">@TelemetryStorageModel.Count(t.Rows)</td>
+                                    <td class="text-end">@TelemetryStorageModel.Bytes(t.Bytes)</td>
+                                    @if (showTimescale)
+                                    {
+                                        <td class="text-end">@(t.CompressionSavedBytes is { } saved ? TelemetryStorageModel.Bytes(saved) : t.BeforeCompressionBytes is { } before ? $"ก่อนบีบอัด {TelemetryStorageModel.Bytes(before)}" : "ยังไม่บีบอัด")</td>
+                                        <td class="text-end">@(t.CompressionRatio is { } ratio ? $"{ratio:N1} เท่า" : "–")</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                        @if (storage.TotalBytes is { } total)
+                        {
+                            <tfoot><tr><th>รวม</th><th></th><th class="text-end">@TelemetryStorageModel.Bytes(total)</th>@if (showTimescale) { <th></th><th></th> }</tr></tfoot>
+                        }
+                    </table>
+                </div>
+            }
+            @if (storage.Note != null)
+            {
+                <div class="small text-muted"><i class="bi bi-info-circle"></i> @storage.Note</div>
+            }
+            @if (s.Kind == TelemetryStoreKind.Other)
+            {
+                <div class="small text-muted">ที่เก็บในหน่วยความจำไม่มีขนาดบนดิสก์</div>
+            }
+        </div>
+    </div>
+}
+
+@* ── Estimate ── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <h6 class="card-title">ประมาณการพื้นที่ <span class="badge bg-light text-dark border">ค่าประมาณ</span></h6>
+        @if (est != null)
+        {
+            <p class="small text-muted mb-2">คิดจากปริมาณข้อมูล 24 ชั่วโมงล่าสุด เก็บตามระยะเวลาที่ตั้งไว้ ตัวเลขจริงขึ้นกับจำนวนช่องข้อมูลต่อไซต์และความถี่ที่ส่ง</p>
+            <div class="table-responsive">
+                <table class="table table-sm mb-2">
+                    <tbody>
+                        <tr>
+                            <td>ค่าดิบ เก็บ @s.RawRetentionDays วัน
+                                <div class="small text-muted">@TelemetryStorageModel.Count(est.RawPerDay) ค่า/วัน × @est.BytesPerRaw.ToString("N1") ไบต์ (@(est.RawMeasured ? "วัดจากที่เก็บนี้" : "ค่าอ้างอิง"))</div></td>
+                            <td class="text-end text-nowrap">@TelemetryStorageModel.Bytes(est.RawBytes)</td>
+                        </tr>
+                        <tr>
+                            <td>สรุปราย 5 นาที เก็บ @s.FiveMinuteRetentionDays วัน
+                                <div class="small text-muted">@TelemetryStorageModel.Count(est.FiveMinutePerDay) แถว/วัน × @est.BytesPerAggregate.ToString("N1") ไบต์ (@(est.AggregateMeasured ? "วัดจากที่เก็บนี้" : "ค่าอ้างอิง"))</div></td>
+                            <td class="text-end text-nowrap">@TelemetryStorageModel.Bytes(est.FiveMinuteBytes)</td>
+                        </tr>
+                        <tr>
+                            <td>สรุปรายชั่วโมงและรายวัน 1 ปี
+                                <div class="small text-muted">เก็บตลอดไป เพิ่มขึ้นปีละประมาณเท่านี้</div></td>
+                            <td class="text-end text-nowrap">@TelemetryStorageModel.Bytes(est.HourAndDayBytesPerYear)</td>
+                        </tr>
+                        <tr class="fw-semibold">
+                            <td>รวมโดยประมาณ</td>
+                            <td class="text-end text-nowrap">@est.ProjectedGb.ToString(est.ProjectedGb < 10 ? "N2" : "N1") GB</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            @if (est.BytesPerSite is { } perSite && est.SitesPer100Gb is { } fit)
+            {
+                <div class="alert alert-info small py-2 mb-2">
+                    เฉลี่ยไซต์ละประมาณ <strong>@TelemetryStorageModel.Bytes(perSite)</strong>
+                    (จาก @est.ActiveSites ไซต์ที่ส่งข้อมูลใน 24 ชม.) —
+                    ดิสก์ <strong>100 GB</strong> เก็บได้ประมาณ <strong>@fit.ToString("N0") ไซต์</strong> แบบไซต์เฉลี่ยตอนนี้
+                </div>
+            }
+        }
+        @foreach (var note in s.EstimateNotes)
+        {
+            <div class="small text-muted"><i class="bi bi-info-circle"></i> @note</div>
+        }
+    </div>
+</div>
+
+@* ── Copy from SQL Server (PostgreSQL mode only) ── *@
+@if (s.IsPostgres)
+{
+    <div class="card border-0 shadow-sm mb-3" id="copy">
+        <div class="card-body">
+            <h6 class="card-title">ข้อมูล telemetry เดิมใน SQL Server</h6>
+            @if (s.LegacyError != null)
+            {
+                <div class="small text-muted"><i class="bi bi-info-circle"></i> ตรวจข้อมูลเดิมใน SQL Server ไม่ได้: @s.LegacyError</div>
+            }
+            else if (!s.CopyAvailable)
+            {
+                <div class="small text-muted"><i class="bi bi-check2"></i> ไม่มีข้อมูล telemetry ค้างอยู่ใน SQL Server ไม่ต้องคัดลอก</div>
+            }
+            else
+            {
+                <p class="small mb-2">
+                    ข้อมูลที่เข้ามาก่อนเปลี่ยนไปใช้ PostgreSQL ยังอยู่ใน SQL Server และตอนนี้ไม่แสดงในกราฟหรือรายงาน
+                    กดปุ่มด้านล่างเพื่อคัดลอกมาไว้ที่เก็บปัจจุบัน งานทำอยู่เบื้องหลังทีละช่องข้อมูลทีละวัน
+                    กดซ้ำได้ไม่เกิดข้อมูลซ้ำ และ<strong>ไม่ลบข้อมูลใน SQL Server</strong>
+                </p>
+                @if (s.Legacy is { Tables.Count: > 0 } legacy)
+                {
+                    <ul class="small mb-2">
+                        @foreach (var t in legacy.Tables)
+                        {
+                            <li><code>@t.Table</code> — @TelemetryStorageModel.Count(t.Rows) แถว, @TelemetryStorageModel.Bytes(t.Bytes)</li>
+                        }
+                    </ul>
+                }
+
+                <div class="border rounded p-2 mb-2 small">
+                    <div class="mb-1">สถานะ <span class="badge bg-@copyCss">@copyText</span></div>
+                    @if (copy.Status != TelemetryCopyStatus.None)
+                    {
+                        @if (copy.ChannelsTotal > 0)
+                        {
+                            var pct = (int)Math.Round(100.0 * copy.ChannelsDone / copy.ChannelsTotal);
+                            <div class="progress mb-1" style="height: .6rem" role="progressbar" aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100">
+                                <div class="progress-bar" style="width: @pct%"></div>
+                            </div>
+                            <div>ช่องข้อมูลเสร็จแล้ว @copy.ChannelsDone.ToString("N0") จาก @copy.ChannelsTotal.ToString("N0")</div>
+                        }
+                        <div>คัดลอกค่าดิบแล้ว <strong>@TelemetryStorageModel.Count(copy.RawCopied)</strong> ค่า · ค่าสรุป <strong>@TelemetryStorageModel.Count(copy.AggregatesCopied)</strong> แถว</div>
+                        @if (copy.RawAlreadyThere + copy.AggregatesAlreadyThere > 0)
+                        {
+                            <div class="text-muted">มีอยู่แล้ว ข้ามไป: ค่าดิบ @TelemetryStorageModel.Count(copy.RawAlreadyThere) · ค่าสรุป @TelemetryStorageModel.Count(copy.AggregatesAlreadyThere)</div>
+                        }
+                        @if (copy.AggregatesKept > 0)
+                        {
+                            <div class="text-muted">ค่าสรุป @TelemetryStorageModel.Count(copy.AggregatesKept) แถวที่ที่เก็บใหม่มีอยู่แล้วคงไว้ตามเดิม และให้ระบบคำนวณสรุปใหม่ @copy.DaysQueuedForRollup วัน</div>
+                        }
+                        @if (copy.CurrentChannelId != null)
+                        {
+                            <div>ตอนนี้: ช่อง <code>@copy.CurrentChannelKey</code> (#@copy.CurrentChannelId, ไซต์ #@copy.CurrentInstallationId) วันที่ @copy.CurrentDayUtc?.ToString("yyyy-MM-dd")</div>
+                        }
+                        <div>เริ่ม @TelemetryStorageModel.Time(copy.StartedUtc ?? copy.QueuedUtc)@(copy.RequestedBy != null ? $" โดย {copy.RequestedBy}" : "")
+                            @if (copy.FinishedUtc != null) { <span>· เสร็จ @TelemetryStorageModel.Time(copy.FinishedUtc)</span> }
+                            @if (copy.HeartbeatUtc != null && copy.FinishedUtc == null) { <span class="text-muted">· อัปเดตล่าสุด @TelemetryStorageModel.Time(copy.HeartbeatUtc)</span> }
+                        </div>
+                        @if (copy.LastError != null)
+                        {
+                            <div class="text-danger mt-1"><i class="bi bi-exclamation-triangle"></i> ข้อผิดพลาดล่าสุด (@TelemetryStorageModel.Time(copy.LastErrorUtc)): @copy.LastError</div>
+                        }
+                    }
+                </div>
+
+                <form method="post" asp-page-handler="Copy" class="d-grid d-sm-block"
+                      onsubmit="return confirm('เริ่มคัดลอกข้อมูล telemetry เดิมจาก SQL Server? งานทำอยู่เบื้องหลัง ไม่ลบข้อมูลต้นทาง');">
+                    <button type="submit" class="btn btn-primary" disabled="@s.CopyActive">
+                        <i class="bi bi-files"></i> คัดลอกข้อมูล telemetry เดิมจาก SQL Server
+                    </button>
+                </form>
+                <div class="form-text">
+                    @if (s.CopyActive)
+                    {
+                        <span>กำลังทำงานอยู่ หน้านี้รีเฟรชเองทุก 15 วินาที</span>
+                    }
+                    else if (copy.Status == TelemetryCopyStatus.Done)
+                    {
+                        <span>กดอีกครั้งเพื่อตรวจซ้ำ ระบบจะคัดลอกเฉพาะส่วนที่ยังขาด</span>
+                    }
+                    else if (copy.Status is TelemetryCopyStatus.Failed or TelemetryCopyStatus.Interrupted or TelemetryCopyStatus.Queued or TelemetryCopyStatus.Running)
+                    {
+                        <span>กดเพื่อทำต่อจากช่องข้อมูลและวันที่ค้างไว้</span>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@section Scripts {
+    @if (s.CopyActive)
+    {
+        <script>setTimeout(function () { location.reload(); }, 15000);</script>
+    }
+}

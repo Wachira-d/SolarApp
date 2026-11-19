@@ -25,7 +25,7 @@ namespace SolarApp.Services.Telemetry;
 /// The schema is created on first use and is idempotent; nothing has to be
 /// run by hand besides creating the database.
 /// </summary>
-public sealed class PostgresTelemetryStore : ITelemetryStore
+public sealed class PostgresTelemetryStore : ITelemetryStore, ITelemetryStoreStats
 {
     /// <summary>Late data may arrive this far back (ingest window 35 days); aggregate chunks stay uncompressed until then.</summary>
     public static readonly TimeSpan RawCompressAfter = TimeSpan.FromDays(7);
@@ -40,6 +40,9 @@ public sealed class PostgresTelemetryStore : ITelemetryStore
 
     /// <summary>True when the TimescaleDB extension is active (known after the first call).</summary>
     public bool TimescaleEnabled { get; private set; }
+
+    /// <summary>The PostgreSQL schema holding the telemetry tables.</summary>
+    public string Schema => _schema;
 
     public PostgresTelemetryStore(IConfiguration configuration, ILogger<PostgresTelemetryStore> logger)
         : this(configuration.GetConnectionString("TelemetryPostgres")
@@ -404,6 +407,84 @@ CREATE INDEX IF NOT EXISTS ix_telemetry_agg_5m_ts_brin ON {Agg(AggregateResoluti
             list.Add((table, bytes, before));
         }
         return list;
+    }
+
+    // ── stats (read-only, ITelemetryStoreStats) ──────────────────────
+
+    public async Task<long> CountRawAsync(DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+    {
+        await using var conn = await OpenAsync(ct);
+        await using var cmd = new NpgsqlCommand($"SELECT count(*) FROM {Raw} WHERE ts >= @a AND ts < @b", conn) { CommandTimeout = 120 };
+        cmd.Parameters.AddWithValue("a", NpgsqlDbType.TimestampTz, Utc(fromUtc));
+        cmd.Parameters.AddWithValue("b", NpgsqlDbType.TimestampTz, Utc(toUtc));
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    public async Task<Dictionary<int, (DateTime First, DateTime Last)>> ChannelExtentsAsync(CancellationToken ct = default)
+    {
+        var map = new Dictionary<int, (DateTime, DateTime)>();
+        await using var conn = await OpenAsync(ct);
+        var parts = new[] { $"SELECT channel_id, min(ts) AS f, max(ts) AS l FROM {Raw} GROUP BY channel_id" }
+            .Concat(new[] { AggregateResolution.FiveMinutes, AggregateResolution.Hour, AggregateResolution.Day }
+                .Select(r => $"SELECT channel_id, min(bucket_start), max(bucket_start) FROM {Agg(r)} GROUP BY channel_id"));
+        await using var cmd = new NpgsqlCommand(
+            $"SELECT channel_id, min(f), max(l) FROM ({string.Join(" UNION ALL ", parts)}) x GROUP BY channel_id", conn)
+        { CommandTimeout = 600 };
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+            map[r.GetInt32(0)] = (Utc(r.GetDateTime(1)), Utc(r.GetDateTime(2)));
+        return map;
+    }
+
+    /// <summary>
+    /// <see cref="SizesAsync"/> plus row counts (planner estimates, exact
+    /// only for small never-analysed tables) and, with TimescaleDB, the
+    /// compressed chunks' size after compression.
+    /// </summary>
+    public async Task<TelemetryStorageReport> StorageAsync(CancellationToken ct = default)
+    {
+        var sizes = await SizesAsync(ct);
+        var kinds = new Dictionary<string, TelemetryTableKind>
+        {
+            [Raw] = TelemetryTableKind.Raw,
+            [Agg(AggregateResolution.FiveMinutes)] = TelemetryTableKind.FiveMinutes,
+            [Agg(AggregateResolution.Hour)] = TelemetryTableKind.Hour,
+            [Agg(AggregateResolution.Day)] = TelemetryTableKind.Day,
+        };
+        var list = new List<TelemetryTableSize>();
+        await using var conn = await OpenAsync(ct);
+        foreach (var (table, bytes, before) in sizes)
+        {
+            long? after = null;
+            if (TimescaleEnabled && before is > 0)
+                after = await TryScalarAsync<long>(conn, ct,
+                            $"SELECT sum(after_compression_total_bytes)::bigint FROM chunk_compression_stats('{table}')")
+                        ?? await TryScalarAsync<long>(conn, ct,
+                            $"SELECT sum(after_compression_total_bytes)::bigint FROM chunk_columnstore_stats('{table}')");
+            list.Add(new TelemetryTableSize(table[(table.LastIndexOf('.') + 1)..], kinds[table],
+                await RowEstimateAsync(conn, table, ct), bytes, before is > 0 ? before : null, after is > 0 ? after : null));
+        }
+        return new TelemetryStorageReport(list);
+    }
+
+    /// <summary>
+    /// Counting a hypertable of billions of rows takes minutes, so use the
+    /// statistics: TimescaleDB's approximate_row_count, else pg_class.reltuples.
+    /// Only a table never analysed (fresh, so small) is counted exactly.
+    /// </summary>
+    private async Task<long?> RowEstimateAsync(NpgsqlConnection conn, string table, CancellationToken ct)
+    {
+        long? n = null;
+        if (TimescaleEnabled) n = await TryScalarAsync<long>(conn, ct, $"SELECT approximate_row_count('{table}')");
+        if (n is null or <= 0)
+            n = await TryScalarAsync<long>(conn, ct, $"SELECT reltuples::bigint FROM pg_class WHERE oid = '{table}'::regclass");
+        if (n is > 0) return n;
+        try
+        {
+            await using var cmd = new NpgsqlCommand($"SELECT count(*) FROM {table}", conn) { CommandTimeout = 30 };
+            return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct));
+        }
+        catch (NpgsqlException) { return null; }
     }
 
     private static async Task ExecAsync(NpgsqlConnection conn, string sql, CancellationToken ct)

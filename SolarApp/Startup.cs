@@ -290,6 +290,7 @@ public class Startup
         builder.Services.AddScoped<Services.Analytics.SiteAnalyticsService>();
         builder.Services.AddScoped<BackgroundJobs.SiteAnalyticsJob>();
         builder.Services.AddScoped<BackgroundJobs.TelemetryRetentionJob>();
+        builder.Services.AddScoped<BackgroundJobs.TelemetryCopyFromSqlServerJob>();   // one-off, from /Admin/TelemetryStorage
         builder.Services.AddScoped<BackgroundJobs.PredictiveDiagnosticsJob>();
         builder.Services.AddScoped<BackgroundJobs.DataRetentionJob>();
         builder.Services.AddScoped<BackgroundJobs.MonthlyReportJob>();

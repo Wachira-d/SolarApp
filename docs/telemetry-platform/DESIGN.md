@@ -313,6 +313,16 @@ fails without it) or `Postgres` (plain tables, for tests), connection string
 * Same behaviour contract as the other stores (`TelemetryStoreContractTests`;
   set `SOLARAPP_TEST_POSTGRES` to run it against a database).
 * Setup steps: `TIMESCALEDB-SETUP.md`.
+* `/Admin/TelemetryStorage` shows the active store, table sizes (and TimescaleDB
+  compression), counts and a capacity estimate (`ITelemetryStoreStats`,
+  `TelemetryCapacityEstimate`). In PostgreSQL mode it offers a one-off copy of the
+  telemetry left in the SQL Server tables (`TelemetryStoreCopier` via the
+  `TelemetryCopyFromSqlServerJob` Hangfire job): channel by channel, UTC day by
+  day; raw samples skipped when `ExistingAsync` finds them, aggregate buckets
+  written only where the destination has none (a differing bucket there was rolled
+  up after the switch: it is kept and the day becomes a `TelemetryDirtyRange`);
+  progress and resume position in SystemSettings `Telemetry.CopyFromSqlServer`.
+  Nothing is deleted from SQL Server.
 
 ## 6. Site capabilities (what each report shows)
 
