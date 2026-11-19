@@ -47,6 +47,7 @@ public class AnalyticsModel : PageModel
         double PvKwh, double? PvLastYearKwh, double? PvYoYPct,
         double SavingsThb, double? SavingsLastYearThb, double? SavingsYoYPct);
 
+    public EnvironmentalFactors Factors { get; private set; } = EnvironmentalFactors.Default;
     public Installation Site { get; private set; } = null!;
     public SiteCapabilities Caps { get; private set; } = null!;
 
@@ -132,7 +133,8 @@ public class AnalyticsModel : PageModel
         HasEnergyData = rows.Count > 0;
         if (!HasEnergyData) return;
 
-        var opts = Staff.EconomicsOptionsFor(site);
+        Factors = await EnvironmentalFactors.LoadAsync(_context);
+        var opts = Factors.Apply(Staff.EconomicsOptionsFor(site));
         var months = rows
             .GroupBy(r => (r.Timestamp.Year, r.Timestamp.Month))
             .OrderBy(g => g.Key)

@@ -1,0 +1,68 @@
+@page
+@model SolarApp.Pages.Admin.ReportSettingsModel
+@using SolarApp.Services.Analytics
+@{
+    ViewData["Title"] = "ตั้งค่ารายงาน CO₂";
+    var ex = SolarApp.Pages.Admin.ReportSettingsModel.Example(Model.Current);
+}
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle"></i> @Model.StatusMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <div class="alert alert-danger"><i class="bi bi-exclamation-triangle"></i> @Model.Error</div>
+}
+
+<h4 class="mb-1"><i class="bi bi-tree text-success"></i> ค่า CO₂ และต้นไม้ในรายงาน</h4>
+<p class="text-muted small">
+    ใช้คำนวณ "ลด CO₂" และ "เทียบเท่าปลูกต้นไม้" ทุกที่ในระบบ ได้แก่ หน้าวิเคราะห์ระบบ หน้าไซต์ของลูกค้า
+    หน้าความคุ้มค่าของลูกค้า และรายงานรายเดือนทาง LINE ค่าเดียวใช้กับทุกไซต์ เพราะทุกไซต์ใช้ไฟจากระบบไฟฟ้าเดียวกัน
+</p>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body">
+                <form method="post" autocomplete="off">
+                    <div class="mb-3">
+                        <label class="form-label" for="co2kwh">CO₂ ที่ลดได้ต่อไฟโซลาร์ 1 kWh <span class="text-muted">(กก. CO₂/kWh)</span></label>
+                        <input id="co2kwh" name="Co2KgPerKwh" value="@Model.Co2KgPerKwh" class="form-control" inputmode="decimal" required />
+                        <div class="form-text">
+                            ค่าการปล่อย CO₂ ของระบบไฟฟ้า (grid emission factor) ช่วงที่รับได้
+                            @EnvironmentalFactors.MinPerKwh–@EnvironmentalFactors.MaxPerKwh · ค่าเริ่มต้น @EnvironmentalFactors.DefaultCo2KgPerKwh
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="co2tree">CO₂ ที่ต้นไม้ 1 ต้นดูดซับต่อปี <span class="text-muted">(กก./ปี)</span></label>
+                        <input id="co2tree" name="Co2KgPerTreeYear" value="@Model.Co2KgPerTreeYear" class="form-control" inputmode="decimal" required />
+                        <div class="form-text">
+                            จำนวนต้นไม้ = CO₂ ที่ลดได้ ÷ ค่านี้ ช่วงที่รับได้ @EnvironmentalFactors.MinPerTree–@EnvironmentalFactors.MaxPerTree
+                            · ค่าเริ่มต้น @EnvironmentalFactors.DefaultCo2KgPerTreeYear · ค่าที่อ้างกันทั่วไปอยู่ราว 9–22 กก. ขึ้นกับชนิดและอายุต้นไม้
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="co2src">แหล่งอ้างอิง <span class="text-muted">(ไม่บังคับ)</span></label>
+                        <input id="co2src" name="Source" value="@Model.Source" class="form-control" maxlength="200" placeholder="เช่น อบก. ค่าการปล่อยก๊าซเรือนกระจกของไฟฟ้า ปี 2568" />
+                        <div class="form-text">แสดงใต้ตัวเลข CO₂ ให้ผู้อ่านรู้ว่าคิดจากอะไร</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> บันทึก</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h6 class="card-title">ค่าที่ใช้อยู่ตอนนี้</h6>
+                <p class="mb-2">@Model.Current.BasisText</p>
+                <div class="small text-muted">ตัวอย่าง ไฟโซลาร์ 1,000 kWh</div>
+                <div>ลด CO₂ <strong>@ex.Co2Kg.ToString("N0") กก.</strong> · เทียบเท่าต้นไม้ <strong>@ex.Trees.ToString("N0") ต้น</strong></div>
+            </div>
+        </div>
+    </div>
+</div>

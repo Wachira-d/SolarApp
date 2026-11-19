@@ -173,7 +173,7 @@ else
                     </tbody>
                 </table>
             </div>
-            <small class="text-muted">คิดที่อัตรา ฿@inst.ElectricityRatePerKwh.ToString("0.##")/kWh @(inst.FeedInTariffRate is > 0 ? $"· ขายคืน ฿{inst.FeedInTariffRate:0.##}/kWh" : "") · CO₂ 0.5 kg/kWh · ต้นไม้ 1 ต้นดูดซับ 9 kg/ปี</small>
+            <small class="text-muted">คิดที่อัตรา ฿@inst.ElectricityRatePerKwh.ToString("0.##")/kWh @(inst.FeedInTariffRate is > 0 ? $"· ขายคืน ฿{inst.FeedInTariffRate:0.##}/kWh" : "") · @Model.Factors.BasisText</small>
         </div></div>
     }
 }

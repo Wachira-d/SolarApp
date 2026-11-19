@@ -42,8 +42,6 @@ public class MonthlyReportJob
     // Thailand's grid mix is roughly 0.5 kgCO2 per kWh; a tree absorbs about
     // 21 kg a year. Same constants the customer portal already shows, so the
     // message and the website can't disagree.
-    private const decimal Co2KgPerKwh = 0.5m;
-    private const decimal Co2KgPerTreeYear = 21m;
 
     private static readonly string[] ThaiMonths =
     {
@@ -79,6 +77,9 @@ public class MonthlyReportJob
 
         var sent = 0;
         var skippedNoProduction = 0;
+
+        // System-wide CO₂ factors (Admin → ตั้งค่ารายงาน): the report says what the portal says.
+        var factors = await SolarApp.Services.Analytics.EnvironmentalFactors.LoadAsync(_context);
 
         foreach (var customer in customers)
         {
@@ -188,7 +189,7 @@ public class MonthlyReportJob
                                      && w.ActualEndTime >= monthStartUtc
                                      && w.ActualEndTime < monthEndUtcExclusive);
 
-                var co2 = totalKwh * Co2KgPerKwh;
+                var co2 = (decimal)factors.Co2Kg((double)totalKwh);
 
                 await _line.SendMonthlyReportAsync(customer.LineUserId!, new MonthlyReportData
                 {
@@ -198,7 +199,7 @@ public class MonthlyReportJob
                     TotalKwh = Math.Round(totalKwh, 0),
                     SavingsThb = Math.Round(savings, 0),
                     Co2SavedKg = Math.Round(co2, 0),
-                    TreesEquivalent = (int)Math.Round(co2 / Co2KgPerTreeYear),
+                    TreesEquivalent = (int)Math.Round(factors.Trees((double)co2)),
                     ChangeVsPreviousPercent = change,
                     BestDayKwh = Math.Round(best?.Kwh ?? 0, 1),
                     BestDayDate = best?.Day.ToString("dd/MM"),

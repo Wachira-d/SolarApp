@@ -162,10 +162,10 @@ public class IndexModel : PageModel
             monthRevenueSum += monthKwh * (inst.ElectricityRatePerKwh > 0 ? inst.ElectricityRatePerKwh : 4.0m);
         }
 
-        // 0.5 kgCO2 per kWh is the rule of thumb for Thailand's grid mix;
-        // tree-year equivalent ≈ 21 kg CO2 absorbed per tree per year, so
-        // we present the rounded count of trees needed to absorb the same.
-        var co2Kg = totalMonth * 0.5m;
+        // CO₂ per kWh and per tree come from the system-wide setting
+        // (Admin → ตั้งค่ารายงาน) so this matches every other page.
+        var factors = await SolarApp.Services.Analytics.EnvironmentalFactors.LoadAsync(_context);
+        var co2Kg = (decimal)factors.Co2Kg((double)totalMonth);
         Overview = new OverviewVm
         {
             TotalCurrentPowerKw = Math.Round(totalPower, 2),
@@ -174,7 +174,7 @@ public class IndexModel : PageModel
             TotalLifetimeKwh = Math.Round(totalLife, 0),
             EstimatedSavingsThbMonth = Math.Round(monthRevenueSum, 0),
             Co2SavedKgMonth = Math.Round(co2Kg, 0),
-            TreesEquivalentMonth = (int)Math.Round(co2Kg / 21m),
+            TreesEquivalentMonth = (int)Math.Round(factors.Trees((double)co2Kg)),
             OnlineSites = onlineSites,
             TotalSites = Customer.Installations.Count,
         };

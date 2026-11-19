@@ -52,6 +52,7 @@ public class AnalyticsModel : PageModel
     public EconomicsResult? Lifetime { get; private set; }
     public EconomicsResult? Last30 { get; private set; }
     public bool HasEnergyData { get; private set; }
+    public EnvironmentalFactors Factors { get; private set; } = EnvironmentalFactors.Default;
     public EnergyFlow? Flow30 { get; private set; }
 
     /// <summary>Last-30-day energy flows for the Sankey, kWh. Battery terms are 0 without a battery.</summary>
@@ -201,7 +202,8 @@ public class AnalyticsModel : PageModel
         HasEnergyData = rows.Count > 0;
         if (!HasEnergyData) return;
 
-        var opts = EconomicsOptionsFor(inst);
+        Factors = await EnvironmentalFactors.LoadAsync(_db);
+        var opts = Factors.Apply(EconomicsOptionsFor(inst));
         var months = rows
             .GroupBy(r => (r.Timestamp.Year, r.Timestamp.Month))
             .OrderBy(g => g.Key)
