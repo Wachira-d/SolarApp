@@ -71,8 +71,9 @@
         <a asp-page="/My/Index" class="@(IsActive("/My/Index") ? "active" : "")">
             <i class="bi bi-house-door@(IsActive("/My/Index") ? "-fill" : "")"></i> หน้าหลัก
         </a>
-        <a asp-page="/My/Sites" class="@(IsActive("/My/Sites") || IsActive("/My/Site") ? "active" : "")">
-            <i class="bi bi-sun@(IsActive("/My/Sites") || IsActive("/My/Site") ? "-fill" : "")"></i> ไซต์
+        @{ var sitesTab = IsActive("/My/Sites") || IsActive("/My/Site") || IsActive("/My/Analytics"); }
+        <a asp-page="/My/Sites" class="@(sitesTab ? "active" : "")">
+            <i class="bi bi-sun@(sitesTab ? "-fill" : "")"></i> ไซต์
         </a>
         <a asp-page="/My/History" class="@(IsActive("/My/History") ? "active" : "")">
             <i class="bi bi-bar-chart@(IsActive("/My/History") ? "-fill" : "")"></i> ประวัติ

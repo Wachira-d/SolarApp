@@ -80,6 +80,17 @@
     </div>
 </div>
 
+<a class="my-card my-site-card my-an-link" style="margin-top:12px" asp-page="/My/Analytics" asp-route-id="@Model.Site.Id">
+    <div class="my-card-row">
+        <i class="bi bi-graph-up-arrow lead"></i>
+        <div style="flex:1; min-width:0">
+            <div class="my-card-title">ความคุ้มค่าของระบบ</div>
+            <div class="my-an-muted">ประหยัดสะสม คืนทุน เทียบปีก่อน@(Model.Site.HasBattery ? " สุขภาพแบตเตอรี่" : "") และไฟดับ</div>
+        </div>
+        <i class="bi bi-chevron-right" style="color:var(--my-text-muted)"></i>
+    </div>
+</a>
+
 @* ── Today's curve ────────────────────────────────────────────────── *@
 @if (Model.TodayCurve.Any())
 {

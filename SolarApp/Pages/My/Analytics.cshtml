@@ -1,0 +1,316 @@
+@page "{id:int}"
+@model SolarApp.Pages.My.AnalyticsModel
+@using SolarApp.Services.Analytics
+@using Staff = SolarApp.Pages.Installations.AnalyticsModel
+@{
+    ViewData["Title"] = "ความคุ้มค่าของระบบ";
+    var site = Model.Site;
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    string Pct(double v) => Math.Clamp(v, 0, 100).ToString("0.#", inv);
+}
+
+<a class="my-an-back" asp-page="/My/Site" asp-route-id="@site.Id"><i class="bi bi-chevron-left"></i> @site.SiteName</a>
+
+@* ═══════════════════════════ ค่าไฟที่ประหยัด ═══════════════════════════ *@
+<div class="my-section-title">ค่าไฟที่ประหยัดได้</div>
+@if (!Model.HasEnergyData)
+{
+    <div class="my-card my-an-note"><i class="bi bi-hourglass-split"></i> ยังไม่มีข้อมูลการผลิตรายวัน ตัวเลขความคุ้มค่าจะแสดงเมื่อระบบเก็บข้อมูลได้แล้ว</div>
+}
+else
+{
+    var life = Model.Lifetime!;
+    <div class="my-stat-grid my-an-stats">
+        <div class="my-stat">
+            <div class="k"><i class="bi bi-piggy-bank icon"></i> ประหยัดสะสม</div>
+            <div class="v">฿@Staff.N(Model.CumulativeSavingsThb, "N0")</div>
+            <div class="sub">ตั้งแต่เริ่มใช้งาน</div>
+        </div>
+        <div class="my-stat">
+            <div class="k"><i class="bi bi-calendar-month icon"></i> 30 วันล่าสุด</div>
+            <div class="v">฿@Staff.N(Model.Last30?.SavingsThb, "N0")</div>
+            <div class="sub">ค่าไฟที่ไม่ต้องจ่าย</div>
+        </div>
+        @if (Model.PaybackPct is double pp)
+        {
+            <div class="my-stat">
+                <div class="k"><i class="bi bi-arrow-repeat icon"></i> คืนทุนแล้ว</div>
+                <div class="v">@pp.ToString("0.#", inv) <small>%</small></div>
+                <div class="my-an-bar" role="progressbar" aria-valuenow="@Pct(pp)" aria-valuemin="0" aria-valuemax="100"><span style="width:@Pct(pp)%"></span></div>
+                <div class="sub">จากราคาระบบ ฿@site.ContractValue!.Value.ToString("N0")</div>
+            </div>
+        }
+        <div class="my-stat">
+            <div class="k"><i class="bi bi-house-check icon"></i> พึ่งพาตัวเอง</div>
+            <div class="v">@(Model.Last30?.SelfSufficiencyPct is double ss ? ss.ToString("0", inv) : "–") <small>%</small></div>
+            <div class="sub">ไฟที่บ้านใช้มาจากโซลาร์ (30 วัน)</div>
+        </div>
+    </div>
+
+    @if (Model.Months.Count > 0)
+    {
+        <div class="my-card my-an-card">
+            <div class="my-an-h">ประหยัดได้รายเดือน (บาท)</div>
+            <div class="my-an-chart"><canvas id="chSavings"></canvas></div>
+        </div>
+        <div class="my-card my-an-card">
+            <div class="my-an-h">พึ่งพาตัวเองรายเดือน (%)</div>
+            <div class="my-an-chart sm"><canvas id="chSelfSufficiency"></canvas></div>
+            <div class="my-an-foot">ยิ่งสูง ยิ่งซื้อไฟจากการไฟฟ้าน้อยลง</div>
+        </div>
+    }
+
+    @* ── CO₂ ── *@
+    <div class="my-section-title">ช่วยโลก</div>
+    <div class="my-an-eco">
+        <div class="icon"><i class="bi bi-tree-fill"></i></div>
+        <div style="flex:1; min-width:0">
+            <div class="v">@Staff.N(life.Co2Kg / 1000, "N1") <small>ตัน CO₂</small></div>
+            <div class="k">ลดการปล่อยก๊าซคาร์บอนไดออกไซด์ได้ตั้งแต่เริ่มใช้งาน</div>
+            <div class="eco"><i class="bi bi-tree"></i> เทียบเท่าปลูกต้นไม้ @Staff.N(life.Trees, "N0") ต้น</div>
+        </div>
+    </div>
+
+    @* ── Year on year ── *@
+    @if (Model.YearOnYear.Count > 0)
+    {
+        <div class="my-section-title">เทียบกับปีก่อน</div>
+        <div class="my-card my-an-card">
+            <div class="table-responsive my-an-scroll">
+                <table class="my-an-table">
+                    <thead>
+                        <tr><th>เดือน</th><th class="r">ผลิตได้ kWh</th><th class="r">เทียบปีก่อน</th><th class="r">ประหยัด ฿</th><th class="r">เทียบปีก่อน</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var r in Model.YearOnYear)
+                    {
+                        <tr>
+                            <td>
+                                @AnalyticsModel.MonthLabel(r.Year, r.Month)
+                                @if (r.Partial) { <div class="my-an-muted">ยังไม่ครบเดือน</div> }
+                            </td>
+                            <td class="r">@Staff.N(r.PvKwh, "N0")</td>
+                            <td class="r @(r.PvYoYPct < 0 ? "down" : r.PvYoYPct > 0 ? "up" : "")">@(r.PvYoYPct is double py ? py.ToString("+0;-0;0", inv) + "%" : "–")</td>
+                            <td class="r">@Staff.N(r.SavingsThb, "N0")</td>
+                            <td class="r @(r.SavingsYoYPct < 0 ? "down" : r.SavingsYoYPct > 0 ? "up" : "")">@(r.SavingsYoYPct is double sy ? sy.ToString("+0;-0;0", inv) + "%" : "–")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <div class="my-an-foot">
+                เทียบกับเดือนเดียวกันของปีก่อน · "–" คือยังไม่มีข้อมูลของปีก่อน ·
+                คิดค่าไฟ ฿@Staff.EconomicsOptionsFor(site).ImportRateThb.ToString("0.##", inv)/kWh@(site.FeedInTariffRate is > 0 ? $" ขายคืน ฿{site.FeedInTariffRate.Value.ToString("0.##", inv)}/kWh" : "")
+            </div>
+        </div>
+    }
+}
+
+@* ═══════════════════════════ ไฟดับ ═══════════════════════════ *@
+@if (Model.ShowOutages)
+{
+    var g = Model.Grid;
+    <div class="my-section-title">ไฟดับ</div>
+    @if (g == null)
+    {
+        <div class="my-card my-an-note"><i class="bi bi-hourglass-split"></i> กำลังรวบรวมข้อมูลไฟดับ จะแสดงภายในวันพรุ่งนี้</div>
+    }
+    else if (g.Outages.Count == 0)
+    {
+        <div class="my-card my-an-note"><i class="bi bi-shield-check" style="color:#10b981"></i> ไม่พบไฟดับใน @g.WindowDays วันที่ผ่านมา</div>
+    }
+    else
+    {
+        <div class="my-stat-grid my-an-stats">
+            <div class="my-stat">
+                <div class="k"><i class="bi bi-lightning icon"></i> ไฟดับ</div>
+                <div class="v">@g.Outages.Count <small>ครั้ง</small></div>
+                <div class="sub">ใน @g.WindowDays วันที่ผ่านมา</div>
+            </div>
+            <div class="my-stat">
+                <div class="k"><i class="bi bi-stopwatch icon"></i> รวมเวลา</div>
+                <div class="v my-an-v-sm">@Staff.Hours(g.Outages.Sum(o => o.DurationMinutes))</div>
+            </div>
+        </div>
+        <div class="my-card my-an-card">
+            @foreach (var o in Enumerable.Reverse(g.Outages).Take(20))
+            {
+                <div class="my-an-row">
+                    <div style="min-width:0">
+                        <div class="my-card-title">@Staff.Local(o.StartUtc, "ddd d MMM yy HH:mm")</div>
+                        <div class="my-an-muted">
+                            @if (o.Ongoing) { <span>ยังดับอยู่ ·</span> }
+                            ดับนาน @Staff.Hours(o.DurationMinutes)
+                        </div>
+                    </div>
+                    @if (Model.ShowBattery && o.HoursCovered is double hc)
+                    {
+                        <div class="my-an-batt @(o.BatteryDepleted ? "empty" : "")">
+                            <i class="bi @(o.BatteryDepleted ? "bi-battery" : "bi-battery-charging")"></i>
+                            @(o.BatteryDepleted ? "แบตหมดหลัง " + Staff.Hours(hc * 60) : "แบตสำรองไฟ " + Staff.Hours(hc * 60))
+                        </div>
+                    }
+                </div>
+            }
+            @if (Model.ShowBattery)
+            {
+                <div class="my-an-foot">เวลาที่แบตเตอรี่จ่ายไฟให้บ้านระหว่างไฟดับ</div>
+            }
+        </div>
+    }
+}
+
+@* ═══════════════════════════ แบตเตอรี่ ═══════════════════════════ *@
+@if (Model.ShowBattery)
+{
+    var b = Model.Battery;
+    <div class="my-section-title">แบตเตอรี่</div>
+    @if (b == null && Model.History.Buckets.Count == 0)
+    {
+        <div class="my-card my-an-note"><i class="bi bi-hourglass-split"></i> กำลังรวบรวมข้อมูลแบตเตอรี่ สรุปสุขภาพแบตเตอรี่จะแสดงภายในวันพรุ่งนี้</div>
+    }
+    @if (b != null)
+    {
+        var grade = b.Overall.Grade;
+        <div class="my-card my-an-grade @Staff.OverallClass(grade)">
+            <div class="letter">@(grade is "A" or "B" or "C" ? grade : "–")</div>
+            <div style="flex:1; min-width:0">
+                <div class="my-an-muted">สุขภาพแบตเตอรี่</div>
+                <div class="label">@(grade is "A" or "B" or "C" ? b.Overall.Label : "ยังประเมินไม่ได้")</div>
+                <div class="my-an-muted">@AnalyticsModel.GradeSentence(grade)</div>
+            </div>
+        </div>
+        <div class="my-stat-grid my-an-stats">
+            <div class="my-stat">
+                <div class="k"><i class="bi bi-battery-half icon"></i> ความจุที่วัดได้</div>
+                <div class="v">@(b.Capacity.MedianPct is double mp ? mp.ToString("0", inv) : "–") <small>%</small></div>
+                <div class="sub">@(b.Capacity.MedianPct.HasValue ? "เทียบกับตอนติดตั้งใหม่" : "รอวัดจากรอบที่ชาร์จเต็มแล้วใช้ไฟลงมาก")</div>
+            </div>
+            @if (b.Warranty is { } w)
+            {
+                <div class="my-stat">
+                    <div class="k"><i class="bi bi-shield-check icon"></i> ใช้ประกันไปแล้ว</div>
+                    <div class="v">@w.ThroughputUsedPct.ToString("0.#", inv) <small>%</small></div>
+                    <div class="my-an-bar @(w.ThroughputUsedPct > 80 ? "danger" : w.ThroughputUsedPct > 50 ? "warning" : "")" role="progressbar" aria-valuenow="@Pct(w.ThroughputUsedPct)" aria-valuemin="0" aria-valuemax="100"><span style="width:@Pct(w.ThroughputUsedPct)%"></span></div>
+                    <div class="sub">ตามปริมาณไฟที่แบตจ่ายไป</div>
+                </div>
+                <div class="my-stat">
+                    <div class="k"><i class="bi bi-hourglass icon"></i> คาดว่าใช้ได้อีก</div>
+                    <div class="v">@Staff.N(w.ExpectedRemainingYears, "N1") <small>ปี</small></div>
+                    <div class="sub">ตามเงื่อนไขประกัน @w.WarrantyYears.ToString("0", inv) ปี</div>
+                </div>
+            }
+        </div>
+    }
+    @if (Model.History.Buckets.Count > 0)
+    {
+        <div class="my-card my-an-card">
+            <div class="my-an-h">ประวัติแบตเตอรี่ทั้งหมด</div>
+            <div class="my-an-muted">@(Model.History.Resolution == "week" ? "รายสัปดาห์" : "รายวัน") · @Model.HistoryDays วันที่มีข้อมูล</div>
+            <div class="my-an-chart lg"><canvas id="chHistory"></canvas></div>
+            <div class="my-an-legend">
+                <span><i style="background:#2e9e5b"></i> ชาร์จเข้าแบต (บน)</span>
+                <span><i style="background:#f08c2e"></i> แบตจ่ายไฟ (ล่าง)</span>
+                <span><i style="background:rgba(66,133,244,.35)"></i> ระดับแบตต่ำสุด–สูงสุด (แกนขวา %)</span>
+                <span><b style="color:#d9534f">▼</b> วันที่ไฟดับ</span>
+            </div>
+        </div>
+    }
+}
+
+@* ═══════════════════════════ ช่วงเวลาที่ควรใช้ไฟ ═══════════════════════════ *@
+@if (Model.BestHours.Count > 0)
+{
+    <div class="my-section-title">ช่วงเวลาที่ควรใช้ไฟ</div>
+    <div class="my-alert">
+        <div class="icon"><i class="bi bi-lightbulb"></i></div>
+        <div style="flex:1; min-width:0">
+            <div class="title">ไฟจากแผงเหลือทิ้งมากที่สุดในช่วงเหล่านี้</div>
+            @foreach (var h in Model.BestHours) { <div class="my-an-hour">@h.MessageTh</div> }
+        </div>
+    </div>
+}
+
+@if (Model.UpdatedAt is DateTime up)
+{
+    <div class="my-refresh-hint">อัปเดตการวิเคราะห์ล่าสุด @Staff.Local(up) · ระบบคำนวณใหม่ทุกวัน</div>
+}
+
+@section Scripts {
+<script>
+(function () {
+    if (typeof Chart === 'undefined') return;
+    const css = getComputedStyle(document.documentElement);
+    Chart.defaults.color = css.getPropertyValue('--my-text-muted').trim() || '#6b7280';
+    Chart.defaults.font.family = 'inherit';
+    Chart.defaults.maintainAspectRatio = false;
+    const gridColor = 'rgba(127,127,127,.12)';
+    const GREEN = '#2e9e5b', ORANGE = '#f08c2e', BLUE = '#4285f4', RED = '#d9534f';
+    const ACCENT = css.getPropertyValue('--my-accent').trim() || GREEN;
+    const el = id => document.getElementById(id);
+
+    @if (Model.Months.Count > 0)
+    {
+        var months = Model.Months.TakeLast(24).ToList();
+        <text>
+        const monthLabels = @Json.Serialize(months.Select(m => AnalyticsModel.MonthLabel(m.Year, m.Month)));
+        if (el('chSavings')) new Chart(el('chSavings'), { type: 'bar',
+            data: { labels: monthLabels, datasets: [{ label: 'ประหยัด (บาท)', data: @Json.Serialize(months.Select(m => Math.Round(m.Result.SavingsThb))),
+                    backgroundColor: ACCENT, borderRadius: 4 }] },
+            options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '฿' + Number(c.raw).toLocaleString() } } },
+                scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 8 } },
+                          y: { beginAtZero: true, grid: { color: gridColor }, ticks: { callback: v => '฿' + Number(v).toLocaleString() } } } }
+        });
+        if (el('chSelfSufficiency')) new Chart(el('chSelfSufficiency'), { type: 'line',
+            data: { labels: monthLabels, datasets: [{ label: 'พึ่งพาตัวเอง (%)',
+                    data: @Json.Serialize(months.Select(m => m.Result.SelfSufficiencyPct.HasValue ? Math.Round(m.Result.SelfSufficiencyPct.Value, 1) : (double?)null)),
+                    borderColor: BLUE, backgroundColor: 'rgba(66,133,244,.12)', fill: true, tension: .3, spanGaps: true, pointRadius: 2 }] },
+            options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.raw + ' %' } } },
+                scales: { x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 8 } },
+                          y: { min: 0, max: 100, grid: { color: gridColor }, ticks: { stepSize: 25, callback: v => v + '%' } } } }
+        });
+        </text>
+    }
+
+    @if (Model.ShowBattery && Model.History.Buckets.Count > 0)
+    {
+        var hb = Model.History.Buckets;
+        var weekly = Model.History.Resolution == "week";
+        <text>
+        (function () {
+            const labels = @Json.Serialize(hb.Select(x => (weekly ? "สัปดาห์ " : "") + x.Start.ToString("d MMM yy", System.Globalization.CultureInfo.GetCultureInfo("th-TH"))));
+            const charged = @Json.Serialize(hb.Select(x => Math.Round(x.ChargedKwh, 2)));
+            const discharged = @Json.Serialize(hb.Select(x => -Math.Round(x.DischargedKwh, 2)));
+            const band = @Json.Serialize(hb.Select(x => x.SocMin.HasValue && x.SocMax.HasValue ? new[] { Math.Round(x.SocMin.Value, 1), Math.Round(x.SocMax.Value, 1) } : null));
+            const outage = @Json.Serialize(hb.Select(x => x.HadOutage ? (double?)100 : null));
+            new Chart(el('chHistory'), {
+                data: { labels, datasets: [
+                    { type: 'bar', label: 'ชาร์จ kWh', data: charged, backgroundColor: GREEN, stack: 'kwh', yAxisID: 'y', order: 2 },
+                    { type: 'bar', label: 'จ่าย kWh', data: discharged, backgroundColor: ORANGE, stack: 'kwh', yAxisID: 'y', order: 2 },
+                    { type: 'bar', label: 'ระดับแบต ต่ำสุด–สูงสุด', data: band, backgroundColor: 'rgba(66,133,244,.22)', borderWidth: 0, yAxisID: 'y1', stack: 'soc',
+                      grouped: false, barPercentage: 1, categoryPercentage: 1, order: 3 },
+                    { type: 'line', label: 'ไฟดับ', data: outage, yAxisID: 'y1', showLine: false, pointStyle: 'triangle', rotation: 180,
+                      pointRadius: 6, pointBackgroundColor: RED, borderColor: RED, order: 1, clip: false }
+                ] },
+                options: {
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => {
+                        if (c.dataset.label === 'ระดับแบต ต่ำสุด–สูงสุด') return c.raw ? `ระดับแบต ${c.raw[0]}–${c.raw[1]} %` : null;
+                        if (c.dataset.label === 'ไฟดับ') return c.raw ? 'มีไฟดับ' : null;
+                        return `${c.dataset.label}: ${Math.abs(c.raw)}`;
+                    } } } },
+                    scales: {
+                        x: { stacked: true, grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 12 } },
+                        y: { stacked: true, title: { display: true, text: 'kWh' }, grid: { color: gridColor },
+                             ticks: { callback: v => Math.abs(v) } },
+                        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: '%' }, grid: { display: false },
+                              ticks: { stepSize: 25 } }
+                    }
+                }
+            });
+        })();
+        </text>
+    }
+})();
+</script>
+}
