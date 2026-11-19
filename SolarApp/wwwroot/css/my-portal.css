@@ -291,6 +291,76 @@ body.my-app {
   padding: 6px; opacity: .6;
 }
 
+/* ── Owner analytics (/My/Analytics) ───────────────────────────────── */
+.my-an-back {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  color: var(--my-text-muted); text-decoration: none; font-size: .88rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.my-an-back:hover { color: var(--my-accent); }
+.my-an-link .my-card-row i.lead { font-size: 1.6rem; color: var(--my-accent); }
+.my-an-muted { font-size: .8rem; color: var(--my-text-muted); }
+.my-an-note { color: var(--my-text-muted); font-size: .9rem; }
+.my-an-card { padding: 12px; }
+.my-an-h { font-weight: 600; font-size: .95rem; margin-bottom: 4px; }
+.my-an-foot { font-size: .75rem; color: var(--my-text-muted); margin-top: 6px; }
+.my-an-chart { position: relative; height: 230px; }
+.my-an-chart.sm { height: 180px; }
+.my-an-chart.lg { height: 280px; }
+.my-an-stats { margin-bottom: 12px; }
+.my-an-stats .my-stat { min-width: 0; }
+.my-an-stats .my-stat .v { font-size: 1.35rem; overflow-wrap: anywhere; }
+.my-an-stats .my-stat .v.my-an-v-sm { font-size: 1.1rem; }
+.my-an-stats .my-stat .sub { font-size: .75rem; color: var(--my-text-muted); margin-top: 4px; }
+.my-an-bar { height: 6px; border-radius: 3px; background: var(--my-accent-soft); margin-top: 6px; overflow: hidden; }
+.my-an-bar > span { display: block; height: 100%; background: var(--my-accent); border-radius: 3px; }
+.my-an-bar.warning > span { background: #f59e0b; }
+.my-an-bar.danger > span { background: #ef4444; }
+
+.my-an-eco {
+  display: flex; gap: 14px; align-items: center; padding: 18px;
+  border-radius: var(--my-radius); margin-bottom: 12px;
+  background: linear-gradient(135deg, #dcfce7, #bbf7d0); color: #14532d;
+}
+[data-my-mode="dark"] .my-an-eco { background: linear-gradient(135deg, #0f2e1c, #0a2214); color: #86efac; }
+.my-an-eco .icon { font-size: 2rem; }
+.my-an-eco .v { font-size: 1.6rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.my-an-eco .v small { font-size: .85rem; font-weight: 600; opacity: .8; }
+.my-an-eco .k { font-size: .82rem; opacity: .85; margin-top: 4px; }
+.my-an-eco .eco { font-size: .85rem; margin-top: 6px; font-weight: 600; }
+
+/* Bootstrap is not loaded in the portal: a local scroll wrapper keeps wide tables off the page width. */
+.my-app .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.my-an-scroll { max-height: 440px; overflow-y: auto; }
+.my-an-table { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }
+.my-an-table th, .my-an-table td { padding: 7px 8px; border-bottom: 1px solid var(--my-border); white-space: nowrap; text-align: left; vertical-align: top; }
+.my-an-table th { position: sticky; top: 0; background: var(--my-surface); font-size: .75rem; color: var(--my-text-muted); font-weight: 600; }
+.my-an-table .r { text-align: right; }
+.my-an-table .up { color: #10b981; }
+.my-an-table .down { color: #ef4444; }
+
+.my-an-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--my-border);
+}
+.my-an-batt { font-size: .8rem; text-align: right; color: #10b981; flex-shrink: 0; max-width: 50%; }
+.my-an-batt.empty { color: #f59e0b; }
+
+.my-an-grade { display: flex; gap: 14px; align-items: center; border-left: 4px solid #6b7280; }
+.my-an-grade .letter {
+  width: 56px; height: 56px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.8rem; font-weight: 800; color: #fff; background: #6b7280;
+}
+.my-an-grade .label { font-size: 1.1rem; font-weight: 700; margin: 2px 0; }
+.my-an-grade.success { border-left-color: #10b981; } .my-an-grade.success .letter { background: #10b981; }
+.my-an-grade.warning { border-left-color: #f59e0b; } .my-an-grade.warning .letter { background: #f59e0b; }
+.my-an-grade.danger  { border-left-color: #ef4444; } .my-an-grade.danger  .letter { background: #ef4444; }
+
+.my-an-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .75rem; color: var(--my-text-muted); margin-top: 6px; }
+.my-an-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.my-an-hour { font-size: .88rem; margin-top: 6px; }
+
 /* ── Small responsive tweaks ───────────────────────────────────────── */
 @media (max-width: 360px) {
   .my-hero .value { font-size: 2.2rem; }
