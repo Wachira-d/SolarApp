@@ -425,6 +425,124 @@ else
         @foreach (var n in b.Notes) { <div class="small text-muted"><i class="bi bi-info-circle"></i> @n</div> }
     }
 
+    @if (Model.HasCellVoltages)
+    {
+        var ch = Model.CellHistory;
+        <style>
+            .an-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 4px; }
+            .an-cell { position: relative; border: 1px solid var(--bs-border-color); border-radius: .4rem; padding: 2px 3px;
+                       text-align: center; line-height: 1.15; background: var(--bs-tertiary-bg); min-width: 0; }
+            .an-cell .n { font-size: .7rem; color: var(--bs-secondary-color); }
+            .an-cell .mv { font-weight: 600; font-size: .9rem; font-variant-numeric: tabular-nums; }
+            .an-cell .d { font-size: .7rem; font-variant-numeric: tabular-nums; }
+            .an-cell.watch { background: var(--bs-warning-bg-subtle); border-color: var(--bs-warning-border-subtle); color: var(--bs-warning-text-emphasis); }
+            .an-cell.poor { background: var(--bs-danger-bg-subtle); border-color: var(--bs-danger-border-subtle); color: var(--bs-danger-text-emphasis); }
+            .an-cell.hi, .an-cell.lo { border-width: 2px; border-color: var(--bs-emphasis-color); }
+            .an-cell.stale { opacity: .55; border-style: dashed; }
+            .an-cell .tag { font-size: .65rem; font-weight: 600; }
+        </style>
+        <div class="card mb-3" id="batteryCells"><div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-1">
+                <h6 class="card-title mb-1">เซลล์รายก้อน — แรงดันล่าสุด</h6>
+                <small class="text-muted">@Model.CellPacks.Count ก้อน · @Model.CellPacks.Sum(p => p.Cells.Count) เซลล์</small>
+            </div>
+            <p class="small text-muted mb-2">
+                ตัวเลขใหญ่ = แรงดันเซลล์ (mV) ตัวเล็ก = ห่างจากค่ากลางของก้อน (มัธยฐาน) ·
+                <span class="an-legend-swatch border" style="background:var(--bs-tertiary-bg)"></span> ไม่เกิน @BatteryCellAnalyzer.NeutralMv.ToString("0") mV ปกติ
+                <span class="an-legend-swatch ms-1" style="background:var(--bs-warning-bg-subtle);border:1px solid var(--bs-warning-border-subtle)"></span> @BatteryCellAnalyzer.NeutralMv.ToString("0")–@BatteryCellAnalyzer.WatchMv.ToString("0") mV เฝ้าระวัง
+                <span class="an-legend-swatch ms-1" style="background:var(--bs-danger-bg-subtle);border:1px solid var(--bs-danger-border-subtle)"></span> เกิน @BatteryCellAnalyzer.WatchMv.ToString("0") mV ผิดปกติ ·
+                ▲ สูงสุด ▼ ต่ำสุดในก้อน · กรอบประ = ไม่ได้รับค่าใหม่เกิน @BatteryCellAnalyzer.StaleAfter.TotalMinutes.ToString("0") นาที
+            </p>
+            @foreach (var cp in Model.CellPacks)
+            {
+                <div class="mb-3" id="cellPack@(cp.Pack)">
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                        <strong>ก้อนที่ @cp.Pack</strong>
+                        <span class="badge text-bg-@AnalyticsModel.GradeClass(cp.DeltaGrade)" title="@cp.DeltaNote">ΔV @AnalyticsModel.N(cp.DeltaMv, "0") mV@(cp.DeltaGrade != KpiGrade.NotAvailable ? " · " + KpiGrades.Thai(cp.DeltaGrade) : "")</span>
+                        <span class="small text-muted">สูงสุด @AnalyticsModel.N(cp.MaxMv, "0") · ต่ำสุด @AnalyticsModel.N(cp.MinMv, "0") · ค่ากลาง @AnalyticsModel.N(cp.MedianMv, "0") mV · อ่านเมื่อ @AnalyticsModel.Local(cp.NewestUtc, "d MMM HH:mm")</span>
+                        @if (cp.IsStale) { <span class="badge text-bg-secondary"><i class="bi bi-clock-history"></i> ข้อมูลเก่า</span> }
+                        else if (cp.StaleCount > 0) { <span class="badge text-bg-secondary">@cp.StaleCount เซลล์ข้อมูลเก่า</span> }
+                        @if (Model.CellPack == cp.Pack) { <span class="small text-muted ms-auto">กำลังแสดงประวัติด้านล่าง</span> }
+                        else
+                        {
+                            <a class="small ms-auto" asp-route-id="@inst.Id" asp-route-tab="battery" asp-route-range="@Model.Range" asp-route-pack="@cp.Pack" asp-fragment="cellHistory">ดูประวัติ @AnalyticsModel.CellHistoryDays วัน</a>
+                        }
+                    </div>
+                    <div class="small text-muted mb-1">@cp.DeltaNote</div>
+                    <div class="an-cells">
+                        @foreach (var c in cp.Cells)
+                        {
+                            <div class="an-cell @AnalyticsModel.CellClass(c.Grade) @(c.IsHighest ? "hi" : "") @(c.IsLowest ? "lo" : "") @(c.IsStale ? "stale" : "")"
+                                 title="เซลล์ @c.Cell · @AnalyticsModel.N(c.Mv, "0.#") mV · @AnalyticsModel.Local(c.TsUtc, "d MMM HH:mm")@(c.IsStale ? " (ข้อมูลเก่า)" : "")">
+                                <div class="n">#@c.Cell @if (c.IsHighest) { <span class="tag">▲</span> } else if (c.IsLowest) { <span class="tag">▼</span> }</div>
+                                <div class="mv">@AnalyticsModel.N(c.Mv, "0")</div>
+                                <div class="d">@AnalyticsModel.N(c.DeviationMv, "+0;-0;0")</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div></div>
+
+        <div class="card mb-3" id="cellHistory"><div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
+                <h6 class="card-title mb-0">ΔV ของก้อนที่ @Model.CellPack ย้อนหลัง @AnalyticsModel.CellHistoryDays วัน</h6>
+                @if (Model.CellPacks.Count > 1)
+                {
+                    <div class="d-flex flex-wrap gap-1" role="group" aria-label="เลือกก้อน">
+                        @foreach (var cp in Model.CellPacks)
+                        {
+                            <a class="btn btn-sm @(Model.CellPack == cp.Pack ? "btn-secondary" : "btn-outline-secondary")" asp-route-id="@inst.Id" asp-route-tab="battery"
+                               asp-route-range="@Model.Range" asp-route-pack="@cp.Pack" asp-fragment="cellHistory">ก้อน @cp.Pack</a>
+                        }
+                    </div>
+                }
+            </div>
+            @if (ch == null || ch.Buckets == 0)
+            {
+                <p class="text-muted small mb-0">ยังไม่มีประวัติแรงดันเซลล์ของก้อนนี้ในช่วง @AnalyticsModel.CellHistoryDays วันที่ผ่านมา</p>
+            }
+            else
+            {
+                <div class="small text-muted mb-1">
+                    ΔV = เซลล์สูงสุด − เซลล์ต่ำสุด ทุก 5 นาที · มัธยฐาน @AnalyticsModel.N(ch.MedianDeltaMv, "0") mV · สูงสุด @AnalyticsModel.N(ch.MaxDeltaMv, "0") mV · @ch.Buckets.ToString("N0") ช่วง
+                </div>
+                <div class="an-chart sm"><canvas id="chCellDelta"></canvas></div>
+                <div class="row g-3 mt-1" id="cellWeakList">
+                    <div class="col-sm-6">
+                        <div class="fw-semibold small">เซลล์ที่ต่ำสุดบ่อยที่สุด</div>
+                        @if (ch.MostOftenLowest.Count == 0) { <div class="small text-muted">ไม่มีเซลล์ใดต่ำสุดเพียงเซลล์เดียว (เท่ากันหลายเซลล์)</div> }
+                        <ul class="list-unstyled small mb-0">
+                            @foreach (var x in ch.MostOftenLowest)
+                            {
+                                <li>▼ เซลล์ #@x.Cell — ต่ำสุด @AnalyticsModel.N(x.Pct, "0") % ของเวลา <span class="text-muted">(@x.Count.ToString("N0") ช่วง)</span></li>
+                            }
+                        </ul>
+                    </div>
+                    <div class="col-sm-6">
+                        <div class="fw-semibold small">เซลล์ที่สูงสุดบ่อยที่สุด</div>
+                        @if (ch.MostOftenHighest.Count == 0) { <div class="small text-muted">ไม่มีเซลล์ใดสูงสุดเพียงเซลล์เดียว (เท่ากันหลายเซลล์)</div> }
+                        <ul class="list-unstyled small mb-0">
+                            @foreach (var x in ch.MostOftenHighest)
+                            {
+                                <li>▲ เซลล์ #@x.Cell — สูงสุด @AnalyticsModel.N(x.Pct, "0") % ของเวลา <span class="text-muted">(@x.Count.ToString("N0") ช่วง)</span></li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+                @if (ch.SuspectWeakCell is { } weak)
+                {
+                    <div class="alert alert-warning small py-2 mt-2 mb-0">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        เซลล์ #@weak.Cell ของก้อนที่ @ch.Pack ต่ำสุดถึง @AnalyticsModel.N(weak.Pct, "0") % ของเวลา และก้อนนี้มี ΔV มัธยฐาน @AnalyticsModel.N(ch.MedianDeltaMv, "0") mV —
+                        มีแนวโน้มเป็นเซลล์อ่อน (ความจุน้อยกว่าเซลล์อื่น) ควรตรวจสอบหรือสั่ง balance
+                    </div>
+                }
+                <small class="text-muted d-block mt-1">เซลล์เดิมที่ต่ำสุดเกินครึ่งของเวลาคือสัญญาณของเซลล์อ่อน · ไม่นับช่วงที่หลายเซลล์เท่ากัน · นับเฉพาะช่วงที่ได้ค่าจากอย่างน้อย @((BatteryCellAnalyzer.MinCoverage * 100).ToString("0")) % ของเซลล์ในก้อน</small>
+            }
+        </div></div>
+    }
+
     <div class="card mt-3"><div class="card-body">
         <h6 class="card-title">เงื่อนไขประกันแบตเตอรี่</h6>
         <form method="post" asp-page-handler="Warranty" asp-route-id="@inst.Id" class="row g-2 align-items-end">
@@ -952,6 +1070,21 @@ else
                 }
                 draw(); window.addEventListener('resize', draw);
             })();
+            </text>
+        }
+
+        @if (tab == "battery" && Model.CellHistory is { Buckets: > 0 } cellh)
+        {
+            var cd = BatteryCellAnalyzer.WithGaps(cellh.Points);
+            <text>
+            if (el('chCellDelta')) new Chart(el('chCellDelta'), { type: 'line',
+                data: { labels: @Json.Serialize(cd.Select(x => AnalyticsModel.Local(x.TsUtc, "d MMM HH:mm"))),
+                        datasets: [{ label: 'ΔV (mV)', data: @Json.Serialize(cd.Select(x => x.DeltaMv)), borderColor: BLUE, backgroundColor: BLUE,
+                                     pointRadius: 0, borderWidth: 1.5, spanGaps: false }] },
+                options: { interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'ΔV mV' }, grid: { color: gridColor } },
+                              x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 16 } } } }
+            });
             </text>
         }
 
