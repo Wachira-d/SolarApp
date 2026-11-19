@@ -10,6 +10,7 @@
 }
 
 <a class="my-an-back" asp-page="/My/Site" asp-route-id="@site.Id"><i class="bi bi-chevron-left"></i> @site.SiteName</a>
+<a class="my-card my-site-card my-an-link" id="my-report-link" style="margin-top:8px" asp-page="/My/Report" asp-route-id="@site.Id"><div class="my-card-row"><i class="bi bi-printer lead"></i><div style="flex:1; min-width:0"><div class="my-card-title">รายงานรายเดือน (PDF)</div><div class="my-an-muted">สรุปการผลิต ค่าไฟที่ประหยัด และ CO₂ ของเดือน พิมพ์หรือบันทึกเป็น PDF ได้</div></div><i class="bi bi-chevron-right" style="color:var(--my-text-muted)"></i></div></a>
 
 @* ═══════════════════════════ ค่าไฟที่ประหยัด ═══════════════════════════ *@
 <div class="my-section-title">ค่าไฟที่ประหยัดได้</div>
