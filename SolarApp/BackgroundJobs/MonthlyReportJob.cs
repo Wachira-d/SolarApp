@@ -39,10 +39,6 @@ public class MonthlyReportJob
         _logger = logger;
     }
 
-    // Thailand's grid mix is roughly 0.5 kgCO2 per kWh; a tree absorbs about
-    // 21 kg a year. Same constants the customer portal already shows, so the
-    // message and the website can't disagree.
-
     private static readonly string[] ThaiMonths =
     {
         "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
@@ -133,22 +129,31 @@ public class MonthlyReportJob
                     .ToList();
                 var best = byDay.FirstOrDefault();
 
-                // Value the kWh per site, not at one blended rate: a customer
-                // with a factory and a house pays a different tariff on each,
-                // and a flat average quietly overstates the cheaper one.
-                var kwhPerSite = await _context.EnergyData.AsNoTracking()
+                // Value each site with its own tariff and the same formula as the
+                // analytics pages and the printed report (self-consumed kWh at the
+                // import rate + export at the feed-in rate), so the LINE message,
+                // the portal and the PDF show one baht figure for the same month.
+                var energyPerSite = await _context.EnergyData.AsNoTracking()
                     .Where(e => siteIds.Contains(e.InstallationId)
                                 && e.Granularity == DataGranularity.Daily
                                 && e.Timestamp >= monthStart && e.Timestamp <= monthEnd)
                     .GroupBy(e => e.InstallationId)
-                    .Select(g => new { InstallationId = g.Key, Kwh = g.Sum(x => (decimal?)x.EnergyGenerationKwh) ?? 0m })
-                    .ToDictionaryAsync(x => x.InstallationId, x => x.Kwh);
+                    .Select(g => new
+                    {
+                        InstallationId = g.Key,
+                        Pv = g.Sum(x => (decimal?)x.EnergyGenerationKwh) ?? 0m,
+                        Import = g.Sum(x => (decimal?)x.GridImportKwh) ?? 0m,
+                        Export = g.Sum(x => (decimal?)x.GridExportKwh) ?? 0m,
+                    })
+                    .ToDictionaryAsync(x => x.InstallationId);
 
                 var savings = reportSites.Sum(inst =>
                 {
-                    var instKwh = kwhPerSite.TryGetValue(inst.Id, out var k) ? k : 0m;
-                    var rate = inst.ElectricityRatePerKwh > 0 ? inst.ElectricityRatePerKwh : 4.0m;
-                    return instKwh * rate;
+                    if (!energyPerSite.TryGetValue(inst.Id, out var e) || e.Pv <= 0) return 0m;
+                    var opts = factors.Apply(SolarApp.Pages.Installations.AnalyticsModel.EconomicsOptionsFor(inst));
+                    var r = SolarApp.Services.Analytics.EconomicsCalculator.Calculate(
+                        new SolarApp.Services.Analytics.EnergyTotals((double)e.Pv, (double)e.Import, (double)e.Export), opts);
+                    return (decimal)r.SavingsThb;
                 });
 
                 // "Healthy days" counts days with no offline alert raised
