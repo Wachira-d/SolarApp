@@ -117,8 +117,11 @@ try
         Log("  • UseExceptionHandler (production)");
     }
 
-    // Always enforce HTTPS in production (previously opt-in, now default ON)
-    if (!app.Environment.IsDevelopment())
+    // Enforce HTTPS in production by default. EnforceHttps=false is the
+    // escape hatch for TLS that ends at a proxy in front of IIS (the proxy
+    // talks plain HTTP to IIS, so redirecting would loop). With no HTTPS
+    // binding on the site, UseHttpsRedirection finds no port and does nothing.
+    if (!app.Environment.IsDevelopment() && app.Configuration.GetValue("EnforceHttps", true))
     {
         app.UseHttpsRedirection();
         app.UseHsts();
